@@ -312,6 +312,25 @@ pub fn patch_names_session_facts(patch: &TaskPatch) -> bool {
         || patch.stop_pending_at.is_some()
 }
 
+/// A patch that RELEASES the current agent's tmux window (names an empty one
+/// while the agent holds one) is the detach's row write, so it needs the same
+/// host check as the draining clear: only the owner of the task's host may
+/// make it (`split-pane.allium: DetachTmux`). Releasing a window nobody
+/// holds is a no-op and is not judged.
+pub fn check_window_release(
+    window_held: bool,
+    task_host: &str,
+    host: Option<&Host>,
+    caller: &str,
+    patch: &TaskPatch,
+) -> Result<(), String> {
+    let releases = window_held && patch.tmux_window.as_deref() == Some("");
+    if !releases {
+        return Ok(());
+    }
+    validate_task_host_acting_for(task_host, host, caller)
+}
+
 /// A patch that SETS a session fact for a task with no current agent has
 /// nowhere to put it, and is refused. One that only clears (a blank, a zero,
 /// `false`) is a no-op, as clearing what is not there always is

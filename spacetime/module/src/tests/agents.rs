@@ -642,3 +642,31 @@ fn a_seeded_agent_must_keep_the_row_invariants() {
         assert!(validate_seeded_agent(&bad).is_err(), "{bad:?}");
     }
 }
+
+#[test]
+fn releasing_a_held_window_needs_the_caller_to_act_for_the_tasks_host() {
+    let release = TaskPatch {
+        tmux_window: Some(String::new()),
+        ..TaskPatch::default()
+    };
+    let host = |owner: &str| Host {
+        id: "h".into(),
+        label: String::new(),
+        owner: owner.into(),
+    };
+    // Another person's host: refused while a window is held.
+    assert!(check_window_release(true, "h", Some(&host("you")), "me", &release).is_err());
+    // An unregistered host has no board that may release, as for every hook write.
+    assert!(check_window_release(true, "h", None, "me", &release).is_err());
+    assert!(check_window_release(true, "h", Some(&host("me")), "me", &release).is_ok());
+    // A task no host holds is released by anyone.
+    assert!(check_window_release(true, "", None, "me", &release).is_ok());
+    // No window held, or a patch that does not release: not judged.
+    assert!(check_window_release(false, "h", Some(&host("you")), "me", &release).is_ok());
+    let names = TaskPatch {
+        tmux_window: Some("dispatch:x".into()),
+        ..TaskPatch::default()
+    };
+    assert!(check_window_release(true, "h", Some(&host("you")), "me", &names).is_ok());
+    assert!(check_window_release(true, "h", Some(&host("you")), "me", &TaskPatch::default()).is_ok());
+}

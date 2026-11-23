@@ -240,7 +240,11 @@ rule DetachTmux {
         -- another viewer may not make it (agent-health.allium, "Hook-Based
         -- Status Transitions"). The board refuses a foreign task before the
         -- prompt, kills no window and writes nothing, and the store refuses
-        -- the draining clear too. A task whose host is unregistered or has no
+        -- the draining clear too. It refuses the task-row write that releases
+        -- the window as well (patch_task with an empty tmux_window while the
+        -- task's agent holds one): a release is the same detach, so a foreign
+        -- board cannot null another host's window by patching the row. A
+        -- release of a window no agent holds is a no-op and is not judged. A task whose host is unregistered or has no
         -- owner has no board that may detach it, the same as for every hook
         -- write; nothing here recovers it. A task no host holds is detached by
         -- any board.

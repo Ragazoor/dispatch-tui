@@ -138,7 +138,7 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
             &store::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-torn-down"))
                 .tmux_window(Some(&test_tmux_window("task-1")))
-                .host(Some("this-machine")),
+                .host(Some(crate::store::MEMORY_HOST_ID)),
         )
         .await
         .unwrap();

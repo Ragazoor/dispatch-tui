@@ -503,7 +503,15 @@ pub(crate) fn patch_task_row(
     check_task_aim(&row, &patch, &caller_identity(ctx), |host| {
         ctx.db.hosts().id().find(&host.to_string()).map(|h| h.owner)
     })?;
-    check_session_patch(current_agent(&AgentTables(ctx), id).is_some(), &patch)?;
+    let agent = current_agent(&AgentTables(ctx), id);
+    check_session_patch(agent.is_some(), &patch)?;
+    check_window_release(
+        agent.as_ref().is_some_and(|a| !a.tmux_window.is_empty()),
+        &row.host,
+        ctx.db.hosts().id().find(&row.host).as_ref(),
+        &caller_identity(ctx),
+        &patch,
+    )?;
     let was_in_epic = row.epic_id;
     let prior_status = row.status.clone();
     // Read before `apply_patch!` consumes the patch's fields.

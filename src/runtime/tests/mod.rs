@@ -538,7 +538,7 @@ async fn task_with_store_pointers(
             &store::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/x"))
                 .tmux_window(Some(&window))
-                .host(Some("host-a")),
+                .host(Some(crate::store::MEMORY_HOST_ID)),
         )
         .await
         .unwrap();
@@ -565,7 +565,7 @@ async fn exec_persist_task_from_a_stale_copy_leaves_the_pointers_alone() {
 
     let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/x"));
-    assert_eq!(db_task.host.as_deref(), Some("host-a"));
+    assert_eq!(db_task.host.as_deref(), Some(crate::store::MEMORY_HOST_ID));
     assert_eq!(db_task.tmux_window, Some(window));
 }
 
@@ -604,7 +604,7 @@ async fn exec_persist_task_releasing_the_window_keeps_the_worktree() {
     let db_task = rt.database.get_task(id).await.unwrap();
     assert_eq!(db_task.tmux_window, None);
     assert_eq!(db_task.worktree.as_deref(), Some("/repo/.worktrees/x"));
-    assert_eq!(db_task.host.as_deref(), Some("host-a"));
+    assert_eq!(db_task.host.as_deref(), Some(crate::store::MEMORY_HOST_ID));
 }
 
 /// Persist must not clobber `last_pre_tool_use_at`. Hooks own that column —

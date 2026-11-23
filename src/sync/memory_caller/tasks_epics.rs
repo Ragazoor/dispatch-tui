@@ -372,8 +372,11 @@ impl MemoryReducerCaller {
         if let Err(why) = self.check_task_aim(tables, &row, &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
-        if let Err(why) = module::check_session_patch(has_agent, &patch) {
+        let agent = module::current_agent(&self.agent_store(tables), id.0);
+        if let Err(why) = module::check_session_patch(agent.is_some(), &patch) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Err(why) = self.check_window_release(tables, &row, agent.as_ref(), &patch) {
             return Ok(ReducerOutcome::Refused(why));
         }
         let was_in_epic = row.epic_id;
@@ -575,6 +578,23 @@ impl MemoryReducerCaller {
         })
     }
 
+    /// Mirrors the module's `check_window_release` call in `patch_task_row`.
+    fn check_window_release(
+        &self,
+        tables: &Tables,
+        row: &module::Task,
+        agent: Option<&module::Agent>,
+        patch: &module::TaskPatch,
+    ) -> Result<(), String> {
+        module::check_window_release(
+            agent.is_some_and(|a| !a.tmux_window.is_empty()),
+            &row.host,
+            tables.hosts.get(&row.host),
+            &self.sender,
+            patch,
+        )
+    }
+
     /// The refusals `apply_patch_task` can make, read off a copy of `row`:
     /// the same checks in the same order, with no write.
     fn check_patch_would_apply(
@@ -586,8 +606,9 @@ impl MemoryReducerCaller {
     ) -> Result<module::Task, String> {
         module::check_task_patch(&row, &patch)?;
         self.check_task_aim(tables, &row, &patch)?;
-        let has_agent = module::current_agent(&self.agent_store(tables), id.0).is_some();
-        module::check_session_patch(has_agent, &patch)?;
+        let agent = module::current_agent(&self.agent_store(tables), id.0);
+        module::check_session_patch(agent.is_some(), &patch)?;
+        self.check_window_release(tables, &row, agent.as_ref(), &patch)?;
         let prior_status = row.status.clone();
         let schedule = patch.schedule.clone();
         module::apply_task_patch(&mut row, patch);

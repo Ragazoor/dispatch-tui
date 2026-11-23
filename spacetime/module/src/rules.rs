@@ -323,8 +323,13 @@ use super::*;
 /// caller to act for the task's host too (`split-pane.allium: DetachTmux`).
 /// A board that let another viewer detach a task would disagree with the store.
 ///
+/// Bumped: `patch_task` refuses the write that releases the current agent's
+/// tmux window unless the caller acts for the task's host
+/// (`agent.rs: check_window_release`; `split-pane.allium: DetachTmux`). A board
+/// that let a foreign viewer null the window would disagree with the store.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 62;
+pub const RULES_VERSION: i64 = 63;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

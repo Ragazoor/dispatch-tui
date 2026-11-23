@@ -684,3 +684,37 @@ async fn register_host_refuses_an_empty_id() {
         .unwrap();
     assert!(!outcome.won());
 }
+
+/// `patch_task` that releases a held window carries the detach's host check
+/// (module twin: `check_window_release`): a foreign board cannot null it.
+#[tokio::test]
+async fn a_foreign_board_cannot_release_the_window_by_patching_the_row() {
+    let (caller, rows) = caller();
+    let bob = caller
+        .with_sender("bob")
+        .with_registered_host("bobs", "bob");
+    let id = bob
+        .create_task(bindings::Task {
+            host: "bobs".into(),
+            owner: "bob".into(),
+            created_by: "bob".into(),
+            ..blank_task()
+        })
+        .await
+        .unwrap();
+    bob.start_agent_for(id.0);
+    let window = |w: &str| bindings::TaskPatch {
+        tmux_window: Some(w.into()),
+        ..blank_task_patch()
+    };
+    assert!(bob
+        .patch_task(id, window("dispatch:x"))
+        .await
+        .unwrap()
+        .won());
+    let alice = bob.as_user("alice");
+    assert!(!alice.patch_task(id, window("")).await.unwrap().won());
+    assert!(rows.task(id).unwrap().tmux_window.is_some());
+    assert!(bob.patch_task(id, window("")).await.unwrap().won());
+    assert!(rows.task(id).unwrap().tmux_window.is_none());
+}
