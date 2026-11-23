@@ -658,6 +658,15 @@ rule GetEpicViaMcp {
         -- still renders as "Parent: <id>" without a title, rather than
         -- being omitted: a set-but-unresolvable reference must never
         -- read the same as no parent at all.
+        --
+        -- The orchestrator (orchestrators.allium: EpicReadsShowTheOrchestrator)
+        -- renders after the Subtasks line, from what the store holds of the
+        -- switch. An epic whose own switch is on reads "Orchestrator: on,
+        -- start rule <rule>, limit <n>", with " (default)" after a limit the
+        -- epic does not set. An epic under one reads "Orchestrator: covered
+        -- by epic <id> (<title>)". An epic no orchestrator covers has no such
+        -- line. Each machine's orchestrator, the open items, the notes and
+        -- the log come with their own rows, in later steps.
 }
 
 rule ListEpicsViaMcp {
@@ -759,7 +768,8 @@ rule ListEpicsViaMcp {
 rule UpdateEpicViaMcp {
     when: McpEpicUpdate(epic, title?, description?, status?, plan_path?, sort_order?,
                         feed_command?, feed_interval_secs?, group_by_repo?,
-                        feed_append_only?, parent_epic_id?)
+                        feed_append_only?, parent_epic_id?,
+                        orchestrator?, start_rule?, max_parallel?)
 
     requires: title != null or description != null or status != null
               or plan_path != null or sort_order != null
@@ -767,6 +777,42 @@ rule UpdateEpicViaMcp {
               or feed_interval_secs != omitted or group_by_repo != null
               or feed_append_only != null
               or parent_epic_id != omitted
+              or orchestrator != null or start_rule != null
+              or max_parallel != null
+
+    -- The orchestrator arguments (orchestrators.allium: OrchestratorMcpTools)
+    -- travel alone: the switch is its own store write, and a re-parent in the
+    -- same call would change which switch-ons the store allows, so two writes
+    -- that cannot be one transaction are not offered as one call. A call that
+    -- mixes them with any other field is refused before anything is written,
+    -- "the orchestrator arguments go in a call of their own".
+    let sets_orchestration = orchestrator != null or start_rule != null
+                             or max_parallel != null
+    requires:
+        if sets_orchestration:
+            title = null and description = null and status = null
+            and plan_path = null and sort_order = null
+            and feed_command = omitted and feed_interval_secs = omitted
+            and group_by_repo = null and feed_append_only = null
+            and parent_epic_id = omitted
+    -- Switching off takes no settings.
+    requires:
+        if orchestrator = false: start_rule = null and max_parallel = null
+
+    -- orchestrator = true switches on, with the settings given;
+    -- orchestrator = false switches off; settings without orchestrator
+    -- change them. Each refusal is the store's own (an epic already on, one
+    -- above or below that has one, an epic that is off, a limit below 1).
+    ensures:
+        if orchestrator = true:
+            orch/OrchestratorSwitchedOn(epic: epic, start_rule: start_rule,
+                                        max_parallel: max_parallel)
+    ensures:
+        if orchestrator = false: orch/OrchestratorSwitchedOff(epic: epic)
+    ensures:
+        if orchestrator = null and (start_rule != null or max_parallel != null):
+            orch/OrchestratorSettingsChanged(epic: epic, start_rule: start_rule,
+                                             max_parallel: max_parallel)
 
     -- The universal feed-cadence floor (core.allium: "Interval literals",
     -- CLAIM 2). A value below it is rejected with a validation error naming
@@ -902,6 +948,23 @@ rule UpdateEpicViaMcp {
         -- explicitly.
         -- The auto_dispatch flag is not exposed via the MCP update
         -- tool; it is toggled only from the TUI through ToggleAutoDispatch.
+        --
+        -- == The orchestrator arguments ==
+        -- orchestrator is a boolean, start_rule one of marked_only |
+        -- everything (an enum in the schema), max_parallel an integer of at
+        -- least 1. orchestrator = true on an epic that is already on is
+        -- refused with the store's wording, not turned into a settings
+        -- change. The limit cannot yet be set back to the default
+        -- (core/config.orchestrator_max_parallel); the tool description says
+        -- so. Decided by the epic's orchestrator agent (task 99386) while the
+        -- operator was away.
+        --
+        -- == The reply to a move names the switches it turned off ==
+        -- A call that sets parent_epic_id reads which epics of the moved
+        -- subtree had their orchestrator on before the move, and after it.
+        -- Each one that went off (ReparentingKeepsOneOrchestratorOnAPath) is
+        -- named in the reply: "Switched off the orchestrator of epic <id>
+        -- (<title>): epic <id> above it has one."
         -- feed_command and feed_interval_secs use triple-state JSON
         -- semantics: absent field = no change; explicit null = clear;
         -- string/integer value = set.
@@ -2138,7 +2201,8 @@ surface EpicMcpTools {
         -- epic_update (UpdateEpicViaMcp).
         McpEpicUpdate(epic, title?, description?, status?, plan_path?, sort_order?,
                       feed_command?, feed_interval_secs?, group_by_repo?,
-                      feed_append_only?, parent_epic_id?)
+                      feed_append_only?, parent_epic_id?,
+                      orchestrator?, start_rule?, max_parallel?)
         -- feed-config_read (ReadFeedConfigViaMcp). Read-only.
         McpFeedConfigRead()
         -- feed-config_set (ManagedFeedConfigViaMcp). Idempotent.

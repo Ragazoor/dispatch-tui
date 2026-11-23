@@ -23,6 +23,7 @@ use "./settings.allium" as settings
 use "./store-split.allium" as split
 use "./tasks.allium" as tasks
 use "./people.allium" as people
+use "./orchestrators.allium" as orch
 
 ------------------------------------------------------------
 -- Contracts
@@ -175,7 +176,8 @@ rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
                         title?, description?, repo_path?, sort_order?, url?,
                         url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
-                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?,
+                        ready?)
 
     requires: status != null or sub_status != null or plan_path != null or title != null
               or description != null or repo_path != null
@@ -188,6 +190,7 @@ rule UpdateTaskViaMcp {
               or phoenix != null
               or schedule != null
               or bookmarked != null
+              or ready != null
 
     -- Typed-url validation contract. The url string and its type travel
     -- together; the handler rejects inconsistent combinations before any
@@ -348,11 +351,29 @@ rule UpdateTaskViaMcp {
         -- no one. A call that sets only `bookmarked` is SetBookmark itself.
         if bookmarked != null:
             BookmarkSet(subscriber: core/local_host().owner, task: task, bookmarked: bookmarked)
-    -- A call whose only field is `bookmarked` writes no Task field, so it
-    -- leaves task.updated_at alone: a person's own mark is not an edit of the
-    -- shared task. Every other call stamps it.
+    -- ready is the task's ready mark (core/ReadyMark, orchestrators.allium
+    -- O5): true marks the task ready, false clears the mark, omitted leaves
+    -- it. Only a backlog task can be ready, so ready = true is refused before
+    -- anything is written when the status the task will have (the status
+    -- argument, else its current one) is not backlog.
+    let status_after = if status != null: status else: task.status
+    requires:
+        if ready = true: status_after = backlog
     ensures:
-        if not (bookmarked != null and status = null and sub_status = null
+        if ready = true:
+            orch/TaskMarkedReady(
+                task: task,
+                marked_by: marker_of(caller_identity),
+                agent_name: marking_agent_name(caller_identity)
+            )
+    ensures:
+        if ready = false: orch/TaskReadyCleared(task: task)
+    -- A call whose only fields are `bookmarked` and `ready` writes no Task
+    -- field, so it leaves task.updated_at alone: a person's own mark, and a
+    -- signal to an orchestrator, are not edits of the shared task. Every other
+    -- call stamps it.
+    ensures:
+        if not (status = null and sub_status = null
                 and plan_path = null and title = null and description = null
                 and repo_path = null and sort_order = null and epic_id = null
                 and url = null and tag = null and base_branch = null
@@ -363,8 +384,8 @@ rule UpdateTaskViaMcp {
     @guidance
         -- MCP task_update accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, url, url_type, tag, epic_id,
-        -- base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule
-        -- and bookmarked. It does NOT
+        -- base_branch, wrap_up_mode, model, auto_run_plan, phoenix, schedule,
+        -- bookmarked and ready. It does NOT
         -- accept worktree or tmux_window — those are owned by the dispatch flow
         -- and never set via MCP.
         --
@@ -444,13 +465,37 @@ rule UpdateTaskViaMcp {
         -- epic_id (to a grouped root) and repo_path lands where routing by the
         -- NEW repo_path puts it. The epic_id never rides in patch_task, which
         -- refuses one (tasks.allium: PatchTaskNeverMovesAnEpic).
+        --
+        -- == ready is a second write ==
+        -- The ready mark is its own row and its own store write (tasks.allium:
+        -- MarkTaskReady, ClearReadyMark), not part of update_task's
+        -- transaction. The fields (the bookmark among them) are written first,
+        -- then the mark, so one call can move a task back to backlog and mark
+        -- it. Every check that can be made before the first write is made
+        -- there. If the mark is still refused after the fields landed, the
+        -- call fails and its message says plainly that the fields were
+        -- written and the mark was not; it never reports both as done.
+        --
+        -- == Who marked it ==
+        -- marker_of(caller_identity) is agent for a Task(t) caller and
+        -- operator for a Session caller, which is the operator's own session.
+        -- marking_agent_name(caller_identity) is the agent name of the
+        -- caller's task (its current agent, else its display agent;
+        -- agents.allium) for Task(t), and null for Session. A Task(t) caller
+        -- whose task has no agent at all is refused, before any write: an
+        -- agent's mark names the agent. Decided by the epic's orchestrator
+        -- agent (task 99386) while the operator was away.
+        --
+        -- The argument is named ready, as the board's marker is. The open
+        -- question in orchestrators.allium on that word stands.
 }
 
 rule MarkTaskDoneViaMcp {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
                         title?, description?, repo_path?, sort_order?, url?,
                         url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
-                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?,
+                        ready?)
 
     requires: status = done
 
@@ -471,6 +516,7 @@ rule MarkTaskDoneViaMcp {
         and phoenix = null
         and schedule = null
         and bookmarked = null
+        and ready = null
 
     -- A dispatched agent may not close its OWN task through this call — that
     -- route stays session_wrap-up + session_exit, with its token, its ordering
@@ -629,7 +675,8 @@ rule PrFinalisationReflectionNudge {
     when: McpUpdateTask(task, caller_identity, status?, sub_status?, plan_path?,
                         title?, description?, repo_path?, sort_order?, url?,
                         url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
-                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+                        model?, auto_run_plan?, phoenix?, schedule?, bookmarked?,
+                        ready?)
 
     -- "PR finalisation": this one call both moves the task to review and
     -- attaches a pr-typed url, on a task that carried no url at all before the
@@ -673,7 +720,8 @@ rule UpdateTasksViaMcp {
     when: McpUpdateTasks(caller_identity, task_ids, status?, sub_status?, plan_path?,
                          title?, description?, repo_path?, sort_order?, url?,
                          url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
-                         model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+                         model?, auto_run_plan?, phoenix?, schedule?, bookmarked?,
+                        ready?)
 
     -- task_update is the only MCP tool that updates tasks. Each field has the
     -- meaning UpdateTaskViaMcp gives it.
@@ -693,7 +741,8 @@ rule UpdateTasksViaMcp {
                           tag: tag, epic_id: epic_id, base_branch: base_branch,
                           wrap_up_mode: wrap_up_mode, model: model,
                           auto_run_plan: auto_run_plan, phoenix: phoenix,
-                          schedule: schedule, bookmarked: bookmarked)
+                          schedule: schedule, bookmarked: bookmarked,
+                          ready: ready)
     ensures: BulkUpdateReported(task_ids: task_ids)
 
     @guidance
@@ -738,7 +787,8 @@ rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, epic_id, description?, plan_path?,
                         sort_order?, tag?, base_branch?,
-                        wrap_up_mode?, model?, auto_run_plan?, phoenix?, schedule?, signal?)
+                        wrap_up_mode?, model?, auto_run_plan?, phoenix?, schedule?, signal?,
+                        ready?)
 
     -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
     -- present; nullable means the VALUE may be null. The three cases are:
@@ -810,6 +860,18 @@ rule CreateTaskViaMcp {
       if signal = true and task.epic != null:
             for p in people/UserProfiles:
                 core/UnseenTask.created(subscriber: p.identity, task: task)
+
+    -- ready = true marks the new task ready (orchestrators.allium O5), marked
+    -- as UpdateTaskViaMcp's ready marks it. ready is optional; omitted or
+    -- false leaves the task not ready, as every new task starts. The mark is
+    -- a second store write after the creation: if it is refused, the call
+    -- fails and says the task was created and not marked, naming the task.
+      if ready = true:
+            orch/TaskMarkedReady(
+                task: task,
+                marked_by: marker_of(caller_identity),
+                agent_name: marking_agent_name(caller_identity)
+            )
 
     -- signal is optional and defaults to false. Absent or false writes no
     -- row. With no epic there is no epic to light up, so signal is silently
@@ -976,10 +1038,19 @@ rule GetTaskViaMcp {
         --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
         --   [Wrap-up mode], Model, [Wrap-up: refused — <reason>], [Phoenix],
         --   [Schedule], [Schedule error],
-        --   [Bookmarked], Created, Updated.
+        --   [Bookmarked], [Ready], [Orchestrated by], Created, Updated.
         -- [Bookmarked] renders "Bookmarked: yes" only when the board's person
         -- (see UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on the
         -- task. It is that one person's bookmark, never anyone else's.
+        -- [Ready] renders for a backlog task only (orchestrators.allium:
+        -- TaskReadsShowTheMark): "Ready: yes (marked by agent <name>)",
+        -- "Ready: yes (marked by the operator)", or "Ready: no". An unmarked
+        -- task whose covering orchestration starts everything reads
+        -- "Ready: no mark; epic <id> starts every backlog task".
+        -- [Orchestrated by] renders when an epic on the task's epic chain has
+        -- its orchestrator switched on: "Orchestrated by: epic <id> (<title>)".
+        -- The orchestrator's name and the log entries that name the task come
+        -- with the orchestrator's own rows, in a later step.
         -- Model always renders, as the alias the agent launches on: task.model,
         -- or "opus (default)" when it is null. A missing line would read as
         -- "no model applies", and a null model is a concrete one
@@ -1272,6 +1343,9 @@ rule ListTasksViaMcp {
         -- keeps only those they have not; omitted does not filter. A
         -- bookmarked task's row carries " bookmarked" after its title, with
         -- or without the filter.
+        -- == a ready task's row says so ==
+        -- A task with a core/ReadyMark carries " ready" after its title (after
+        -- " bookmarked" when both apply). There is no ready filter.
         -- == each row names the display agent ==
         -- A row for a task with an agent carries " agent:<name> (<state>)"
         -- after the title, with the same states as the detail form's Agent
@@ -2305,11 +2379,12 @@ surface McpTaskTools {
         McpUpdateTasks(client, task_ids, status?, sub_status?, plan_path?,
                        title?, description?, repo_path?, sort_order?, url?,
                        url_type?, tag?, epic_id?, base_branch?, wrap_up_mode?,
-                       model?, auto_run_plan?, phoenix?, schedule?, bookmarked?)
+                       model?, auto_run_plan?, phoenix?, schedule?, bookmarked?,
+                        ready?)
         McpCreateTask(client, title, repo_path, epic_id, description?,
                       plan_path?, sort_order?, tag?, base_branch?,
                       wrap_up_mode?, model?, auto_run_plan?, phoenix?,
-                      schedule?, signal?)
+                      schedule?, signal?, ready?)
         McpTaskSearch(client, task_id?, epic_id?, repo_paths?, status?,
                       recursive?, base_branch?, query?, limit?, bookmarked?,
                       archived?, updated_after?, updated_before?,

@@ -29,7 +29,13 @@
 -- tasks.allium; the re-parent and delete effects on the switch are in
 -- epics.allium; SwitchOrchestratorOn and ChangeOrchestratorSettings below
 -- are built, and SwitchOrchestratorOff is built for the switch itself (its
--- Orchestrator rows and WaitingItems wait for their steps). Everything else
+-- Orchestrator rows and WaitingItems wait for their steps). Built (step 2):
+-- the MCP side of the switch, the settings and the ready mark, and the task
+-- and epic reads as far as step 1's data goes (mcp-task-tools.allium:
+-- UpdateTaskViaMcp, CreateTaskViaMcp, GetTaskViaMcp, ListTasksViaMcp;
+-- epics.allium: UpdateEpicViaMcp, GetEpicViaMcp). epic_update's reply to a
+-- move names the switches it turned off; the board's own move
+-- (ReparentEpicFromTui) does not yet, and waits for step 9. Everything else
 -- here is decided and not yet built, and every other spec still describes
 -- the system as it runs. Each build step moves the facts it implements into
 -- the specs that own them (the list is under "What the build changes
@@ -1126,8 +1132,10 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes, and
 --     RequestDispatch gains the limit. schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - tasks.allium and mcp-task-tools.allium: the ready argument, the task
---     and epic reads, and the caller identity of an orchestrator.
+--   - tasks.allium and mcp-task-tools.allium: the caller identity of an
+--     orchestrator, and what the task and epic reads add once the
+--     Orchestrator rows, the items, the notes and the log exist (the ready
+--     argument and the reads of the switch and the mark are there already).
 --   - dispatch-prompt.allium: the line a covered task's prompt gains, and
 --     the orchestrator's own prompt.
 --   - agent-health.allium: the hooks of an orchestrator's session, and its
