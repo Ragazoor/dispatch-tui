@@ -127,56 +127,14 @@ pub trait ReducerCaller: Send + Sync {
     /// [`super::SdkReducerCaller::create_task`] for how, and for what that
     /// costs.
     async fn create_task(&self, row: bindings::Task) -> Result<TaskId>;
-    /// [`Self::create_task`], and mark the task unseen for everyone who can see
-    /// its epic in the same transaction
-    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
+    /// [`Self::create_task`], and mark the task unseen for every known person
+    /// in the same transaction
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`).
     async fn create_task_signalled(&self, row: bindings::Task) -> Result<TaskId>;
-    /// `workspaces.allium: SetDisplayName`: set the CALLER's own display name.
+    /// `people.allium: SetDisplayName`: set the CALLER's own display name.
     /// The store trims, bounds and refuses; the caller is whoever the
     /// connection is, so there is no identity argument to forge.
     async fn set_display_name(&self, name: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: ClaimSuperAdmin` (with `AdoptOwnerlessUserBoardTasks`).
-    async fn claim_super_admin(&self) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: GrantSuperAdmin`.
-    async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: RevokeSuperAdmin`; refused for the last one.
-    async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: SetEpicVisibility`; `visibility` is `"public"` or
-    /// `"private"`.
-    async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: MoveEpicToWorkspace`.
-    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64)
-        -> Result<ReducerOutcome>;
-    /// `workspaces.allium: SetWorkPackageVisibility`.
-    async fn set_work_package_visibility(
-        &self,
-        id: WorkPackageId,
-        visibility: String,
-    ) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: SuperAdminDeletesUnseenItem`; `kind` is `"epic"` or
-    /// `"work_package"`.
-    async fn super_admin_delete_unseen_item(
-        &self,
-        kind: String,
-        item_id: i64,
-    ) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: CreateWorkspace`.
-    async fn create_workspace(&self, name: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: RenameWorkspace`.
-    async fn rename_workspace(&self, workspace_id: i64, name: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: DeleteWorkspace`.
-    async fn delete_workspace(&self, workspace_id: i64) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: AddMember`; `role` is `admin` or `member`.
-    async fn add_member(
-        &self,
-        workspace_id: i64,
-        user: String,
-        role: String,
-    ) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: SetMemberRole`.
-    async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome>;
-    /// `workspaces.allium: RemoveMember`.
-    async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome>;
     /// `tasks.allium: SeeTaskByLandingOnIt`.
     async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome>;
     /// `tasks.allium: SetBookmark`.
@@ -215,17 +173,10 @@ pub trait ReducerCaller: Send + Sync {
     /// Insert an epic and answer with the id the store generated.
     async fn create_epic(&self, row: bindings::Epic) -> Result<EpicId>;
     async fn patch_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
-    /// `epics.allium: UpdateEpicIsOneTransaction`: the patch, the
-    /// workspace move and the visibility change in one reducer call. `None`
-    /// leaves the workspace or visibility alone. A missing epic is refused,
-    /// unlike [`patch_epic`](Self::patch_epic)'s no-op.
-    async fn update_epic(
-        &self,
-        id: EpicId,
-        patch: bindings::EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
-    ) -> Result<ReducerOutcome>;
+    /// `epics.allium: UpdateEpicIsOneTransaction`: the patch in one reducer
+    /// call. A missing epic is refused, unlike
+    /// [`patch_epic`](Self::patch_epic)'s no-op.
+    async fn update_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome>;
     /// `epics.allium: RegroupEpic`, in one transaction: every direct task of
     /// `root` moves into its per-repo sub-epic. Idempotent.
@@ -314,8 +265,8 @@ pub trait ReducerCaller: Send + Sync {
 
     // -- Learnings and retrievals (Phase 10, task #4914) ----------------------
     //
-    // Nothing here is scoped by host — a learning's visibility is governed
-    // entirely by its own scope/scope_ref (`docs/specs/learnings.allium`). `create_learning` needs the same content-matched id
+    // Nothing here is scoped by host — which dispatches receive a learning is
+    // decided by its own scope/scope_ref (`docs/specs/learnings.allium`). `create_learning` needs the same content-matched id
     // read-back `create_task` uses: unlike a find-or-create, a
     // learning has no natural unique key — duplicates are a soft constraint
     // per `docs/specs/learnings.allium`, not something this call can match on
@@ -379,12 +330,12 @@ pub trait ReducerCaller: Send + Sync {
         epic_ids: Vec<EpicId>,
     ) -> Result<bindings::DeleteCheck>;
 
-    /// One archived task the caller may see (`read_archived_task`), or
+    /// One archived task (`read_archived_task`), or
     /// `None`. A read, not a reducer: no board subscribes to the archive
     /// (`core.allium: ArchivedTask`).
     async fn read_archived_task(&self, id: TaskId) -> Result<Option<bindings::ArchivedTask>>;
 
-    /// The caller-visible archived tasks in `epic_id` (`None` for any) and
+    /// The archived tasks in `epic_id` (`None` for any) and
     /// `repo_paths` (empty for any) (`list_archived_tasks`).
     async fn list_archived_tasks(
         &self,
@@ -519,14 +470,13 @@ pub trait ReducerCaller: Send + Sync {
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
     ) -> Result<ReducerOutcome>;
-    /// The patch, the visibility change, then every unlink, then every link,
-    /// in one transaction (`update_work_package_with_links`;
+    /// The patch, then every unlink, then every link, in one transaction
+    /// (`update_work_package_with_links`;
     /// `work-packages.allium: UpdateWorkPackageIsOneTransaction`).
     async fn update_work_package_with_links(
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
-        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome>;

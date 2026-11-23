@@ -76,10 +76,10 @@ pub trait IngestStore {
     fn delete_stale_feed_tasks_in_epic(&mut self, epic_id: i64, keep: &HashSet<&str>);
     fn delete_all_feed_tasks_in_epic(&mut self, epic_id: i64);
     fn recalculate_epic_chain(&mut self, epic_id: i64);
-    /// Mark `task_id` unseen for everyone who can see `epic_id`, as a
+    /// Mark `task_id` unseen for every known person, as a
     /// signalled create does (`mcp-task-tools.allium:
-    /// SignalMarksTheTaskForEveryoneWhoSeesIt`).
-    fn mark_task_unseen_for_viewers(&mut self, task_id: i64, epic_id: i64);
+    /// SignalMarksTheTaskForEveryone`).
+    fn mark_task_unseen_for_everyone(&mut self, task_id: i64, epic_id: i64);
 }
 
 /// [`IngestStore`] over a reducer's live tables.
@@ -87,8 +87,7 @@ pub(crate) struct ReducerStore<'a>(pub(crate) &'a ReducerContext, pub(crate) Str
 
 impl IngestStore for ReducerStore<'_> {
     fn epic(&self, id: i64) -> Option<Epic> {
-        // Sight first: an unseen epic is answered as a missing one.
-        crate::visibility::visible_epic(self.0, id)
+        self.0.db.epics().id().find(id)
     }
     fn child_epics(&self, parent: i64) -> Vec<Epic> {
         self.0.db.epics().parent_epic_id().filter(&parent).collect()
@@ -109,7 +108,7 @@ impl IngestStore for ReducerStore<'_> {
         now(self.0)
     }
     fn insert_epic(&mut self, row: Epic) -> i64 {
-        self.0.db.epics().insert(inherit_workspace(self.0, row)).id
+        self.0.db.epics().insert(row).id
     }
     fn update_task(&mut self, row: Task) {
         if let Some(prior) = self.0.db.tasks().id().find(row.id) {
@@ -146,8 +145,8 @@ impl IngestStore for ReducerStore<'_> {
     fn recalculate_epic_chain(&mut self, epic_id: i64) {
         recalculate_epic_chain(self.0, epic_id)
     }
-    fn mark_task_unseen_for_viewers(&mut self, task_id: i64, epic_id: i64) {
-        mark_task_unseen_for_viewers(self.0, task_id, epic_id)
+    fn mark_task_unseen_for_everyone(&mut self, task_id: i64, epic_id: i64) {
+        mark_task_unseen_for_everyone(self.0, task_id, epic_id)
     }
 }
 
@@ -663,7 +662,7 @@ fn ingest_role_routed(
     for (target, new_ids) in new_review_requests {
         for task in store.tasks_in_epic(target) {
             if new_ids.contains(&task.external_id) {
-                store.mark_task_unseen_for_viewers(task.id, target);
+                store.mark_task_unseen_for_everyone(task.id, target);
             }
         }
     }

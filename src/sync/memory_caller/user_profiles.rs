@@ -8,7 +8,7 @@ use super::super::writes::ReducerOutcome;
 use super::MemoryReducerCaller;
 
 impl MemoryReducerCaller {
-    /// `workspaces.allium: RegisterUserProfile`: what the module's
+    /// `people.allium: RegisterUserProfile`: what the module's
     /// `client_connected` does for the identity this caller writes as. The
     /// real module runs it on every connect; a memory store has no connect
     /// event, so a fixture calls this where a connection would. Idempotent.

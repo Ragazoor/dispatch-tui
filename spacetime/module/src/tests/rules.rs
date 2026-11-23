@@ -333,10 +333,10 @@ fn a_second_repo_group_with_one_title_is_refused() {
     assert!(check_epic_unique_among(&epic(2, 7, "other", "none", "repo-group", "a"), &siblings).is_ok());
 }
 
-/// Uniqueness is per workspace: a person's root in a workspace they have
-/// left (and can no longer see) does not block a root in another one.
+/// The dead `workspace_id` column plays no part: a creator's second root with
+/// one role is refused whatever an old row holds there (R6).
 #[test]
-fn root_uniqueness_is_per_workspace() {
+fn root_uniqueness_ignores_the_dead_workspace_column() {
     let old = Epic {
         workspace_id: 1,
         ..epic(1, 0, "PR Reviews", "reviews_parent", "manual", "a")
@@ -345,7 +345,7 @@ fn root_uniqueness_is_per_workspace() {
         workspace_id: 2,
         ..epic(2, 0, "PR Reviews", "reviews_parent", "manual", "a")
     };
-    assert!(check_epic_unique_among(&new, &[old]).is_ok());
+    assert!(check_epic_unique_among(&new, &[old]).is_err());
 }
 
 /// These two name the version that ADDED a one-time migration. They never move:
@@ -354,7 +354,6 @@ fn root_uniqueness_is_per_workspace() {
 #[test]
 fn migration_gate_versions_never_move() {
     assert_eq!(FEED_SETTER_CLAIMS_RULES_VERSION, 37);
-    assert_eq!(WORKSPACES_RULES_VERSION, 17);
     assert_eq!(REPO_PATH_VERIFY_RULES_VERSION, 43);
     assert_eq!(SUB_STATUS_FIT_RULES_VERSION, 51);
 }
@@ -384,12 +383,12 @@ fn retiring_a_task_scoped_learning_archives_and_re_scopes_it_to_its_repo() {
         status: "approved".to_string(),
         ..blank_learning()
     };
-    let retired = retired_task_scoped_learning(&row, Some("/repo/a".to_string()), false).unwrap();
+    let retired = retired_task_scoped_learning(&row, Some("/repo/a".to_string())).unwrap();
     assert_eq!(retired.status, "archived");
     assert_eq!(retired.scope, "repo");
     assert_eq!(retired.scope_ref.as_deref(), Some("/repo/a"));
     // The recording task is gone: the row still parses as a repo scope.
-    let orphan = retired_task_scoped_learning(&row, None, false).unwrap();
+    let orphan = retired_task_scoped_learning(&row, None).unwrap();
     assert_eq!(orphan.scope_ref.as_deref(), Some(""));
 }
 
@@ -400,34 +399,5 @@ fn retiring_leaves_every_other_learning_alone() {
         scope_ref: Some("/r".to_string()),
         ..blank_learning()
     };
-    assert!(retired_task_scoped_learning(&row, None, false).is_none());
-}
-
-#[test]
-fn retiring_a_learning_on_a_private_tasks_epic_drops_its_workspace() {
-    let row = Learning {
-        scope: "task".to_string(),
-        scope_ref: Some("7".to_string()),
-        workspace_id: 5,
-        author: "ann".to_string(),
-        ..blank_learning()
-    };
-    let shared = retired_task_scoped_learning(&row, None, false).unwrap();
-    assert_eq!(shared.workspace_id, 5);
-    let private = retired_task_scoped_learning(&row, None, true).unwrap();
-    assert_eq!(private.workspace_id, 0);
-}
-
-#[test]
-fn retiring_a_private_learning_with_no_author_keeps_its_workspace() {
-    // Workspace 0 with no author is seen by everyone: wider than before.
-    let row = Learning {
-        scope: "task".to_string(),
-        scope_ref: Some("7".to_string()),
-        workspace_id: 5,
-        author: String::new(),
-        ..blank_learning()
-    };
-    let retired = retired_task_scoped_learning(&row, None, true).unwrap();
-    assert_eq!(retired.workspace_id, 5);
+    assert!(retired_task_scoped_learning(&row, None).is_none());
 }

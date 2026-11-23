@@ -11,7 +11,7 @@
 //! - the task's unseen mark ends
 //!   (`UnseenMarkEndsWithTheTaskLeavingItsEpic`);
 //! - the task lands in the same epic on both sides, with the same row shape;
-//! - a move onto an epic the caller cannot see is refused the same way on both
+//! - a move onto an epic that does not exist is refused the same way on both
 //!   sides and leaves the mark alone (`set_task_epic`, `update_task`).
 
 use super::*;
@@ -68,19 +68,12 @@ pub(super) struct Pair<'a> {
     pub(super) rows_real: &'a Arc<SharedRows>,
     pub(super) rows_mem: &'a Arc<SharedRows>,
     pub(super) identity: String,
-    /// A second user, a member of the same workspace: owner of the private
-    /// epic the first user must not be able to move a task into.
+    /// A second user of the same store.
     pub(super) other_real: &'a SdkReducerCaller,
-    /// The second user's own subscription: where their marks arrive.
-    pub(super) rows_other: &'a Arc<SharedRows>,
     pub(super) other_mem: &'a MemoryReducerCaller,
-    pub(super) other_identity: String,
-    /// The highest id given to an epic the first caller cannot see.
-    hidden_max: std::cell::Cell<i64>,
 }
 
-/// A published module, two connected users (the first a super-admin, the
-/// second a member of the default workspace) and the twin of each, owned so a
+/// A published module, two connected users and the twin of each, owned so a
 /// test can borrow a [`Pair`] from it.
 pub(super) struct World {
     _instance: Instance,
@@ -90,9 +83,9 @@ pub(super) struct World {
     rows_mem: Arc<SharedRows>,
     identity: String,
     other_real: SdkReducerCaller,
-    rows_other: Arc<SharedRows>,
+    /// The second user's own subscription, kept alive with the world.
+    _rows_other: Arc<SharedRows>,
     other_mem: MemoryReducerCaller,
-    other_identity: String,
 }
 
 impl World {
@@ -112,7 +105,7 @@ impl World {
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -121,7 +114,7 @@ impl World {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         // The second user.
         let rows_other = Arc::new(SharedRows::new());
         let connector2 = Arc::new(SpacetimeSdkConnector::new(
@@ -141,35 +134,8 @@ impl World {
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let other_real = SdkReducerCaller::new(connector2, Arc::new(SettledIdentity::default()));
         let other_mem = mem.as_user(accepted2.identity.clone());
-        // The second user's profile arrives with their subscription; retry
-        // until the store knows the person.
-        tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                let out = real
-                    .add_member(
-                        DEFAULT_WORKSPACE,
-                        accepted2.identity.clone(),
-                        "member".to_string(),
-                    )
-                    .await;
-                match out {
-                    Ok(ReducerOutcome::Applied(_)) => break,
-                    _ => tokio::task::yield_now().await,
-                }
-            }
-        })
-        .await
-        .expect("the store knows the second user");
+        // The real store registers the second user's profile on connect.
         other_mem.register_user_profile();
-        mem.add_member(
-            DEFAULT_WORKSPACE,
-            accepted2.identity.clone(),
-            "member".to_string(),
-        )
-        .await
-        .unwrap()
-        .applied()
-        .unwrap();
         World {
             _instance: instance,
             real,
@@ -178,19 +144,15 @@ impl World {
             rows_mem,
             identity: accepted.identity,
             other_real,
-            rows_other,
+            _rows_other: rows_other,
             other_mem,
-            other_identity: accepted2.identity,
         }
     }
 
     pub(super) fn pair(&self) -> Pair<'_> {
         Pair {
             other_real: &self.other_real,
-            rows_other: &self.rows_other,
             other_mem: &self.other_mem,
-            other_identity: self.other_identity.clone(),
-            hidden_max: std::cell::Cell::new(0),
             real: &self.real,
             mem: &self.mem,
             rows_real: &self.rows_real,
@@ -225,34 +187,6 @@ impl Pair<'_> {
         })
         .await
         .unwrap_or_else(|_| panic!("real store never reached the expected state"));
-    }
-
-    /// An epic another user holds privately: unseen to this caller.
-    pub(super) async fn private_epic_of_another(&self) -> i64 {
-        let row = bindings::Epic {
-            visibility: "private".into(),
-            ..blank_epic()
-        };
-        // The creator's own subscription may not carry it back either, so
-        // the id is the next one the store hands out.
-        let id = self
-            .rows_real
-            .epics()
-            .iter()
-            .map(|e| e.id.0)
-            .max()
-            .unwrap_or(0)
-            .max(self.hidden_max.get())
-            + 1;
-        self.hidden_max.set(id);
-        let made = self.other_real.create_epic(row.clone()).await;
-        assert!(
-            made.is_ok() || format!("{made:?}").contains("outside this board"),
-            "{made:?}"
-        );
-        self.other_mem.align_next_epic_id(id);
-        assert_eq!(self.other_mem.create_epic(row).await.unwrap().0, id);
-        id
     }
 
     pub(super) async fn epic(&self, grouped: bool) -> i64 {
@@ -302,6 +236,30 @@ impl Pair<'_> {
     }
 }
 
+pub(super) async fn make_epic(p: &Pair<'_>, row: bindings::Epic) -> i64 {
+    let row = bindings::Epic {
+        created_by: p.identity.clone(),
+        ..row
+    };
+    let id = p.real.create_epic(row.clone()).await.unwrap().0;
+    p.wait(|r| r.epic(EpicId(id)).is_some()).await;
+    p.mem.align_next_epic_id(id);
+    assert_eq!(p.mem.create_epic(row).await.unwrap().0, id);
+    id
+}
+
+pub(super) async fn make_task(p: &Pair<'_>, epic: i64) -> TaskId {
+    let row = bindings::Task {
+        created_by: p.identity.clone(),
+        ..blank_task_in_epic(epic)
+    };
+    let id = p.real.create_task(row.clone()).await.unwrap();
+    p.wait(|r| r.task(id).is_some()).await;
+    p.mem.align_next_task_id(id.0);
+    assert_eq!(p.mem.create_task(row).await.unwrap(), id);
+    id
+}
+
 pub(super) fn refusal_of(out: ReducerOutcome) -> String {
     match out {
         ReducerOutcome::Refused(why) => why,
@@ -315,10 +273,9 @@ async fn run_path(p: &Pair<'_>, path: MovePath) {
         MovePath::SetTaskEpic | MovePath::UpdateTaskRelink => {
             let (from, to) = (p.epic(false).await, p.epic(false).await);
             let task = p.signalled_task(from, "/x/alpha").await;
-            // Sight is checked on the destination: a missing or unseen epic is refused
-            // identically and the mark stays.
-            let hidden = p.private_epic_of_another().await;
-            for dest in [999_999, hidden] {
+            // A missing destination epic is refused identically and the mark
+            // stays.
+            for dest in [999_999] {
                 let dest_epic = Some(EpicId(dest));
                 let (r, m) = match path {
                     MovePath::SetTaskEpic => (

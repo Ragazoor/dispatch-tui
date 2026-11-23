@@ -3,7 +3,6 @@
 #[macro_use]
 mod args;
 
-mod admin;
 mod context;
 mod dispatch;
 mod epics;

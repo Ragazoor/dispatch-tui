@@ -60,6 +60,7 @@ mod dispatch_requests;
 mod feed;
 mod feed_requests;
 mod grouping;
+mod identity;
 mod learnings;
 mod pr_status;
 mod session_requests;
@@ -67,9 +68,7 @@ mod tasks_epics;
 mod unseen;
 mod user_profiles;
 mod views;
-mod visibility;
 mod work_packages;
-mod workspaces;
 
 #[cfg(test)]
 mod tests;
@@ -120,8 +119,6 @@ struct Tables {
     unseen_tasks: BTreeMap<String, module::UnseenTask>,
     bookmarks: BTreeMap<String, module::Bookmark>,
     user_profiles: BTreeMap<String, module::UserProfile>,
-    workspaces: BTreeMap<i64, module::Workspace>,
-    memberships: BTreeMap<i64, module::Membership>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
     poll_owners: BTreeMap<i64, module::PollOwner>,
@@ -164,8 +161,6 @@ struct Tables {
     next_poll_owner_id: i64,
     next_retired_feed_item_id: i64,
     next_learning_id: i64,
-    next_workspace_id: i64,
-    next_membership_id: i64,
     next_learning_retrieval_id: i64,
     next_learning_verdict_id: i64,
     next_work_package_id: i64,
@@ -186,8 +181,6 @@ impl Tables {
             next_poll_owner_id: 1,
             next_retired_feed_item_id: 1,
             next_learning_id: 1,
-            next_workspace_id: 1,
-            next_membership_id: 1,
             next_learning_retrieval_id: 1,
             next_learning_verdict_id: 1,
             next_work_package_id: 1,
@@ -219,9 +212,9 @@ pub struct MemoryReducerCaller {
     /// The identity a real reducer reads off `ctx.sender`. Stamped as
     /// `created_by` on the sub-epics a routed write creates. Empty unless set.
     sender: String,
-    /// Whether the workspace rules are enforced; see
-    /// [`MemoryReducerCaller::with_workspace_rules`].
-    workspace_rules: bool,
+    /// Whether the identity rules are enforced; see
+    /// [`MemoryReducerCaller::with_identity_rules`].
+    identity_rules: bool,
     /// Faults queued by [`Self::fail_next`], each consumed by the next call
     /// to the reducer it names.
     faults: Mutex<Vec<(&'static str, InjectedFault)>>,
@@ -238,7 +231,7 @@ impl MemoryReducerCaller {
             rows,
             clock,
             sender: String::new(),
-            workspace_rules: false,
+            identity_rules: false,
             faults: Mutex::new(Vec::new()),
         }
     }
@@ -284,15 +277,15 @@ impl MemoryReducerCaller {
     }
 
     /// Another user of the SAME store: shares this caller's tables and rows,
-    /// writes as `sender`. A fixture's way to have a second person own a row
-    /// (a private epic the first caller cannot see). Faults are not shared.
+    /// writes as `sender`. A fixture's way to have a second person own a row.
+    /// Faults are not shared.
     pub fn as_user(&self, sender: impl Into<String>) -> Self {
         Self {
             tables: Arc::clone(&self.tables),
             rows: Arc::clone(&self.rows),
             clock: Arc::clone(&self.clock),
             sender: sender.into(),
-            workspace_rules: self.workspace_rules,
+            identity_rules: self.identity_rules,
             faults: Mutex::new(Vec::new()),
         }
     }
@@ -344,23 +337,6 @@ impl MemoryReducerCaller {
         );
     }
 
-    /// Put `user` in workspace `workspace_id` as a plain member, bypassing the
-    /// admin check and the workspace's existence — a fixture's way to give two
-    /// people a workspace in common.
-    pub fn seed_membership(&self, workspace_id: i64, user: impl Into<String>) {
-        let mut tables = self.lock();
-        let id = Self::assign_id(0, &mut tables.next_membership_id);
-        let row = module::Membership {
-            id,
-            workspace_id,
-            user: user.into(),
-            role: "member".into(),
-            created_at: self.now(),
-        };
-        tables.memberships.insert(id, row.clone());
-        self.rows.upsert_membership(&row.into());
-    }
-
     fn now(&self) -> String {
         stamp(self.clock.now())
     }
@@ -390,26 +366,6 @@ impl MemoryReducerCaller {
     /// As [`Self::align_next_epic_id`], for learnings.
     pub fn align_next_learning_id(&self, id: i64) {
         self.lock().next_learning_id = id;
-    }
-
-    /// What the `unseen_items` view would now hold for this sender, pushed to
-    /// the rows. Called by the writes that change who is a super-admin, who is
-    /// a member, what is private or what exists; the double has no view to
-    /// re-run.
-    fn refresh_unseen_items(&self, tables: &Tables) {
-        self.rows.replace_unseen_items(
-            tables
-                .unseen_items_for(&self.sender)
-                .into_iter()
-                .map(Into::into)
-                .collect(),
-        );
-    }
-
-    /// The listing this store's sender would read from the `unseen_items`
-    /// view; for the conformance suite to compare with the live view.
-    pub fn unseen_items(&self) -> Vec<module::UnseenItem> {
-        self.lock().unseen_items_for(&self.sender)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
@@ -442,95 +398,6 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn set_display_name(&self, name: String) -> Result<ReducerOutcome> {
         self.apply_set_display_name(name)
-    }
-
-    async fn claim_super_admin(&self) -> Result<ReducerOutcome> {
-        let outcome = self.apply_claim_super_admin();
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn grant_super_admin(&self, user: String) -> Result<ReducerOutcome> {
-        let outcome = self.apply_set_super_admin(user, true);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn revoke_super_admin(&self, user: String) -> Result<ReducerOutcome> {
-        let outcome = self.apply_set_super_admin(user, false);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn set_epic_visibility(&self, id: EpicId, visibility: String) -> Result<ReducerOutcome> {
-        let outcome = self.apply_set_epic_visibility(id, visibility);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn move_epic_to_workspace(
-        &self,
-        id: EpicId,
-        workspace_id: i64,
-    ) -> Result<ReducerOutcome> {
-        let outcome = self.apply_move_epic_to_workspace(id, workspace_id);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn set_work_package_visibility(
-        &self,
-        id: WorkPackageId,
-        visibility: String,
-    ) -> Result<ReducerOutcome> {
-        let outcome = self.apply_set_work_package_visibility(id, visibility);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn super_admin_delete_unseen_item(
-        &self,
-        kind: String,
-        item_id: i64,
-    ) -> Result<ReducerOutcome> {
-        let outcome = self.apply_super_admin_delete_unseen_item(kind, item_id);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn create_workspace(&self, name: String) -> Result<ReducerOutcome> {
-        self.apply_create_workspace(name)
-    }
-
-    async fn rename_workspace(&self, workspace_id: i64, name: String) -> Result<ReducerOutcome> {
-        self.apply_rename_workspace(workspace_id, name)
-    }
-
-    async fn delete_workspace(&self, workspace_id: i64) -> Result<ReducerOutcome> {
-        let outcome = self.apply_delete_workspace(workspace_id);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn add_member(
-        &self,
-        workspace_id: i64,
-        user: String,
-        role: String,
-    ) -> Result<ReducerOutcome> {
-        let outcome = self.apply_add_member(workspace_id, user, role);
-        self.refresh_unseen_items(&self.lock());
-        outcome
-    }
-
-    async fn set_member_role(&self, membership_id: i64, role: String) -> Result<ReducerOutcome> {
-        self.apply_set_member_role(membership_id, role)
-    }
-
-    async fn remove_member(&self, membership_id: i64) -> Result<ReducerOutcome> {
-        let outcome = self.apply_remove_member(membership_id);
-        self.refresh_unseen_items(&self.lock());
-        outcome
     }
 
     async fn mark_task_seen(&self, subscriber: String, task_id: TaskId) -> Result<ReducerOutcome> {
@@ -592,16 +459,8 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_patch_epic(id, patch)
     }
 
-    async fn update_epic(
-        &self,
-        id: EpicId,
-        patch: bindings::EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
-    ) -> Result<ReducerOutcome> {
-        let outcome = self.apply_update_epic(id, patch, workspace_id, visibility);
-        self.refresh_unseen_items(&self.lock());
-        outcome
+    async fn update_epic(&self, id: EpicId, patch: bindings::EpicPatch) -> Result<ReducerOutcome> {
+        self.apply_update_epic(id, patch)
     }
 
     async fn delete_epic(&self, id: EpicId) -> Result<ReducerOutcome> {
@@ -959,14 +818,10 @@ impl ReducerCaller for MemoryReducerCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
-        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> Result<ReducerOutcome> {
-        let outcome =
-            self.apply_update_work_package_with_links(id, patch, visibility, unlink, link);
-        self.refresh_unseen_items(&self.lock());
-        outcome
+        self.apply_update_work_package_with_links(id, patch, unlink, link)
     }
 
     async fn delete_work_package(&self, id: WorkPackageId) -> Result<ReducerOutcome> {

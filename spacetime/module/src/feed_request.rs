@@ -391,7 +391,7 @@ pub fn request_feed_refresh(
     host: String,
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
-    let epic = crate::visibility::visible_epic(ctx, epic_id);
+    let epic = ctx.db.epics().id().find(epic_id);
     let owner_row = ctx
         .db
         .poll_owners()

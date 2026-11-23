@@ -113,19 +113,15 @@ pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) -> bool {
 #[spacetimedb::reducer]
 pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String> {
     validate_learning_scope(&row.scope, &row.scope_ref)?;
-    // The store places a learning itself (`LearningVisibility`): a client
-    // names neither its author nor its workspace.
-    let caller = caller_identity(ctx);
+    // The store stamps the author itself (`store-split.allium:
+    // IdentitiesAreTheCallers`); the dead `workspace_id` takes its default.
     let row = Learning {
-        workspace_id: learning_workspace(ctx, &row, &caller),
-        author: caller,
+        workspace_id: 0,
+        author: caller_identity(ctx),
         ..row
     };
-    // An epic ref that names no epic would store a learning nothing can
-    // reach; it is refused with the wording an unseen epic gets, and the
-    // operator, who sees every epic, is refused it too.
-    let unseen = !is_operator(ctx) && !learning_scope_seen(ctx, &row);
-    if unseen || !epic_scope_ref_names_an_epic(ctx, &row) {
+    // An epic ref that names no epic would store a learning nothing can reach.
+    if !epic_scope_ref_names_an_epic(ctx, &row) {
         return Err(format!(
             "{} {} does not exist",
             row.scope,
@@ -178,27 +174,15 @@ pub fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Resul
 /// task scope: archived, so no retrieval returns it, and re-scoped to repo
 /// (the recording task's repo, `""` when that task is gone) so the row stays a
 /// scope every reader parses. `None` for any other row.
-///
-/// A task-scoped learning was seen only while its task was. A repo scope has no
-/// such check, so a row whose task sat in a non-public epic (`private_item`)
-/// loses its workspace and stays with its author, as it stayed hidden before.
-/// A row with no author (it predates workspaces) keeps its workspace instead:
-/// workspace 0 with no author is seen by everyone, which is wider still.
 /// Pure, so the tests can pin it.
 pub fn retired_task_scoped_learning(
     row: &Learning,
     source_repo: Option<String>,
-    private_item: bool,
 ) -> Option<Learning> {
     (row.scope == "task").then(|| Learning {
         scope: "repo".to_string(),
         scope_ref: Some(source_repo.unwrap_or_default()),
         status: "archived".to_string(),
-        workspace_id: if private_item && !row.author.is_empty() {
-            0
-        } else {
-            row.workspace_id
-        },
         ..row.clone()
     })
 }
@@ -229,26 +213,20 @@ pub fn retire_task_scoped_learning(ctx: &ReducerContext, row: &Learning) -> Opti
     if row.scope != "task" {
         return None;
     }
-    // The task the scope named, as the old visibility check read it.
-    let task = row
+    let repo = row
         .scope_ref
         .as_deref()
         .and_then(|r| r.parse::<i64>().ok())
-        .and_then(|id| ctx.db.tasks().id().find(id));
-    let private_item = task
-        .as_ref()
-        .and_then(|t| ctx.db.epics().id().find(t.epic_id))
-        // The real predicate: a private epic anywhere up the chain.
-        .is_some_and(|e| crate::visibility::private_holder(ctx, &e).is_some());
-    let repo = task.map(|t| t.repo_path);
-    retired_task_scoped_learning(row, repo, private_item)
+        .and_then(|id| ctx.db.tasks().id().find(id))
+        .map(|t| t.repo_path);
+    retired_task_scoped_learning(row, repo)
 }
 
 /// Change some fields of a learning. A missing learning is a silent no-op,
 /// the same bargain [`patch_task`] makes.
 #[spacetimedb::reducer]
 pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Result<(), String> {
-    let Some(mut row) = visible_learning(ctx, id) else {
+    let Some(mut row) = ctx.db.learnings().id().find(id) else {
         return Ok(());
     };
     if apply_learning_patch(&mut row, patch) {
@@ -269,16 +247,14 @@ pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Re
 /// `ON DELETE CASCADE` clause.
 #[spacetimedb::reducer]
 pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    if visible_learning(ctx, id).is_none() {
+    if ctx.db.learnings().id().find(id).is_none() {
         return Err(format!("learning {id} not found"));
     }
     delete_learning_rows(ctx, id);
     Ok(())
 }
 
-/// The learning row and what only referred to it, with no sight check:
-/// [`delete_learning`] decides who may, and `delete_workspace` empties a
-/// workspace it was already allowed to delete.
+/// The learning row and what only referred to it.
 pub(crate) fn delete_learning_rows(ctx: &ReducerContext, id: i64) {
     ctx.db.learnings().id().delete(id);
     let retrievals: Vec<i64> = ctx
@@ -308,9 +284,6 @@ pub(crate) fn delete_learning_rows(ctx: &ReducerContext, id: i64) {
 /// not an embedding input, so no row's `embedding` is touched.
 #[spacetimedb::reducer]
 pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Result<(), String> {
-    if !is_operator(ctx) && (visible_epic(ctx, from).is_none() || visible_epic(ctx, to).is_none()) {
-        return Ok(());
-    }
     rescope_learnings(ctx, from, to);
     Ok(())
 }
@@ -320,15 +293,11 @@ pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Resul
 pub(crate) fn rescope_learnings(ctx: &ReducerContext, from: i64, to: i64) {
     let from_ref = from.to_string();
     let to_ref = to.to_string();
-    // The learning follows its epic's workspace
-    // (`LinkedItemsShareThePackagesWorkspace`'s learning twin).
-    let to_workspace = ctx.db.epics().id().find(to).map(|e| e.workspace_id);
     update_matching_learnings(
         ctx,
         |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
         |row| Learning {
             scope_ref: Some(to_ref.clone()),
-            workspace_id: to_workspace.unwrap_or(row.workspace_id),
             ..row
         },
     );
@@ -342,7 +311,9 @@ pub fn record_learning_retrieval(
     learning_id: i64,
     source: String,
 ) -> Result<(), String> {
-    if visible_task(ctx, task_id).is_none() || visible_learning(ctx, learning_id).is_none() {
+    if ctx.db.tasks().id().find(task_id).is_none()
+        || ctx.db.learnings().id().find(learning_id).is_none()
+    {
         return Err(format!(
             "task {task_id} or learning {learning_id} does not exist"
         ));
@@ -406,8 +377,7 @@ pub fn not_retrieved_message(learning_id: i64, task_id: i64) -> String {
 /// by rating twice; entries naming one learning twice in a batch apply in
 /// order. A verdict on a learning the task was never shown (no
 /// `learning_retrievals` row) refuses the whole batch, as does an unknown
-/// verdict string. A learning the caller cannot see, or that does not exist,
-/// is refused as "learning N not found" before the retrieval is checked.
+/// verdict string. A learning that does not exist is refused as "learning N not found" before the retrieval is checked.
 /// A verdict that leaves the score where it was (a repeat, or a first
 /// `not_applicable`) stores the verdict and does not write the learning, so it
 /// cannot keep a stale entry alive.
@@ -417,13 +387,12 @@ pub fn apply_learning_verdicts(
     task_id: i64,
     verdicts: Vec<LearningVerdictInput>,
 ) -> Result<(), String> {
-    if visible_task(ctx, task_id).is_none() {
+    if ctx.db.tasks().id().find(task_id).is_none() {
         return Err(format!("task {task_id} not found"));
     }
     for v in &verdicts {
-        // Visibility first: a learning the caller cannot see is answered as a
-        // missing one, whether or not it was ever retrieved.
-        if visible_learning(ctx, v.learning_id).is_none() {
+        // A missing learning first, whether or not it was ever retrieved.
+        if ctx.db.learnings().id().find(v.learning_id).is_none() {
             return Err(format!("learning {} not found", v.learning_id));
         }
         let retrieved = ctx
@@ -437,7 +406,7 @@ pub fn apply_learning_verdicts(
         }
     }
     for v in verdicts {
-        let Some(row) = visible_learning(ctx, v.learning_id) else {
+        let Some(row) = ctx.db.learnings().id().find(v.learning_id) else {
             continue;
         };
         let standing = ctx
@@ -484,25 +453,15 @@ pub fn apply_learning_verdicts(
 }
 
 /// Archive every approved learning with a non-positive score that has gone
-/// untouched since before `cutoff`, among the learnings the caller sees (the
-/// operator sees all). Mirrors the SQLite bulk `UPDATE`
+/// untouched since before `cutoff`. Mirrors the SQLite bulk `UPDATE`
 /// `ArchiveStaleLearning` (`docs/specs/learnings.allium`) ran directly;
 /// returns the number of rows archived.
 #[spacetimedb::reducer]
 pub fn archive_stale_learnings(ctx: &ReducerContext, cutoff: String) -> Result<(), String> {
     let now = now(ctx);
-    let operator = is_operator(ctx);
     update_matching_learnings(
         ctx,
-        |l| {
-            l.status == "approved"
-                && l.upvote_count <= 0
-                && l.updated_at <= cutoff
-                // `ArchiveStaleLearning` (V7): the sweep archives what its
-                // caller sees, so one board never archives another
-                // workspace's learnings.
-                && (operator || learning_scope_seen(ctx, l))
-        },
+        |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
         |row| Learning {
             status: "archived".to_string(),
             updated_at: now.clone(),

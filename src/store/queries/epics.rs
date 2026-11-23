@@ -57,14 +57,12 @@ impl super::super::EpicCrud for Store {
             birth.sort_order,
             birth.feed_command,
             birth.feed_interval_secs,
-            (birth.workspace_id, birth.visibility),
             &identity,
             &now,
         );
         let id = self.caller.create_epic(row.clone()).await?;
-        // The store rewrites `workspace_id`, `parent_epic_id`, `created_by` and
-        // `feed_command_set_by` on a create (`visibility.rs::settle_new_epic`),
-        // so the row as sent can name the wrong workspace. The board's own
+        // The store rewrites `created_by` and `feed_command_set_by` on a
+        // create (`identity.rs::settle_new_epic`). The board's own
         // view of the row is the truth when it has already arrived. This does
         // not wait for the subscription: a board may never be subscribed to
         // the row. Without it, the reply is the row as sent with the fields
@@ -72,10 +70,6 @@ impl super::super::EpicCrud for Store {
         if let Some(seen) = self.rows.epic(id) {
             return Ok(seen);
         }
-        let workspace_id = match parent_epic_id.and_then(|p| self.rows.epic(p)) {
-            Some(parent) => parent.workspace_id,
-            None => row.workspace_id,
-        };
         let feed_command_set_by = if row.feed_command.is_empty() {
             String::new()
         } else {
@@ -83,7 +77,6 @@ impl super::super::EpicCrud for Store {
         };
         crate::sync::decode::epic(&bindings::Epic {
             id: id.0,
-            workspace_id,
             feed_command_set_by,
             ..row
         })
@@ -118,38 +111,9 @@ impl super::super::EpicCrud for Store {
             .applied()
     }
 
-    async fn update_epic(
-        &self,
-        id: EpicId,
-        patch: &EpicPatch<'_>,
-        workspace_id: Option<i64>,
-        visibility: Option<crate::models::Visibility>,
-    ) -> Result<()> {
+    async fn update_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
         self.caller
-            .update_epic(
-                id,
-                encode::epic_patch(patch),
-                workspace_id,
-                visibility.map(|v| v.as_str().to_string()),
-            )
-            .await?
-            .applied()
-    }
-
-    async fn set_epic_visibility(
-        &self,
-        id: EpicId,
-        visibility: crate::models::Visibility,
-    ) -> Result<()> {
-        self.caller
-            .set_epic_visibility(id, visibility.as_str().to_string())
-            .await?
-            .applied()
-    }
-
-    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64) -> Result<()> {
-        self.caller
-            .move_epic_to_workspace(id, workspace_id)
+            .update_epic(id, encode::epic_patch(patch))
             .await?
             .applied()
     }

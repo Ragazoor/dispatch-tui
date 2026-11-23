@@ -226,26 +226,26 @@ fn an_undecodable_task_is_remembered_against_its_epic_until_replaced_or_removed(
     assert!(shared.undecodable_task_ids_for_epic(EpicId(7)).is_empty());
 }
 
-/// observability.allium: `BulkReadSkipsUndecodableRow`. An unknown visibility
-/// fails the row instead of guessing public: a guess could show a private item
-/// to the whole workspace.
+/// `spacetime-seed.allium: SharedTable`: `visibility` and `workspace_id` are
+/// dead columns that no reader looks at, so whatever an old row holds there,
+/// an unknown value included, the row decodes.
 #[test]
-fn an_unknown_visibility_fails_the_row() {
+fn a_dead_visibility_or_workspace_column_never_fails_the_row() {
     let mut epic = blank_epic();
     epic.visibility = "secret".into();
-    let error = decode::epic(&epic).unwrap_err().to_string();
-    assert!(error.contains("secret"), "{error}");
+    epic.workspace_id = 9;
+    assert!(decode::epic(&epic).is_ok());
 
     let package = bindings::WorkPackage {
         id: 1,
         title: "Blank".into(),
-        visibility: "secret".into(),
+        visibility: "private".into(),
+        workspace_id: 9,
         created_at: "2026-09-18 10:00:00".into(),
         updated_at: "2026-09-18 10:00:00".into(),
         ..dispatch_spacetime_module::blank_work_package().into()
     };
-    let error = decode::work_package(&package).unwrap_err().to_string();
-    assert!(error.contains("secret"), "{error}");
+    assert!(decode::work_package(&package).is_ok());
 }
 
 fn agent_row() -> bindings::Agent {

@@ -664,8 +664,8 @@ use "./work-packages.allium" as wp
 --
 -- == New-task signal ==
 --
--- A task created with the signal on is unseen by each person who can see its
--- epic until that person presses a key with the board cursor on the task's
+-- A task created with the signal on is unseen by every known person
+-- (mcp-task-tools.allium: SignalMarksTheTaskForEveryone) until that person presses a key with the board cursor on the task's
 -- card (core/UnseenTask; tasks.allium: SeeTaskByLandingOnIt). A refresh that
 -- slides the card under a still cursor does not clear it. While a card is marked for the viewing
 -- person it carries a diamond glyph (◆ U+25C6) in SIGNAL, a hue added to
@@ -704,7 +704,7 @@ use "./work-packages.allium" as wp
 -- the same terms as the message flash and the phoenix marker.
 --
 -- Cards for which the viewing person has no row are unmarked, whatever
--- another person sees.
+-- another person's row says.
 
 -- == Bookmark ==
 --

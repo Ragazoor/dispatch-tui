@@ -151,7 +151,12 @@ pub async fn import_old_store(
     // refusal and not a half-finished import.
     let mut to_write: Vec<(SharedTable, Vec<Row>)> = Vec::new();
     let mut conflicts: Vec<String> = Vec::new();
-    for extract in prepared.extracts() {
+    // The dead tables are ignored (`spacetime-seed.allium: ImportOldStore`).
+    for extract in prepared
+        .extracts()
+        .iter()
+        .filter(|e| !e.table.restore_ignores())
+    {
         let missing = missing_rows(target, extract, &mut report, &mut conflicts).await?;
         if !missing.is_empty() {
             report.imported.insert(extract.table, missing.len());

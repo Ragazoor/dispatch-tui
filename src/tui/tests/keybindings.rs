@@ -311,8 +311,6 @@ fn app_with_package_selected() -> App {
         description: String::new(),
         sort_order: None,
         created_by: None,
-        workspace_id: 0,
-        visibility: crate::models::Visibility::Public,
         created_at: at,
         updated_at: at,
     }];
@@ -330,48 +328,6 @@ fn draft_app(mode: InputMode) -> App {
     });
     app.input.epic_draft = Some(EpicDraft::default());
     app.input.mode = mode;
-    app
-}
-
-/// A board with the admin screen open on a super-admin's snapshot, so every
-/// key of the screen has something to act on.
-fn admin_app(mode: InputMode) -> App {
-    let mut app = make_app();
-    app.input.admin = Some(crate::tui::tests::admin::super_admin_screen());
-    app.input.mode = mode;
-    app
-}
-
-/// The admin screen on the pane where `action` acts: a per-pane key does
-/// nothing (and records nothing) on another pane.
-fn admin_app_for(action: &str) -> App {
-    use crate::tui::types::AdminPane as P;
-    let pane = match action {
-        "admin_toggle_role" | "admin_remove_member" => P::Members,
-        "admin_grant_super_admin" | "admin_revoke_super_admin" => P::SuperAdmins,
-        "admin_delete_unseen_item" => P::Unseen,
-        _ => P::Workspaces,
-    };
-    admin_app_on(pane, action == "admin_claim_super_admin")
-}
-
-/// The admin screen on each of its panes, for reading what each one draws.
-fn admin_apps_on_every_pane() -> Vec<App> {
-    use crate::tui::types::AdminPane as P;
-    [P::Workspaces, P::Members, P::SuperAdmins, P::Unseen]
-        .into_iter()
-        .map(|pane| admin_app_on(pane, false))
-        .collect()
-}
-
-/// The admin screen showing `pane`; `claimable` lets the first super-admin
-/// be claimed.
-fn admin_app_on(pane: crate::tui::types::AdminPane, claimable: bool) -> App {
-    let mut app = admin_app(InputMode::Admin);
-    if let Some(screen) = app.input.admin.as_mut() {
-        screen.pane = pane;
-        screen.snapshot.claimable = claimable;
-    }
     app
 }
 
@@ -512,16 +468,6 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardPickerTag => one(draft_app(InputMode::InputTag)),
         N::BoardPickerWrapUpMode => one(draft_app(InputMode::InputWrapUpMode)),
         N::BoardPickerModel => one(draft_app(InputMode::InputModel)),
-        N::BoardPickerPlacement => {
-            let mut app = draft_app(InputMode::InputPlacement);
-            app.input.placement = Some(crate::tui::types::Placement {
-                target: crate::tui::types::PlacementFor::Epic,
-                visibility: crate::models::Visibility::Public,
-                workspace: 0,
-                names_workspace: true,
-            });
-            one(app)
-        }
         N::BoardPickerQuickDispatch => one(draft_app(InputMode::QuickDispatch)),
         N::BoardPickerMoveToEpic => one(with_move_task_picker()),
         N::BoardPickerReparentEpic => one(with_reparent_picker()),
@@ -589,18 +535,6 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),
-        N::BoardAdmin => one(admin_app_for(binding.action)),
-        N::BoardConfirmAdmin => {
-            let mut app = admin_app(InputMode::ConfirmAdmin);
-            if let Some(screen) = app.input.admin.as_mut() {
-                screen.confirm = Some(crate::tui::types::AdminConfirm::RemoveMember {
-                    membership_id: 7,
-                    person: "Ann".to_string(),
-                    workspace: "Default".to_string(),
-                });
-            }
-            one(app)
-        }
         N::AgentTreeTree
         | N::AgentTreeCommits
         | N::AgentTreeAgents
@@ -709,14 +643,13 @@ fn effect_of(app: &mut App, cmds: &[Command]) -> String {
             .map(|p| tree(&p.tree_state))
     );
     let state = format!(
-        "{:?}\n{:?}\n{:?} {} {}\n{:?}\n{:?} {}\n{pickers}",
+        "{:?}\n{:?}\n{:?} {} {}\n{:?}\n{}\n{pickers}",
         app.board.view_mode,
         app.input.mode,
         app.input.buffer,
         app.input.caret,
         app.input.repo_cursor,
         app.input.task_draft,
-        app.input.placement.as_ref().map(|p| p.workspace),
         app.interaction.help_scroll,
     );
     let table = app.key_table;
@@ -768,8 +701,7 @@ fn tree_picker_app(ns: KeyNamespace) -> App {
 
 /// The boards the effect check presses on: the gate's, with enough to move
 /// for a motion to show — a detail scrolled into its middle, a text field
-/// with words either side of its caret, three workspaces to step between, a
-/// tree with a child epic and a task waiting to be moved to Done.
+/// with words either side of its caret, a tree with a child epic and a task waiting to be moved to Done.
 fn effect_apps(binding: &KeyBinding) -> Vec<App> {
     use KeyNamespace as N;
     let ns = binding.namespace;
@@ -808,17 +740,6 @@ fn effect_apps(binding: &KeyBinding) -> Vec<App> {
             }
             // A task waiting to be confirmed, so yes has one to move.
             N::BoardConfirmDone => app.prompt_move_to_done(vec![TaskId(3)]),
-            N::BoardPickerPlacement => {
-                app.input.workspaces = (1..=3)
-                    .map(|id| crate::models::WorkspaceRef {
-                        id,
-                        name: format!("Workspace {id}"),
-                    })
-                    .collect();
-                if let Some(placement) = app.input.placement.as_mut() {
-                    placement.workspace = 1;
-                }
-            }
             _ => {}
         }
     }
@@ -1625,7 +1546,6 @@ fn hint_boards(ns: KeyNamespace) -> Vec<App> {
                 _ => apps_in(b),
             })
             .collect(),
-        KeyNamespace::BoardAdmin => admin_apps_on_every_pane(),
         KeyNamespace::BoardFilter => [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages]
             .into_iter()
             .flat_map(|tab| {
@@ -2282,19 +2202,6 @@ fn toggle_select_on_a_work_package_card_records_nothing() {
     let cmds = press(&mut app, "v");
     assert!(recorded(&cmds).is_empty(), "{:?}", recorded(&cmds));
     assert!(!app.has_selection());
-}
-
-/// A per-pane admin key pressed on another pane does nothing, so it records
-/// nothing: `g` (grant super-admin) on the workspaces pane.
-#[test]
-fn an_admin_key_off_its_pane_records_nothing() {
-    let mut app = admin_app_for("admin_new_workspace");
-    for key in ["g", "v", "m", "x", "D"] {
-        let mode = app.input.mode.clone();
-        let cmds = press(&mut app, key);
-        assert!(recorded(&cmds).is_empty(), "{key}: {:?}", recorded(&cmds));
-        assert_eq!(app.input.mode, mode, "{key}");
-    }
 }
 
 /// Enter in the quick-dispatch picker with no repo under the cursor and no new

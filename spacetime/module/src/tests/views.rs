@@ -9,8 +9,6 @@ struct Store {
     epics: Vec<Epic>,
     tasks: Vec<Task>,
     packages: Vec<WorkPackage>,
-    members: Vec<Membership>,
-    profiles: Vec<UserProfile>,
     subscriptions: Vec<Subscription>,
     links: Vec<WorkPackageLink>,
     agents: Vec<Agent>,
@@ -23,7 +21,6 @@ struct Store {
     learnings: Vec<Learning>,
     hosts: Vec<Host>,
     settings: Vec<Setting>,
-    workspaces: Vec<Workspace>,
     usage_events: Vec<UsageEvent>,
     archived_tasks: Vec<ArchivedTask>,
 }
@@ -42,29 +39,11 @@ impl StoreReads for Store {
     fn package(&self, id: i64) -> Option<WorkPackage> {
         self.packages.iter().find(|p| p.id == id).cloned()
     }
-    fn workspace(&self, id: i64) -> Option<Workspace> {
-        self.workspaces.iter().find(|w| w.id == id).cloned()
-    }
-    fn listed_workspaces(&self) -> Vec<Workspace> {
-        keep(&self.workspaces, |w| w.listed)
-    }
-    fn profile(&self, who: &str) -> Option<UserProfile> {
-        self.profiles.iter().find(|p| p.identity == who).cloned()
-    }
-    fn members_of(&self, ws: i64) -> Vec<Membership> {
-        keep(&self.members, |m| m.workspace_id == ws)
-    }
-    fn memberships_of(&self, user: &str) -> Vec<Membership> {
-        keep(&self.members, |m| m.user == user)
-    }
     fn subscriptions_of(&self, who: &str) -> Vec<Subscription> {
         keep(&self.subscriptions, |s| s.subscriber == who)
     }
     fn epics_under(&self, parent: i64) -> Vec<Epic> {
         keep(&self.epics, |e| e.parent_epic_id == parent)
-    }
-    fn epics_in_workspace(&self, ws: i64) -> Vec<Epic> {
-        keep(&self.epics, |e| e.workspace_id == ws)
     }
     fn epics_created_by(&self, who: &str) -> Vec<Epic> {
         keep(&self.epics, |e| e.created_by == who)
@@ -77,9 +56,6 @@ impl StoreReads for Store {
     }
     fn tasks_created_by(&self, who: &str) -> Vec<Task> {
         keep(&self.tasks, |t| t.created_by == who)
-    }
-    fn packages_in_workspace(&self, ws: i64) -> Vec<WorkPackage> {
-        keep(&self.packages, |p| p.workspace_id == ws)
     }
     fn packages_created_by(&self, who: &str) -> Vec<WorkPackage> {
         keep(&self.packages, |p| p.created_by == who)
@@ -129,11 +105,8 @@ impl StoreReads for Store {
     fn poll_owners_of(&self, scope_id: i64) -> Vec<PollOwner> {
         keep(&self.poll_owners, |p| p.scope_id == scope_id)
     }
-    fn learnings_in_workspace(&self, ws: i64) -> Vec<Learning> {
-        keep(&self.learnings, |l| l.workspace_id == ws)
-    }
-    fn learnings_by_author(&self, author: &str) -> Vec<Learning> {
-        keep(&self.learnings, |l| l.author == author)
+    fn all_learnings(&self) -> Vec<Learning> {
+        self.learnings.clone()
     }
     fn hosts_owned_by(&self, owner: &str) -> Vec<Host> {
         keep(&self.hosts, |h| h.owner == owner)
@@ -147,24 +120,16 @@ impl StoreReads for Store {
     fn archived_task(&self, id: i64) -> Option<ArchivedTask> {
         self.archived_tasks.iter().find(|a| a.id == id).cloned()
     }
-    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask> {
-        keep(&self.archived_tasks, |a| a.workspace_id == workspace_id)
-    }
-    fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask> {
-        keep(&self.archived_tasks, |a| a.owner == who)
-    }
     fn all_archived_tasks(&self) -> Vec<ArchivedTask> {
         self.archived_tasks.clone()
     }
 }
 
-fn epic(id: i64, parent: i64, visibility: &str, creator: &str, ws: i64) -> Epic {
+fn epic(id: i64, parent: i64, creator: &str) -> Epic {
     Epic {
         id,
         parent_epic_id: parent,
-        visibility: visibility.to_string(),
         created_by: creator.to_string(),
-        workspace_id: ws,
         ..blank_epic()
     }
 }
@@ -176,16 +141,6 @@ fn task(id: i64, epic_id: i64, creator: &str, owner: &str) -> Task {
         created_by: creator.to_string(),
         owner: owner.to_string(),
         ..blank_task()
-    }
-}
-
-fn member(id: i64, ws: i64, user: &str) -> Membership {
-    Membership {
-        id,
-        workspace_id: ws,
-        user: user.to_string(),
-        role: ROLE_MEMBER.to_string(),
-        ..blank_membership()
     }
 }
 
@@ -201,39 +156,33 @@ fn ids<T>(rows: &[T], id: impl Fn(&T) -> i64) -> Vec<i64> {
     rows.iter().map(id).collect()
 }
 
-/// Ann follows epic 1 (public) in workspace 7. Epic 2 under it is public,
-/// epic 3 under that is private to bob, epic 4 under 3 is public by itself but
-/// sits under a private ancestor. Epic 5 is a public child of 2.
+/// Ann follows epic 1. Epic 2 is under it, epic 3 under 2 (bob made it),
+/// epic 4 under 3, and epic 5 under 2. Epic 6 is a root bob made that nobody
+/// follows.
 fn tree() -> Store {
     Store {
         epics: vec![
-            epic(1, 0, "public", "ann", 7),
-            epic(2, 1, "public", "ann", 7),
-            epic(3, 2, "private", "bob", 7),
-            epic(4, 3, "public", "bob", 7),
-            epic(5, 2, "public", "ann", 7),
+            epic(1, 0, "ann"),
+            epic(2, 1, "ann"),
+            epic(3, 2, "bob"),
+            epic(4, 3, "bob"),
+            epic(5, 2, "ann"),
+            epic(6, 0, "bob"),
         ],
-        members: vec![member(1, 7, "ann"), member(2, 7, "bob")],
-        subscriptions: vec![follow("ann", 1), follow("bob", 1)],
+        subscriptions: vec![follow("ann", 1)],
         ..Store::default()
     }
 }
 
 #[test]
-fn covered_epics_walks_down_at_any_depth_and_stops_at_a_private_epic() {
+fn covered_epics_walks_down_at_any_depth_whoever_made_each_epic() {
     let store = tree();
-    assert_eq!(ids(&covered_epics_of(&store, "ann"), |e| e.id), [1, 2, 5]);
     assert_eq!(
-        ids(&covered_epics_of(&store, "bob"), |e| e.id),
+        ids(&covered_epics_of(&store, "ann"), |e| e.id),
         [1, 2, 3, 4, 5]
     );
-}
-
-#[test]
-fn covered_epics_is_empty_for_a_follower_who_left_the_workspace() {
-    let mut store = tree();
-    store.members.retain(|m| m.user != "ann");
-    assert!(covered_epics_of(&store, "ann").is_empty());
+    // Bob follows nothing: delivery narrows by follows, not by who made it.
+    assert!(covered_epics_of(&store, "bob").is_empty());
 }
 
 #[test]
@@ -242,25 +191,19 @@ fn covered_tasks_follow_the_covered_epics() {
     store.tasks = vec![
         task(10, 2, "bob", ""),
         task(11, 3, "bob", ""),
-        task(12, 5, "x", ""),
+        task(12, 6, "bob", ""),
     ];
-    assert_eq!(ids(&covered_tasks_of(&store, "ann"), |t| t.id), [10, 12]);
-    assert_eq!(
-        ids(&covered_tasks_of(&store, "bob"), |t| t.id),
-        [10, 11, 12]
-    );
+    assert_eq!(ids(&covered_tasks_of(&store, "ann"), |t| t.id), [10, 11]);
+    assert!(covered_tasks_of(&store, "bob").is_empty());
 }
 
 #[test]
-fn own_creations_drop_out_when_the_creator_can_no_longer_see_them() {
+fn own_creations_are_what_the_caller_made_or_owns() {
     let mut store = tree();
-    store.tasks = vec![task(10, 2, "ann", ""), task(11, 0, "ann", "ann")];
+    store.tasks = vec![task(10, 6, "ann", ""), task(11, 0, "ann", "ann")];
     assert_eq!(ids(&own_tasks_of(&store, "ann"), |t| t.id), [10, 11]);
     assert_eq!(ids(&own_epics_of(&store, "ann"), |e| e.id), [1, 2, 5]);
-    store.members.retain(|m| m.user != "ann");
-    // The epic-less task is still the owner's; the epic ones are gone.
-    assert_eq!(ids(&own_tasks_of(&store, "ann"), |t| t.id), [11]);
-    assert!(own_epics_of(&store, "ann").is_empty());
+    assert_eq!(ids(&own_epics_of(&store, "bob"), |e| e.id), [3, 4, 6]);
 }
 
 #[test]
@@ -272,47 +215,38 @@ fn an_epic_less_task_belongs_to_its_owner_alone() {
 }
 
 #[test]
-fn visible_epics_lists_a_workspace_without_private_epics_of_others() {
+fn held_epics_are_the_ones_the_caller_made_or_covers() {
     let store = tree();
-    assert_eq!(ids(&visible_epics_of(&store, "ann"), |e| e.id), [1, 2, 5]);
-    assert_eq!(
-        ids(&visible_epics_of(&store, "bob"), |e| e.id),
-        [1, 2, 3, 4, 5]
-    );
-    assert!(visible_epics_of(&store, "carol").is_empty());
+    assert_eq!(ids(&held_epics_of(&store, "ann"), |e| e.id), [1, 2, 3, 4, 5]);
+    assert_eq!(ids(&held_epics_of(&store, "bob"), |e| e.id), [3, 4, 6]);
+    assert!(held_epics_of(&store, "carol").is_empty());
 }
 
 #[test]
-fn packages_are_visible_when_public_or_the_viewers_own() {
+fn packages_are_served_to_their_creator() {
     let mut store = tree();
     store.packages = vec![
         WorkPackage {
             id: 1,
-            workspace_id: 7,
-            visibility: "public".into(),
             created_by: "bob".into(),
             ..blank_work_package()
         },
         WorkPackage {
             id: 2,
-            workspace_id: 7,
-            visibility: "private".into(),
-            created_by: "bob".into(),
+            created_by: "ann".into(),
             ..blank_work_package()
         },
     ];
-    assert_eq!(ids(&visible_packages_of(&store, "ann"), |p| p.id), [1]);
-    assert_eq!(ids(&visible_packages_of(&store, "bob"), |p| p.id), [1, 2]);
+    assert_eq!(ids(&own_packages_of(&store, "ann"), |p| p.id), [2]);
+    assert_eq!(ids(&own_packages_of(&store, "bob"), |p| p.id), [1]);
 }
 
 #[test]
-fn a_link_is_served_only_when_package_and_item_are_both_visible() {
+fn every_link_of_a_held_package_is_served() {
     let mut store = tree();
     store.tasks = vec![task(10, 2, "bob", ""), task(11, 3, "bob", "")];
     store.packages = vec![WorkPackage {
         id: 1,
-        workspace_id: 7,
-        visibility: "public".into(),
         created_by: "bob".into(),
         ..blank_work_package()
     }];
@@ -335,9 +269,7 @@ fn a_link_is_served_only_when_package_and_item_are_both_visible() {
             .map(|l| l.item_id)
             .collect::<Vec<_>>()
     };
-    let mut ann = seen("ann");
-    ann.sort();
-    assert_eq!(ann, [2, 10]);
+    assert!(seen("ann").is_empty());
     let mut bob = seen("bob");
     bob.sort();
     assert_eq!(bob, [2, 3, 10, 11]);
@@ -346,7 +278,7 @@ fn a_link_is_served_only_when_package_and_item_are_both_visible() {
 #[test]
 fn rows_about_a_task_are_served_only_for_tasks_the_caller_holds() {
     let mut store = tree();
-    store.tasks = vec![task(10, 2, "bob", ""), task(11, 3, "bob", "")];
+    store.tasks = vec![task(10, 2, "bob", ""), task(11, 6, "carol", "")];
     store.agents = vec![
         Agent {
             id: 1,
@@ -359,19 +291,21 @@ fn rows_about_a_task_are_served_only_for_tasks_the_caller_holds() {
             ..blank_agent()
         },
     ];
+    // Ann covers task 10; bob made it; nobody but carol holds task 11.
     assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
-    assert_eq!(ids(&agents_of_held(&store, "bob"), |a| a.id), [1, 2]);
+    assert_eq!(ids(&agents_of_held(&store, "bob"), |a| a.id), [1]);
+    assert_eq!(ids(&agents_of_held(&store, "carol"), |a| a.id), [2]);
 }
 
-/// Y3: a request row follows the HOST, not the caller's sight of the task. A
-/// caller who dispatched a teammate's task and then lost sight of it (an
-/// unfollowed epic) still gets the requests and agents on their own hosts, and
-/// nobody else's.
+/// Y3: a request row follows the HOST, not whether the caller holds the task.
+/// A caller who dispatched a task and then stopped holding it (an unfollowed
+/// epic) still gets the requests and agents on their own hosts, and nobody
+/// else's.
 #[test]
-fn request_and_agent_rows_follow_the_callers_hosts_not_sight_of_the_task() {
+fn request_and_agent_rows_follow_the_callers_hosts_not_the_held_task() {
     let mut store = tree();
-    // Task 10 sits in bob's private epic: ann has no sight of it.
-    store.tasks = vec![task(10, 3, "bob", "")];
+    // Task 10 sits in bob's epic 6, which ann neither made nor follows.
+    store.tasks = vec![task(10, 6, "bob", "")];
     store.hosts = vec![
         Host {
             id: "ann-laptop".into(),
@@ -439,7 +373,7 @@ fn request_and_agent_rows_follow_the_callers_hosts_not_sight_of_the_task() {
 fn a_task_running_on_the_callers_host_is_held_without_a_follow() {
     let mut store = tree();
     store.subscriptions.retain(|s| s.subscriber != "ann");
-    // Task 10 is in a public epic ann still sees, and no longer follows.
+    // Task 10 is in an epic ann no longer follows.
     store.tasks = vec![task(10, 2, "bob", ""), task(11, 2, "bob", "")];
     store.hosts = vec![Host {
         id: "ann-laptop".into(),
@@ -488,45 +422,25 @@ fn a_task_running_on_the_callers_host_is_held_without_a_follow() {
     assert_eq!(ids(&agents_of_held(&store, "ann"), |a| a.id), [1]);
 }
 
-/// The held task is served only while the caller still sees it: a host does
-/// not carry a private task's row to someone who lost sight of it.
 #[test]
-fn a_task_on_the_callers_host_is_not_served_once_the_caller_loses_sight_of_it() {
+fn unseen_marks_are_the_callers_own_on_tasks_that_exist() {
     let mut store = tree();
-    store.tasks = vec![task(10, 3, "bob", "")]; // bob's private epic
-    store.hosts = vec![Host {
-        id: "ann-laptop".into(),
-        owner: "ann".into(),
-        label: String::new(),
-    }];
-    store.agents = vec![Agent {
-        id: 1,
-        task_id: 10,
-        host: "ann-laptop".into(),
-        state: AGENT_CURRENT.into(),
-        ..blank_agent()
-    }];
-    assert!(held_tasks_of(&store, "ann").is_empty());
-}
-
-#[test]
-fn unseen_marks_are_the_callers_own_on_tasks_they_can_see() {
-    let mut store = tree();
-    store.tasks = vec![task(10, 2, "bob", ""), task(11, 3, "bob", "")];
+    store.tasks = vec![task(10, 2, "bob", "")];
     let mark = |who: &str, task_id| UnseenTask {
         id: unseen_id(who, task_id),
         task_id,
         subscriber: who.to_string(),
     };
     store.unseen = vec![mark("ann", 10), mark("ann", 11), mark("bob", 10)];
+    // Task 11 is gone: its mark is not served.
     assert_eq!(ids(&own_unseen_of(&store, "ann"), |u| u.task_id), [10]);
     assert_eq!(ids(&own_unseen_of(&store, "bob"), |u| u.task_id), [10]);
 }
 
 #[test]
-fn bookmarks_are_the_callers_own_on_tasks_they_can_see() {
+fn bookmarks_are_the_callers_own_on_tasks_that_exist() {
     let mut store = tree();
-    store.tasks = vec![task(10, 2, "bob", ""), task(11, 3, "bob", "")];
+    store.tasks = vec![task(10, 2, "bob", "")];
     let mark = |who: &str, task_id| Bookmark {
         id: bookmark_id(who, task_id),
         task_id,
@@ -540,7 +454,7 @@ fn bookmarks_are_the_callers_own_on_tasks_they_can_see() {
 #[test]
 fn a_poll_owner_follows_its_epic_or_its_task() {
     let mut store = tree();
-    store.tasks = vec![task(3, 3, "bob", "")];
+    store.tasks = vec![task(6, 6, "carol", "")];
     let owner = |id, scope: &str, scope_id| PollOwner {
         id,
         scope: scope.to_string(),
@@ -549,43 +463,31 @@ fn a_poll_owner_follows_its_epic_or_its_task() {
     };
     store.poll_owners = vec![
         owner(1, POLL_SCOPE_EPIC, 2),
-        owner(2, POLL_SCOPE_EPIC, 3),
-        // Task 3 is in private epic 3; the id collides with epic 3 on purpose.
-        owner(3, POLL_SCOPE_TASK, 3),
+        owner(2, POLL_SCOPE_EPIC, 6),
+        // Task 6 is in epic 6; the id collides with epic 6 on purpose.
+        owner(3, POLL_SCOPE_TASK, 6),
     ];
+    // Ann holds epic 2 (covered); bob holds epic 6 (made); carol task 6.
     assert_eq!(ids(&poll_owners_visible_to(&store, "ann"), |p| p.id), [1]);
-    assert_eq!(
-        ids(&poll_owners_visible_to(&store, "bob"), |p| p.id),
-        [1, 2, 3]
-    );
+    assert_eq!(ids(&poll_owners_visible_to(&store, "bob"), |p| p.id), [2]);
+    assert_eq!(ids(&poll_owners_visible_to(&store, "carol"), |p| p.id), [3]);
 }
 
 #[test]
-fn learnings_follow_their_workspace_their_author_and_their_item() {
+fn every_learning_is_served_to_everyone() {
     let mut store = tree();
-    store.tasks = vec![task(11, 3, "bob", "")];
-    let learning = |id, scope: &str, scope_ref: Option<&str>, ws, author: &str| Learning {
+    let learning = |id, scope: &str, author: &str| Learning {
         id,
         scope: scope.to_string(),
-        scope_ref: scope_ref.map(str::to_string),
-        workspace_id: ws,
         author: author.to_string(),
         ..blank_learning()
     };
     store.learnings = vec![
-        learning(1, "repo", None, 7, "bob"),
-        learning(2, "user", None, 0, "bob"),
-        learning(3, "epic", Some("3"), 7, "bob"),
-        learning(4, "repo", None, 0, ""),
-        learning(5, "repo", None, 9, "zed"),
+        learning(1, "repo", "bob"),
+        learning(2, "user", "bob"),
+        learning(3, "epic", ""),
     ];
-    // Ann: the workspace one and the legacy one; not bob's user note, not the
-    // learning on bob's private epic, not another workspace's.
-    assert_eq!(ids(&learnings_visible_to(&store, "ann"), |l| l.id), [1, 4]);
-    assert_eq!(
-        ids(&learnings_visible_to(&store, "bob"), |l| l.id),
-        [1, 2, 3, 4]
-    );
+    assert_eq!(ids(&learnings_visible_to(&store), |l| l.id), [1, 2, 3]);
 }
 
 #[test]
@@ -626,59 +528,6 @@ fn settings_are_served_to_the_owner_of_their_host_only() {
     assert_eq!(seen("ann"), ["h1/k"]);
     assert_eq!(seen("bob"), ["h2/k"]);
     assert!(seen("carol").is_empty());
-}
-
-#[test]
-fn workspaces_and_memberships_are_the_callers_own() {
-    let mut store = tree();
-    store.members.push(member(3, 8, "bob"));
-    store.workspaces = vec![
-        Workspace {
-            id: 7,
-            ..blank_workspace()
-        },
-        Workspace {
-            id: 8,
-            ..blank_workspace()
-        },
-    ];
-    assert_eq!(ids(&workspaces_visible_to(&store, "ann"), |w| w.id), [7]);
-    assert_eq!(
-        ids(&memberships_visible_to(&store, "ann"), |m| m.id),
-        [1, 2]
-    );
-    assert_eq!(ids(&workspaces_visible_to(&store, "bob"), |w| w.id), [7, 8]);
-}
-
-#[test]
-fn a_super_admin_sees_every_workspace_and_its_memberships() {
-    let mut store = tree();
-    store.members.push(member(3, 8, "bob"));
-    store.workspaces = vec![
-        Workspace {
-            id: 7,
-            ..blank_workspace()
-        },
-        Workspace {
-            id: 8,
-            ..blank_workspace()
-        },
-    ];
-    assert!(workspaces_visible_to(&store, "root").is_empty());
-    store.profiles.push(UserProfile {
-        identity: "root".into(),
-        display_name: String::new(),
-        is_super_admin: true,
-        created_at: String::new(),
-    });
-    assert_eq!(
-        ids(&workspaces_visible_to(&store, "root"), |w| w.id),
-        [7, 8]
-    );
-    assert_eq!(
-        ids(&memberships_visible_to(&store, "root"), |m| m.id),
-        [1, 2, 3]
-    );
 }
 
 #[test]
@@ -757,7 +606,7 @@ fn delete_check_names_every_undone_task_in_a_subtree_lowest_first() {
         status_task(20, 2, "done"),
         status_task(25, 2, "review"),
     ];
-    let check = delete_check_for(&store, false, "bob", &[], &[1]);
+    let check = delete_check_for(&store, &[], &[1]);
     assert_eq!(check.refusal, None);
     assert_eq!(
         check
@@ -770,15 +619,11 @@ fn delete_check_names_every_undone_task_in_a_subtree_lowest_first() {
 }
 
 #[test]
-fn delete_check_passes_done_missing_and_unseen_rows() {
+fn delete_check_passes_done_and_missing_rows() {
     let mut store = tree();
-    store.tasks = vec![
-        status_task(10, 2, "done"),
-        // Epic 3 is private to bob: ann sees neither it nor its task.
-        status_task(11, 3, "running"),
-    ];
+    store.tasks = vec![status_task(10, 2, "done")];
     assert_eq!(
-        delete_check_for(&store, false, "ann", &[10, 11, 999], &[999]),
+        delete_check_for(&store, &[10, 999], &[999]),
         DeleteCheck::default()
     );
 }
@@ -787,21 +632,10 @@ fn delete_check_passes_done_missing_and_unseen_rows() {
 fn delete_check_for_a_plain_task_reports_it_when_not_done() {
     let mut store = tree();
     store.tasks = vec![status_task(10, 2, "backlog")];
-    let check = delete_check_for(&store, false, "ann", &[10], &[]);
+    let check = delete_check_for(&store, &[10], &[]);
     assert_eq!(check.blockers.len(), 1);
     assert_eq!(
         (check.blockers[0].epic_id, check.blockers[0].task_id),
         (0, 10)
     );
-}
-
-#[test]
-fn delete_check_refuses_a_subtree_holding_an_epic_the_caller_cannot_see() {
-    let store = tree();
-    // Epic 2's subtree holds epic 3, private to bob.
-    let check = delete_check_for(&store, false, "ann", &[], &[2]);
-    assert!(check.refusal.is_some());
-    assert!(delete_check_for(&store, false, "bob", &[], &[2])
-        .refusal
-        .is_none());
 }

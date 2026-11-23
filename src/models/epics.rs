@@ -42,10 +42,6 @@ pub struct Epic {
     pub feed_append_only: bool,
     pub feed_role: FeedRole,
     pub origin: EpicOrigin,
-    /// The workspace this epic lives in, as the store's workspace id. `0`
-    /// for a row from before workspaces existed.
-    pub workspace_id: i64,
-    pub visibility: crate::models::Visibility,
     /// The person whose command `feed_command` is: who last set it, or the
     /// epic's creator for a command that predates the record. A host runs the
     /// command only when its owner is this person (`feeds.allium:

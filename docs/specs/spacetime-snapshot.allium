@@ -106,12 +106,9 @@ enum StoreTarget {
 -- One column the store keeps non-optional with a sentinel standing for
 -- absence. The full list is src/spacetime/snapshot.rs's sentinel_columns.
 --
--- The workspace columns (workspaces.allium: epics, work_packages and
--- learnings each carry workspace_id) are zero-sentinel columns: 0 is "in no
--- workspace", which is a user-scoped learning's real state and an epic's
--- state until the migration places it. The visibility columns are plain
--- text, never absent. user_profiles.is_super_admin is a canonical boolean
--- like every other.
+-- The dead workspace_id columns (epics, work_packages and learnings) are
+-- zero-sentinel columns, and the dead visibility columns plain text;
+-- nothing reads their values (spacetime-seed.allium: SharedTable).
 entity SentinelColumn {
     table: seed/SharedTable
     column: String

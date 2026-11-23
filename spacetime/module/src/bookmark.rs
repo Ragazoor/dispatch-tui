@@ -33,64 +33,10 @@ pub(crate) fn end_marks_on_finish(ctx: &ReducerContext, prior: &Task, next: &Tas
     }
 }
 
-/// Drop every unseen mark and bookmark whose `(task_id, subscriber)` matches
-/// `lost_sight`: the person can no longer see the task (`workspaces.allium:
-/// RemoveMember`, `MoveEpicToWorkspace`).
-///
-/// `subscriber` names the one person the sweep is about, when it is about one
-/// (member removal): both tables are then read through their `subscriber`
-/// index instead of scanned whole. `None` sweeps everyone's marks.
-pub(crate) fn drop_marks_where(
-    ctx: &ReducerContext,
-    subscriber: Option<&str>,
-    lost_sight: impl Fn(i64, &str) -> bool,
-) {
-    let unseen: Vec<(String, i64, String)> = match subscriber {
-        Some(who) => ctx
-            .db
-            .unseen_tasks()
-            .subscriber()
-            .filter(who)
-            .map(|u| (u.id, u.task_id, u.subscriber))
-            .collect(),
-        None => ctx
-            .db
-            .unseen_tasks()
-            .iter()
-            .map(|u| (u.id, u.task_id, u.subscriber))
-            .collect(),
-    };
-    for (id, task_id, who) in unseen {
-        if lost_sight(task_id, &who) {
-            ctx.db.unseen_tasks().id().delete(&id);
-        }
-    }
-    let bookmarks: Vec<(String, i64, String)> = match subscriber {
-        Some(who) => ctx
-            .db
-            .bookmarks()
-            .subscriber()
-            .filter(who)
-            .map(|b| (b.id, b.task_id, b.subscriber))
-            .collect(),
-        None => ctx
-            .db
-            .bookmarks()
-            .iter()
-            .map(|b| (b.id, b.task_id, b.subscriber))
-            .collect(),
-    };
-    for (id, task_id, who) in bookmarks {
-        if lost_sight(task_id, &who) {
-            ctx.db.bookmarks().id().delete(&id);
-        }
-    }
-}
-
 /// `tasks.allium: SetBookmark`: set (`bookmarked`) or remove `subscriber`'s
 /// bookmark on `task_id`. Only the person themselves may write it, the
-/// operator included: a bookmark is personal. A task the caller cannot see is
-/// refused as a missing one, and a Done task cannot be bookmarked. Both
+/// operator included: a bookmark is personal. A missing task is refused, and a
+/// Done task cannot be bookmarked. Both
 /// directions are idempotent.
 #[spacetimedb::reducer]
 pub fn set_bookmark(
@@ -118,7 +64,7 @@ pub(crate) fn write_bookmark(
     if subscriber != caller_identity(ctx) {
         return Err("a bookmark is written only by the person it belongs to".into());
     }
-    let Some(task) = visible_task(ctx, task_id) else {
+    let Some(task) = ctx.db.tasks().id().find(task_id) else {
         return Err(format!("task {task_id} does not exist"));
     };
     let id = bookmark_id(&subscriber, task_id);

@@ -11,63 +11,21 @@ use crate::sync::encode;
 
 use super::super::{CreateLearningRow, LearningFilter, LearningPatch, Store};
 
-/// Who is reading the knowledge base: the identity this board writes as and
-/// the workspaces it belongs to, as the board last read them.
-struct LearningReader {
-    identity: Option<String>,
-    workspaces: Vec<i64>,
-}
-
-impl LearningReader {
-    fn sees(&self, learning: &Learning) -> bool {
-        learning.seen_by(self.identity.as_deref(), &self.workspaces)
-    }
-}
-
-impl Store {
-    /// `workspaces.allium: LearningVisibility`. An agent reads through its
-    /// host's board, so it sees what that board's owner sees.
-    async fn learning_reader(&self) -> LearningReader {
-        let identity = self.identity.user().await.ok().flatten();
-        let workspaces = match &identity {
-            Some(me) => self
-                .rows
-                .memberships()
-                .into_iter()
-                .filter(|m| &m.user == me)
-                .map(|m| m.workspace_id)
-                .collect(),
-            None => Vec::new(),
-        };
-        LearningReader {
-            identity,
-            workspaces,
-        }
-    }
-}
-
 #[async_trait::async_trait]
 impl super::super::LearningStore for Store {
-    /// Unlike settings, nothing here is scoped by host — a learning's
-    /// visibility is governed entirely by its own scope/scope_ref.
+    /// Unlike settings, nothing here is scoped by host: every board reads
+    /// every learning (`learnings.allium`, Scope Model).
     async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
         let row = encode::create_learning_row(&row, &self.now());
         self.caller.create_learning(row).await
     }
 
     async fn get_learning(&self, id: LearningId) -> Result<Option<Learning>> {
-        let reader = self.learning_reader().await;
-        Ok(self.rows.learning(id).filter(|l| reader.sees(l)))
+        Ok(self.rows.learning(id))
     }
 
     async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>> {
-        let reader = self.learning_reader().await;
-        Ok(self
-            .rows
-            .learnings_matching(&filter)
-            .into_iter()
-            .filter(|l| reader.sees(l))
-            .collect())
+        Ok(self.rows.learnings_matching(&filter))
     }
 
     async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()> {
@@ -89,26 +47,12 @@ impl super::super::LearningStore for Store {
     }
 
     async fn list_all_approved_learnings_with_embedding(&self) -> Result<Vec<(Learning, Vec<u8>)>> {
-        let reader = self.learning_reader().await;
-        Ok(self
-            .rows
-            .approved_learnings_with_embedding()
-            .into_iter()
-            .filter(|(l, _)| reader.sees(l))
-            .collect())
+        Ok(self.rows.approved_learnings_with_embedding())
     }
 
-    /// Only the learnings this board's person sees: the store skips a patch to
-    /// any other, so listing it would re-embed it on every startup
-    /// (`learnings.allium: RecordLearningViaMcp`, the repair pass).
+    /// `learnings.allium: RecordLearningViaMcp`, the repair pass.
     async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>> {
-        let reader = self.learning_reader().await;
-        Ok(self
-            .rows
-            .learnings_missing_embedding()
-            .into_iter()
-            .filter(|l| reader.sees(l))
-            .collect())
+        Ok(self.rows.learnings_missing_embedding())
     }
 
     /// Always `0`. The archived count is best-effort telemetry, not a
@@ -198,24 +142,16 @@ mod tests {
         }
     }
 
-    /// Every read of the knowledge base shows the reader what
-    /// `LearningVisibility` lets them see, and nothing else.
+    /// Every reader sees every learning (`learnings.allium`, Scope Model):
+    /// whatever its author or the dead `workspace_id` column holds.
     #[tokio::test]
-    async fn reads_show_only_what_the_reader_may_see() {
+    async fn every_read_shows_every_learning() {
         let store = Store::open_in_memory().unwrap();
-        store.rows.upsert_membership(&bindings::Membership {
-            id: 1,
-            workspace_id: 5,
-            user: MEMORY_USER_ID.into(),
-            role: "member".into(),
-            created_at: "2026-01-01 00:00:00.000".into(),
-        });
         for row in [
-            learning(1, 5, "someone"),      // my workspace
-            learning(2, 6, "someone"),      // another workspace
-            learning(3, 0, MEMORY_USER_ID), // private, mine
-            learning(4, 0, "someone"),      // private, theirs
-            learning(5, 0, ""),             // from before workspaces
+            learning(1, 5, "someone"),
+            learning(2, 0, MEMORY_USER_ID),
+            learning(3, 0, "someone"),
+            learning(4, 0, ""),
         ] {
             store.rows.upsert_learning(&row);
         }
@@ -228,30 +164,16 @@ mod tests {
             .map(|l| l.id.0)
             .collect();
         listed.sort();
-        assert_eq!(listed, vec![1, 3, 5]);
-        assert!(store.get_learning(LearningId(2)).await.unwrap().is_none());
-        assert!(store.get_learning(LearningId(4)).await.unwrap().is_none());
+        assert_eq!(listed, vec![1, 2, 3, 4]);
         assert!(store.get_learning(LearningId(3)).await.unwrap().is_some());
-    }
-
-    /// The repair pass lists only what the reader sees: the store would skip
-    /// the write to any other row, so it would be re-embedded every startup.
-    #[tokio::test]
-    async fn the_missing_embedding_list_shows_only_what_the_reader_may_see() {
-        let store = Store::open_in_memory().unwrap();
-        for row in [
-            learning(1, 0, MEMORY_USER_ID), // private, mine
-            learning(2, 0, "someone"),      // private, theirs
-        ] {
-            store.rows.upsert_learning(&row);
-        }
-        let listed: Vec<i64> = store
+        let mut missing: Vec<i64> = store
             .list_learnings_missing_embedding()
             .await
             .unwrap()
             .into_iter()
             .map(|l| l.id.0)
             .collect();
-        assert_eq!(listed, vec![1]);
+        missing.sort();
+        assert_eq!(missing, vec![1, 2, 3, 4]);
     }
 }

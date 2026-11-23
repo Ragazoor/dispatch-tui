@@ -494,35 +494,37 @@ rule SubscribeOnceIdentityIsSettled {
         -- already have asked for a stranger's rows before discovering it was a
         -- stranger.
         --
-        -- THE BOARD ASKS THE VIEWS, NOT THE TABLES. Every table that carries a
-        -- person's work is private (docs/architecture.md, "Read enforcement:
-        -- per-caller views"), and the board subscribes to the per-caller views
-        -- over them, which answer for the connection's own identity:
+        -- THE BOARD ASKS THE VIEWS, NOT THE TABLES. The tables that carry work
+        -- are private in the store's schema, and changing that is a schema
+        -- change, so the board subscribes to the per-caller views over them,
+        -- which answer for the connection's own identity. The views narrow by
+        -- follows and ownership only: that narrowing is DELIVERY (what this
+        -- board receives), not access. No row is withheld from anyone for
+        -- access reasons.
         --   own_tasks, own_epics, own_packages: what this person created,
         --     and the epic-less tasks they own (own_creations); own_tasks
         --     also the tasks run on a host this person owns (a current
-        --     agent, or an open dispatch or session request, there), while
-        --     they still see them: the host's reactor
-        --     acts on the task a request row names, so the task must
-        --     arrive with the row, and its subagent rows with it;
+        --     agent, or an open dispatch or session request, there): the
+        --     host's reactor acts on the task a request row names, so the
+        --     task must arrive with the row, and its subagent rows with it;
         --   covered_epics, covered_tasks: the epics this person follows and
         --     every descendant, at any depth, and their tasks;
         --   rows about a held task (learning retrievals and verdicts, unseen
         --     marks, bookmarks),
         --     agents and dispatch and session requests (a held task's, plus
         --     every row on a host this person owns, so a request outlives
-        --     the person's sight of its task: unfollowing the epic of a
-        --     teammate's task one dispatched must not lose the wrap-up row
-        --     or its serving); feed requests (store-split.allium:
-        --     FeedRequest), which concern no held task, only on the hosts
-        --     this person owns; and the links, poll claims,
-        --     learnings, settings, workspaces and memberships the caller
-        --     may see, and the super-admin's unseen-item listing.
+        --     the follow that delivered its task: unfollowing the epic of a
+        --     task one dispatched must not lose the wrap-up row or its
+        --     serving); feed requests (store-split.allium: FeedRequest),
+        --     which concern no held task, only on the hosts this person owns;
+        --     and the links, poll claims, learnings and settings the views
+        --     serve the caller.
         -- Usage is not a view: the board asks the store on demand
         -- (own_usage_summary). Public tables (hosts, user_profiles, repo
         -- lists) are asked for directly. This person's own follows come
-        -- through the own_subscriptions view; the subscriptions table is
-        -- private, so no client can read another person's follows.
+        -- through the own_subscriptions view. The subscriptions table is
+        -- private only as schema left from the multi-user store; the view
+        -- narrows what a board receives, not who may read it.
         --
         -- THE STORE WALKS THE TREE, THE BOARD DOES NOT. covered_epics is
         -- derived from the Subscription rows on the store's side, so a
@@ -711,12 +713,11 @@ rule SubscribeToUserProfiles {
     ensures: UserProfileSubscriptionAsserted(connection: connection)
 
     @guidance
-        -- Every UserProfile row (workspaces.allium), unfiltered: the
-        -- directory of identities and display names is readable by every
-        -- connected client (workspaces.allium, D7). A row holds an identity,
-        -- a name, the super-admin flag and a creation stamp, nothing private.
-        -- The board needs it to show a creator by name
-        -- (CreatorIsShownByName). Re-asserted on every connection, like the
+        -- Every UserProfile row (people.allium), unfiltered: the directory of
+        -- identities and display names is readable by every connected client
+        -- (people.allium, P2). A row holds an identity, a name and a creation
+        -- stamp, nothing private. The board needs it to show a creator by
+        -- name (people.allium: CreatorIsShownByName). Re-asserted on every connection, like the
         -- rest.
 }
 
@@ -737,7 +738,7 @@ rule SubscribeToAgents {
         -- caller owns. The board needs ended agents as well as current ones,
         -- because A2 resolves a name to its task on any task the board can
         -- see. The owned-hosts leg keeps an agent this host runs on its board
-        -- after its task has left the caller's sight. The retired name ledger
+        -- after its task has left the board's follows. The retired name ledger
         -- is NOT asked for: nothing reads it (agents.allium: A4).
         -- Re-asserted on every connection, like the rest.
         --
@@ -1102,7 +1103,7 @@ rule CreatesRequireASettledIdentity {
         -- settled (feeds.allium: IngestFeedEmission), so there is no name it
         -- could get wrong, and it does not supply a person.
         --
-        -- NOR DO WRITES THE STORE STAMPS ITSELF. A learning, a workspace, a
+        -- NOR DO WRITES THE STORE STAMPS ITSELF. A learning, a
         -- usage event and the request rows (dispatch, wrap-up, feed refresh)
         -- carry no person the board chose; whatever names their author the
         -- store takes from the caller it sees. None of them waits.
@@ -1501,8 +1502,8 @@ rule SubscribeToEpic {
         --
         -- THE SUBSCRIBER IS THE CALLER. The store refuses a subscriber that is
         -- not the identity making the call, so a board cannot make someone
-        -- else follow an epic (workspaces.allium, "Identities are the
-        -- caller's"); the rule above already names the local host's owner.
+        -- else follow an epic (store-split.allium: IdentitiesAreTheCallers);
+        -- the rule above already names the local host's owner.
         --
         -- REQUIRES AN IDENTITY, because a subscription is one person's standing
         -- interest and an install that has never connected does not know whose.
@@ -1548,12 +1549,7 @@ rule UnsubscribeFromEpic {
         -- SubscribeToEpic, the store refuses a subscriber that is not the
         -- identity making the call, so a board cannot unfollow someone else
         -- (releasing their hosts' poll claims). The refusal is the same for a
-        -- row that exists and one that does not. The sight check: a caller who
-        -- holds no row and cannot see the epic is told "no epic N", not "not
-        -- subscribed", so the answer never confirms that a private epic
-        -- exists. A caller who still holds a row may always remove it, even
-        -- after losing sight of the epic, so a stale follow cannot become
-        -- permanent.
+        -- row that exists and one that does not.
         --
         -- RELEASING THE CLAIM. A feed epic this person no longer
         -- follows is invisible to their boards (`epic_search` answers from
@@ -1603,8 +1599,10 @@ rule UnsubscribeFromEpic {
 -- A board asks for its own user board, its subscribed epics, and everything
 -- it created itself (own_creations, SubscribeOnceIdentityIsSettled). The
 -- interesting half is the converse: nothing else was asked for, so a store
--- that honours the request sends nothing else, and a colleague's private work
--- is not on this machine to be leaked, searched or accidentally rendered.
+-- that honours the request sends nothing else, and work this identity
+-- neither follows nor created is not on this machine to be searched or
+-- accidentally rendered. That is delivery, not access: nothing is withheld
+-- for access reasons.
 -- own_creations does not weaken that: it is scoped to rows this identity
 -- itself created, so widening it to cover every epic and every unfollowed
 -- task never exposes a row belonging to anyone else — the ask stays "mine",
@@ -1825,9 +1823,8 @@ surface StoreBoundary {
         -- `covered_epics` (the followed ones and their sub-epic trees),
         -- anything the connected identity created or owns (own_creations),
         -- and the other rows the per-caller views serve that identity
-        -- (SubscribeOnceIdentityIsSettled: workspaces, memberships,
-        -- learnings, links, poll claims, settings, bookmarks, the
-        -- super-admin's unseen-item listing), plus the public tables it asks
+        -- (SubscribeOnceIdentityIsSettled: learnings, links, poll claims,
+        -- settings, bookmarks), plus the public tables it asks
         -- for directly. Usage is never sent unasked: the board asks for it on
         -- demand.
         -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics constrains what is

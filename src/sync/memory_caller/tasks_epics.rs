@@ -92,13 +92,6 @@ impl MemoryReducerCaller {
     }
 
     pub(super) fn write_epic(&self, tables: &mut Tables, mut row: module::Epic) -> i64 {
-        // The module's `inherit_workspace`, for every epic a module path
-        // inserts under a parent (feed grouping, role routing, repo groups).
-        if row.id == 0 && row.parent_epic_id != 0 {
-            if let Some(parent) = tables.epics.get(&row.parent_epic_id) {
-                row.workspace_id = parent.workspace_id;
-            }
-        }
         let id = Self::assign_id(row.id, &mut tables.next_epic_id);
         row.id = id;
         tables.epics.insert(id, row.clone());
@@ -297,7 +290,7 @@ impl MemoryReducerCaller {
             ..row
         };
         tables
-            .check_task_may_enter_epic(&scope, "task", row.epic_id)
+            .check_epic_exists("task", row.epic_id)
             .map_err(StoreRefusal)?;
         // The module's `check_new_task_aim`.
         module::check_new_task_aim(&row, &self.sender, |host| {
@@ -339,11 +332,9 @@ impl MemoryReducerCaller {
         store_owns_completion: bool,
         close_host: Option<&str>,
     ) -> Result<ReducerOutcome> {
-        let scope = self.scope();
         let mut tables = self.lock();
         self.patch_task_row_in(
             &mut tables,
-            &scope,
             id,
             module::TaskPatch::from(patch),
             store_owns_completion,
@@ -357,13 +348,12 @@ impl MemoryReducerCaller {
     pub(super) fn patch_task_row_in(
         &self,
         tables: &mut Tables,
-        scope: &super::visibility::Scope,
         id: TaskId,
         patch: module::TaskPatch,
         store_owns_completion: bool,
         close_host: Option<&str>,
     ) -> Result<ReducerOutcome> {
-        let Some(mut row) = tables.visible_task(scope, id.0) else {
+        let Some(mut row) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         if let Err(why) = module::check_task_patch(&row, &patch) {
@@ -494,28 +484,12 @@ impl MemoryReducerCaller {
         {
             let scope = self.scope();
             let mut tables = self.lock();
-            let Some(row) = tables.visible_task(&scope, id.0) else {
+            let Some(row) = tables.tasks.get(&id.0).cloned() else {
                 return Ok(ReducerOutcome::Refused(format!("task {} not found", id.0)));
             };
             if let Some(epic_id) = epic_id {
-                if epic_id != 0 && !tables.epics.contains_key(&epic_id) {
-                    return Ok(ReducerOutcome::Refused(format!(
-                        "task {}: epic {epic_id} does not exist",
-                        id.0
-                    )));
-                }
-                if let Err(why) =
-                    tables.check_task_may_enter_epic(&scope, &format!("task {}", id.0), epic_id)
-                {
+                if let Err(why) = tables.check_epic_exists(&format!("task {}", id.0), epic_id) {
                     return Ok(ReducerOutcome::Refused(why));
-                }
-                // The module's move half refuses this inside one transaction;
-                // this double has no rollback, so it refuses before either half.
-                // A repo-group sub-epic is public, so routing keeps the holder.
-                if epic_id != row.epic_id {
-                    if let Err(why) = tables.check_task_move(&scope, &row, epic_id) {
-                        return Ok(ReducerOutcome::Refused(why));
-                    }
                 }
             }
             let patch = module::TaskPatch::from(patch.clone());
@@ -618,9 +592,8 @@ impl MemoryReducerCaller {
     }
 
     pub(super) fn apply_delete_task(&self, id: TaskId) -> Result<ReducerOutcome> {
-        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(row) = tables.visible_task(&scope, id.0) else {
+        let Some(row) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         // Mirrors the module's `delete_task` guard (task #4971): only a
@@ -651,18 +624,10 @@ impl MemoryReducerCaller {
         let epic_id = encode::epic_ref(epic_id);
         let scope = self.scope();
         let mut tables = self.lock();
-        let Some(task) = tables.visible_task(&scope, id.0) else {
+        let Some(task) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Refused(format!("task {} not found", id.0)));
         };
-        if epic_id != 0 && !tables.epics.contains_key(&epic_id) {
-            return Ok(ReducerOutcome::Refused(format!(
-                "task {}: epic {epic_id} does not exist",
-                id.0
-            )));
-        }
-        if let Err(why) =
-            tables.check_task_may_enter_epic(&scope, &format!("task {}", id.0), epic_id)
-        {
+        if let Err(why) = tables.check_epic_exists(&format!("task {}", id.0), epic_id) {
             return Ok(ReducerOutcome::Refused(why));
         }
         // Routed first, then compared, as the module does.
@@ -671,11 +636,6 @@ impl MemoryReducerCaller {
         if was_in == epic_id {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
-        if let Err(why) = tables.check_task_move(&scope, &task, epic_id) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
-        let left_workspace = tables.epics.get(&was_in).map(|e| e.workspace_id);
-        let joined_workspace = tables.epics.get(&epic_id).map(|e| e.workspace_id);
         let updated_at = self.now();
         let row = module::Task {
             epic_id,
@@ -691,23 +651,13 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         self.clear_unseen_for_task(&mut tables, id.0);
-        self.on_task_sight_lost(&mut tables, id.0);
-        let leaves_workspace = match (left_workspace, joined_workspace) {
-            (Some(a), Some(b)) => a != b,
-            (Some(_), None) => true,
-            _ => false,
-        };
-        if leaves_workspace {
-            // Mirrors the module: the task's links were the old workspace's.
-            self.delete_work_package_links_to(&mut tables, module::WORK_PACKAGE_ITEM_TASK, id.0);
-        }
         self.recalculate_epic_chain(&mut tables, was_in);
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    /// The module's uniqueness check over the epics under `row`'s parent,
-    /// visible or not (`core.allium: UniqueFeedRolePerParent`).
+    /// The module's uniqueness check over the epics under `row`'s parent
+    /// (`core.allium: UniqueFeedRolePerParent`).
     pub(super) fn check_epic_unique(tables: &Tables, row: &module::Epic) -> Result<(), String> {
         use module::StoreReads;
         module::check_epic_unique_among(row, &tables.epics_under(row.parent_epic_id))
@@ -738,112 +688,18 @@ impl MemoryReducerCaller {
         self.patch_epic_row(id, patch, false)
     }
 
-    /// Mirrors the module's `update_epic`: the patch, the workspace move and
-    /// the visibility change, whole or not at all.
-    ///
-    /// The module leans on its rolled-back transaction; this double has none,
-    /// so each part is first asked whether it would be refused (`check_only`,
-    /// no write), and only when all three would apply are they written, in the
-    /// module's order. The checks read the epic as it is before the patch; a
-    /// patch changes neither the creator, the workspace nor the visibility, so
-    /// the answers match what the writes would see.
+    /// Mirrors the module's `update_epic`: the patch, whole or not at all. A
+    /// missing epic is refused, unlike [`Self::apply_patch_epic`]'s no-op.
     pub(super) fn apply_update_epic(
         &self,
         id: EpicId,
         patch: bindings::EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
     ) -> Result<ReducerOutcome> {
-        {
-            let scope = self.scope();
-            let tables = self.lock();
-            if tables.visible_epic(&scope, id.0).is_none()
-                && !module::reaches_an_unseen_epic(
-                    !scope.on() || self.caller_is_super_admin(&tables),
-                    &module::EpicPatch::from(patch.clone()),
-                    workspace_id,
-                    visibility.as_deref(),
-                )
-            {
-                return Ok(ReducerOutcome::Refused(format!(
-                    "epic {} does not exist",
-                    id.0
-                )));
-            }
+        let missing = self.lock().require_epic(id.0).err();
+        if let Some(why) = missing {
+            return Ok(ReducerOutcome::Refused(why));
         }
-        // The module runs the parts in order, each seeing what the one before
-        // wrote. Dry-run them the same way: the patch's parent and the move's
-        // workspace are laid over the row for the checks after them, then put
-        // back. Nothing is written until every part has said yes.
-        let original = self.lock().epics.get(&id.0).cloned();
-        let lay_over = |parent: Option<i64>, workspace: Option<i64>| {
-            let mut tables = self.lock();
-            if let Some(row) = tables.epics.get_mut(&id.0) {
-                if let Some(parent) = parent {
-                    row.parent_epic_id = parent;
-                }
-                if let Some(workspace) = workspace {
-                    row.workspace_id = workspace;
-                }
-            }
-        };
-        let restore = || {
-            if let Some(original) = &original {
-                self.lock().epics.insert(id.0, original.clone());
-            }
-        };
-        let mut refusal = None;
-        let patched = self.patch_epic_row(id, patch.clone(), true)?;
-        if matches!(patched, ReducerOutcome::Refused(_)) {
-            refusal = Some(patched);
-        }
-        if refusal.is_none() {
-            lay_over(patch.parent_epic_id, None);
-            if let Some(workspace_id) = workspace_id {
-                let moved = self.move_epic_row(id, workspace_id, true)?;
-                if matches!(moved, ReducerOutcome::Refused(_)) {
-                    refusal = Some(moved);
-                } else {
-                    lay_over(None, Some(workspace_id));
-                }
-            }
-        }
-        if refusal.is_none() {
-            if let Some(visibility) = &visibility {
-                let set = self.set_epic_visibility_row(id, visibility.clone(), true)?;
-                if matches!(set, ReducerOutcome::Refused(_)) {
-                    refusal = Some(set);
-                }
-            }
-        }
-        restore();
-        if let Some(refusal) = refusal {
-            return Ok(refusal);
-        }
-        // The dry run judged each part against the store as it was, so a later
-        // part can still be refused once an earlier one has been written (the
-        // module rolls the whole call back; this double cannot). Name the part
-        // rather than hide a half-applied update.
-        let applied = |part: &str, outcome: ReducerOutcome| -> Result<()> {
-            match outcome {
-                ReducerOutcome::Refused(reason) => Err(anyhow::anyhow!(
-                    "update_epic {}: the {part} part was refused after the dry run accepted it: {reason}",
-                    id.0
-                )),
-                _ => Ok(()),
-            }
-        };
-        applied("patch", self.patch_epic_row(id, patch, false)?)?;
-        if let Some(workspace_id) = workspace_id {
-            applied("move", self.move_epic_row(id, workspace_id, false)?)?;
-        }
-        if let Some(visibility) = visibility {
-            applied(
-                "visibility",
-                self.set_epic_visibility_row(id, visibility, false)?,
-            )?;
-        }
-        Ok(ReducerOutcome::Applied(vec![]))
+        self.patch_epic_row(id, patch, false)
     }
 
     /// [`Self::apply_patch_epic`]'s body; `check_only` returns the answer
@@ -855,14 +711,13 @@ impl MemoryReducerCaller {
         check_only: bool,
     ) -> Result<ReducerOutcome> {
         let id = id.0;
-        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.visible_epic(&scope, id) else {
+        let Some(mut row) = tables.epics.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         let patch = module::EpicPatch::from(patch);
-        if let Some(parent) = patch.parent_epic_id {
-            if let Err(why) = tables.check_epic_move(&scope, &row, parent) {
+        if let Some(parent) = patch.parent_epic_id.filter(|&p| p != 0) {
+            if let Err(why) = tables.require_epic(parent) {
                 return Ok(ReducerOutcome::Refused(why));
             }
         }
@@ -876,16 +731,6 @@ impl MemoryReducerCaller {
         }) {
             return Ok(ReducerOutcome::Refused(why));
         }
-        // `FeedCommandAuthority` (V8).
-        if let Some(command) = &patch.feed_command {
-            if scope.on() && !module::may_change_feed_command(&*tables, &row, command, &self.sender)
-            {
-                return Ok(ReducerOutcome::Refused(format!(
-                    "only the creator of epic {} or an admin of its workspace may change its feed command",
-                    row.id
-                )));
-            }
-        }
         let prior_status = row.status.clone();
         let was_child_of = row.parent_epic_id;
         let caller_named_a_completion = patch.completed_at.is_some();
@@ -894,21 +739,6 @@ impl MemoryReducerCaller {
             .feed_command
             .as_ref()
             .is_some_and(|c| *c != row.feed_command);
-        let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
-        if let Some(parent) = patch.parent_epic_id.filter(|p| *p != was_child_of) {
-            // `SightChangeNeverStrandsAHost`: before any write.
-            let subtree = Self::collect_epic_subtree_ids(&tables, id);
-            if module::epic_change_strands_a_host(&*tables, &subtree, &|mut node| {
-                if node.id == id {
-                    node.parent_epic_id = parent;
-                }
-                node
-            }) {
-                return Ok(ReducerOutcome::Refused(
-                    module::epic_change_strands_refusal(id),
-                ));
-            }
-        }
         let before = row.clone();
         module::apply_epic_patch(&mut row, patch);
         if module::epic_uniqueness_inputs_changed(&before, &row) {
@@ -937,13 +767,8 @@ impl MemoryReducerCaller {
             self.release_poll_claims(
                 &mut tables,
                 &std::collections::HashSet::from([id]),
-                |_, owner| owner != setter,
+                |owner| owner != setter,
             );
-        }
-        if reparented {
-            // `ClaimsFollowSight`.
-            let subtree = Self::collect_epic_subtree_ids(&tables, id);
-            self.on_sight_lost(&mut tables, &subtree);
         }
 
         // The parent chain, never the epic itself (the module's
@@ -957,18 +782,13 @@ impl MemoryReducerCaller {
 
     pub(super) fn apply_delete_epic(&self, id: EpicId) -> Result<ReducerOutcome> {
         let id = id.0;
-        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(row) = tables.visible_epic(&scope, id) else {
+        let Some(row) = tables.epics.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
-        // Sight first, so a refusal below names nothing a private sub-epic
-        // holds. Then the module's `delete_epic` guard (task #4971): every
-        // task anywhere in the subtree must be `done`.
+        // The module's `delete_epic` guard (task #4971): every task anywhere
+        // in the subtree must be `done`.
         let doomed = Self::collect_epic_subtree_ids(&tables, id);
-        if let Err(why) = tables.check_subtree_all_seen(&scope, id, &doomed) {
-            return Ok(ReducerOutcome::Refused(why));
-        }
         if let Some(why) = Self::subtree_too_deep(&tables, id) {
             return Ok(ReducerOutcome::Refused(why));
         }
@@ -985,8 +805,7 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `check_deletable` procedure: the delete rules over
-    /// this store's rows, changing nothing. With the workspace rules off
-    /// nobody is refused sight, as everywhere in this double.
+    /// this store's rows, changing nothing.
     pub(super) fn apply_check_deletable(
         &self,
         task_ids: Vec<TaskId>,
@@ -994,10 +813,8 @@ impl MemoryReducerCaller {
     ) -> bindings::DeleteCheck {
         let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
         let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
-        let operator = !self.scope().on();
         let tables = self.lock();
-        let check =
-            module::delete_check_for(&*tables, operator, &self.sender, &task_ids, &epic_ids);
+        let check = module::delete_check_for(&*tables, &task_ids, &epic_ids);
         bindings::DeleteCheck {
             blockers: check
                 .blockers
@@ -1013,12 +830,11 @@ impl MemoryReducerCaller {
         }
     }
 
-    /// Mirrors the module's `read_archived_task` procedure, through the
-    /// module's own `archived_task_for`.
+    /// Mirrors the module's `read_archived_task` procedure.
     pub(super) fn apply_read_archived_task(&self, id: TaskId) -> Option<bindings::ArchivedTask> {
-        let operator = !self.scope().on();
+        use module::StoreReads;
         let tables = self.lock();
-        module::archived_task_for(&*tables, operator, &self.sender, id.0).map(Into::into)
+        tables.archived_task(id.0).map(Into::into)
     }
 
     /// Mirrors the module's `list_archived_tasks` procedure, through the
@@ -1028,18 +844,11 @@ impl MemoryReducerCaller {
         epic_id: Option<EpicId>,
         repo_paths: Vec<String>,
     ) -> Vec<bindings::ArchivedTask> {
-        let operator = !self.scope().on();
         let tables = self.lock();
-        module::archived_tasks_for(
-            &*tables,
-            operator,
-            &self.sender,
-            epic_id.map_or(0, |e| e.0),
-            &repo_paths,
-        )
-        .into_iter()
-        .map(Into::into)
-        .collect()
+        module::archived_tasks_for(&*tables, epic_id.map_or(0, |e| e.0), &repo_paths)
+            .into_iter()
+            .map(Into::into)
+            .collect()
     }
 
     /// Mirrors the module's `batch_delete` (task #4971): validate every
@@ -1053,18 +862,14 @@ impl MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         let task_ids: Vec<i64> = task_ids.into_iter().map(|id| id.0).collect();
         let epic_ids: Vec<i64> = epic_ids.into_iter().map(|id| id.0).collect();
-        let scope = self.scope();
         let mut tables = self.lock();
 
         let mut epic_doomed: Vec<(i64, std::collections::HashSet<i64>)> = Vec::new();
         for &id in &epic_ids {
-            if tables.visible_epic(&scope, id).is_none() {
+            if !tables.epics.contains_key(&id) {
                 continue;
             }
             let doomed = Self::collect_epic_subtree_ids(&tables, id);
-            if let Err(why) = tables.check_subtree_all_seen(&scope, id, &doomed) {
-                return Ok(ReducerOutcome::Refused(why));
-            }
             if let Some(why) = Self::subtree_too_deep(&tables, id) {
                 return Ok(ReducerOutcome::Refused(why));
             }
@@ -1076,7 +881,7 @@ impl MemoryReducerCaller {
             epic_doomed.push((id, doomed));
         }
         for &id in &task_ids {
-            if let Some(row) = tables.visible_task(&scope, id) {
+            if let Some(row) = tables.tasks.get(&id).cloned() {
                 if row.status != DONE {
                     return Ok(ReducerOutcome::Refused(format!(
                         "task {id}: cannot delete because it is not done"
@@ -1105,7 +910,7 @@ impl MemoryReducerCaller {
             self.delete_epic_subtree_with_feed_cleanup(&mut tables, *id, doomed);
         }
         for &id in &task_ids {
-            let Some(row) = tables.visible_task(&scope, id) else {
+            let Some(row) = tables.tasks.get(&id).cloned() else {
                 // Already gone, or never the caller's to see.
                 continue;
             };

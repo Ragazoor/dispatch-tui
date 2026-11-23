@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{Epic, EpicId, TaskStatus, Visibility};
+use crate::models::{Epic, EpicId, TaskStatus};
 use crate::service::{CreateEpicParams, UpdateEpicParams};
 
 use super::time_filter;
@@ -11,7 +11,7 @@ use super::types::{
     deserialize_flexible_id, deserialize_nullable_flexible_i64, deserialize_nullable_flexible_id,
     deserialize_nullable_string, deserialize_optional_flexible_i64,
     deserialize_optional_flexible_id, deserialize_optional_limit, parse_args, reject_alongside,
-    service_err_to_response, tool_error, JsonRpcResponse,
+    service_err_to_response, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -28,10 +28,6 @@ pub(super) struct CreateEpicArgs {
     pub(super) sort_order: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_id")]
     pub(super) parent_epic_id: Option<EpicId>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) workspace_id: Option<i64>,
-    #[serde(default)]
-    pub(super) visibility: Option<Visibility>,
 }
 
 #[derive(Deserialize)]
@@ -84,10 +80,6 @@ pub(super) struct UpdateEpicArgs {
     pub(super) feed_append_only: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_id")]
     pub(super) parent_epic_id: Option<Option<EpicId>>,
-    #[serde(default)]
-    pub(super) visibility: Option<Visibility>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    pub(super) workspace_id: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,28 +98,6 @@ pub(super) async fn handle_epic_create(
     };
     tracing::info!(title = %parsed.title, "MCP epic_create");
 
-    // `epics.allium: CreateEpicViaMcp`. A sub-epic takes
-    // its parent's workspace, so naming one is refused rather than ignored.
-    let workspace_id = match (parsed.parent_epic_id, parsed.workspace_id) {
-        (Some(_), Some(_)) => {
-            return tool_error(
-                id,
-                "workspace_id is for a root epic; a sub-epic takes its parent's workspace, so \
-                 drop workspace_id and keep parent_epic_id",
-            )
-        }
-        (Some(_), None) => 0,
-        (None, Some(workspace_id)) => workspace_id,
-        (None, None) => {
-            return tool_error(
-                id,
-                format!(
-                    "a root epic needs a workspace_id: add workspace_id, or pass parent_epic_id for a sub-epic. {}",
-                    workspace_choices(state).await
-                ),
-            )
-        }
-    };
     let created = state
         .epic_svc
         .create_epic(CreateEpicParams {
@@ -137,68 +107,15 @@ pub(super) async fn handle_epic_create(
             parent_epic_id: parsed.parent_epic_id,
             feed_command: None,
             feed_interval_secs: None,
-            workspace_id,
-            visibility: parsed.visibility.unwrap_or_default(),
         })
         .await;
     let epic = match created {
         Ok(epic) => epic,
-        Err(e) => return workspace_refusal(state, id, workspace_id, e).await,
+        Err(e) => return service_err_to_response(id, e),
     };
     state.notify_epic_changed(epic.id);
-    let text = format!(
-        "Epic {} created: {} (workspace {}, {})",
-        epic.id, epic.title, epic.workspace_id, epic.visibility
-    );
+    let text = format!("Epic {} created: {}", epic.id, epic.title);
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-}
-
-/// The store's refusal of a create, with the caller's workspaces added to a
-/// refusal that is about the workspace. The store decides whether the caller
-/// may create there (`workspaces.allium: CreateEpicInWorkspace`); the local list only
-/// helps the caller pick another. A workspace that does not exist and one the
-/// caller is not in read the same, so the answer does not tell which ids are
-/// taken.
-pub(super) async fn workspace_refusal(
-    state: &McpState,
-    id: Option<Value>,
-    workspace_id: i64,
-    err: crate::service::ServiceError,
-) -> JsonRpcResponse {
-    let about_workspace = workspace_id != 0
-        && matches!(&err, crate::service::ServiceError::Validation(m)
-            if m.contains(&format!("workspace {workspace_id}")));
-    if !about_workspace {
-        return service_err_to_response(id, err);
-    }
-    let choices = workspace_choices(state).await;
-    let msg = format!("{err}. {choices}");
-    service_err_to_response(id, crate::service::ServiceError::Validation(msg))
-}
-
-/// The workspaces the caller belongs to, for a refusal that asks for a
-/// `workspace_id` (`epics.allium: CreateEpicViaMcp`).
-pub(super) async fn workspace_choices(state: &McpState) -> String {
-    if state.people_svc.admin_snapshot().await.me.is_none() {
-        return NOT_SETTLED.to_string();
-    }
-    format_workspace_choices(&state.people_svc.my_workspaces().await)
-}
-
-/// Said instead of "you belong to no workspace" while the board does not yet
-/// know who it writes as: the list is empty for want of an identity.
-pub(super) const NOT_SETTLED: &str =
-    "Your identity is not settled yet, so your workspaces are not known; try again in a moment.";
-
-fn format_workspace_choices(mine: &[crate::models::WorkspaceRef]) -> String {
-    if mine.is_empty() {
-        return format!("{}.", crate::models::NO_WORKSPACE);
-    }
-    let list: Vec<String> = mine
-        .iter()
-        .map(|w| format!("{} ({})", w.id, w.name))
-        .collect();
-    format!("Your workspaces: {}.", list.join(", "))
 }
 
 /// epics.allium: GetEpicViaMcp, the `epic_id` form of epic_search.
@@ -241,10 +158,6 @@ async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonR
     text.push_str(&format!(
         "\nUpdated: {}",
         epic.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
-    ));
-    text.push_str(&format!(
-        "\nWorkspace: {}\nVisibility: {}",
-        epic.workspace_id, epic.visibility
     ));
     text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
@@ -424,13 +337,11 @@ fn format_epic_list_line(
         None => String::new(),
     };
     format!(
-        "- [{}] {} ({}/{} done) [workspace {}, {}]{}{}{} | Updated: {} | Completed: {}: {}",
+        "- [{}] {} ({}/{} done){}{}{} | Updated: {} | Completed: {}: {}",
         e.id,
         e.title,
         done,
         total,
-        e.workspace_id,
-        e.visibility,
         plan_indicator,
         status_indicator,
         parent_indicator,
@@ -469,8 +380,6 @@ pub(super) async fn handle_epic_update(
         group_by_repo: parsed.group_by_repo,
         feed_append_only: parsed.feed_append_only,
         parent_epic_id: parsed.parent_epic_id,
-        visibility: parsed.visibility,
-        workspace_id: parsed.workspace_id,
     };
     let field_names: Vec<String> = params
         .updated_field_names()

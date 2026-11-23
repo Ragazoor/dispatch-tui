@@ -30,27 +30,16 @@ impl TuiRuntime {
                     .await
                     .map(|_| ()),
             ),
-            WorkPackageCommand::Create {
-                title,
-                item,
-                workspace_id,
-                visibility,
-            } => (
+            WorkPackageCommand::Create { title, item } => (
                 "creating work package",
-                match self.workspace_for_new_item(workspace_id, false).await {
-                    Ok(workspace_id) => self
-                        .work_package_svc
-                        .create_work_package(CreateWorkPackageParams {
-                            title,
-                            description: String::new(),
-                            link: vec![item],
-                            workspace_id,
-                            visibility,
-                        })
-                        .await
-                        .map(|_| ()),
-                    Err(message) => Err(crate::service::ServiceError::Validation(message)),
-                },
+                self.work_package_svc
+                    .create_work_package(CreateWorkPackageParams {
+                        title,
+                        description: String::new(),
+                        link: vec![item],
+                    })
+                    .await
+                    .map(|_| ()),
             ),
             WorkPackageCommand::Rename { id, title } => (
                 "renaming work package",
@@ -67,16 +56,6 @@ impl TuiRuntime {
                 self.work_package_svc
                     .update_work_package(UpdateWorkPackageParams {
                         sort_order: Some(sort_order),
-                        ..UpdateWorkPackageParams::for_package(id)
-                    })
-                    .await
-                    .map(|_| ()),
-            ),
-            WorkPackageCommand::SetVisibility { id, visibility } => (
-                "setting work package visibility",
-                self.work_package_svc
-                    .update_work_package(UpdateWorkPackageParams {
-                        visibility: Some(visibility),
                         ..UpdateWorkPackageParams::for_package(id)
                     })
                     .await

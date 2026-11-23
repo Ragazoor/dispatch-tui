@@ -7,9 +7,13 @@
 //! function over its own rows (`src/sync/memory_caller/views.rs`), so the
 //! module and its double cannot disagree about who sees what.
 //!
-//! Every read is a point read on a btree index: a view handle has no `.iter()`,
-//! and a range read counts as a full scan, so it would re-run the view on every
-//! write to that table (`docs/plans/2026-10-28-per-caller-views-spike.md`).
+//! The views narrow by follows and ownership only (`sync.allium`): that is
+//! delivery, what a board receives, not access. One person uses the store.
+//!
+//! Every read is a point read on a btree index, but for `visible_learnings`: a
+//! view handle has no `.iter()`, and a range read counts as a full scan, so it
+//! re-runs the view on every write to that table
+//! (`docs/plans/2026-10-28-per-caller-views-spike.md`).
 //!
 //! The operator (the publisher identity) is not served by views: it reads the
 //! tables directly.
@@ -24,25 +28,18 @@ pub trait StoreReads {
     fn epic(&self, id: i64) -> Option<Epic>;
     fn task(&self, id: i64) -> Option<Task>;
     fn package(&self, id: i64) -> Option<WorkPackage>;
-    fn workspace(&self, id: i64) -> Option<Workspace>;
-    fn listed_workspaces(&self) -> Vec<Workspace>;
-    fn profile(&self, who: &str) -> Option<UserProfile>;
-    fn members_of(&self, workspace_id: i64) -> Vec<Membership>;
-    fn memberships_of(&self, user: &str) -> Vec<Membership>;
     fn subscriptions_of(&self, subscriber: &str) -> Vec<Subscription>;
     fn epics_under(&self, parent: i64) -> Vec<Epic>;
-    fn epics_in_workspace(&self, workspace_id: i64) -> Vec<Epic>;
     fn epics_created_by(&self, who: &str) -> Vec<Epic>;
     fn tasks_in_epic(&self, epic_id: i64) -> Vec<Task>;
     fn tasks_owned_by(&self, who: &str) -> Vec<Task>;
     fn tasks_created_by(&self, who: &str) -> Vec<Task>;
-    fn packages_in_workspace(&self, workspace_id: i64) -> Vec<WorkPackage>;
     fn packages_created_by(&self, who: &str) -> Vec<WorkPackage>;
     fn links_of_package(&self, package_id: i64) -> Vec<WorkPackageLink>;
     fn agents_of(&self, task_id: i64) -> Vec<Agent>;
     fn dispatch_requests_of(&self, task_id: i64) -> Vec<DispatchRequest>;
     fn session_requests_of(&self, task_id: i64) -> Vec<SessionRequest>;
-    /// Rows on one machine, whatever the caller can see of their task.
+    /// Rows on one machine, whatever task they are about.
     fn agents_on_host(&self, host: &str) -> Vec<Agent>;
     fn dispatch_requests_on_host(&self, host: &str) -> Vec<DispatchRequest>;
     fn session_requests_on_host(&self, host: &str) -> Vec<SessionRequest>;
@@ -55,15 +52,13 @@ pub trait StoreReads {
     fn retrievals_of(&self, task_id: i64) -> Vec<LearningRetrieval>;
     fn verdicts_of(&self, task_id: i64) -> Vec<LearningVerdict>;
     fn poll_owners_of(&self, scope_id: i64) -> Vec<PollOwner>;
-    fn learnings_in_workspace(&self, workspace_id: i64) -> Vec<Learning>;
-    fn learnings_by_author(&self, author: &str) -> Vec<Learning>;
+    /// Every learning: `visible_learnings` serves them all.
+    fn all_learnings(&self) -> Vec<Learning>;
     fn hosts_owned_by(&self, owner: &str) -> Vec<Host>;
     fn settings_of(&self, host: &str) -> Vec<Setting>;
     fn usage_events_recorded_by(&self, who: &str) -> Vec<UsageEvent>;
     fn archived_task(&self, id: i64) -> Option<ArchivedTask>;
-    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask>;
-    fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask>;
-    /// Every record: the operator's listing reads the whole table.
+    /// Every record: the archive listing reads the whole table.
     fn all_archived_tasks(&self) -> Vec<ArchivedTask>;
 }
 
@@ -81,29 +76,6 @@ macro_rules! impl_store_reads {
             fn package(&self, id: i64) -> Option<WorkPackage> {
                 self.db.work_packages().id().find(id)
             }
-            fn workspace(&self, id: i64) -> Option<Workspace> {
-                self.db.workspaces().id().find(id)
-            }
-            fn listed_workspaces(&self) -> Vec<Workspace> {
-                self.db.workspaces().listed().filter(true).collect()
-            }
-            fn profile(&self, who: &str) -> Option<UserProfile> {
-                self.db.user_profiles().identity().find(&who.to_string())
-            }
-            fn members_of(&self, workspace_id: i64) -> Vec<Membership> {
-                self.db
-                    .memberships()
-                    .workspace_id()
-                    .filter(&workspace_id)
-                    .collect()
-            }
-            fn memberships_of(&self, user: &str) -> Vec<Membership> {
-                self.db
-                    .memberships()
-                    .user()
-                    .filter(&user.to_string())
-                    .collect()
-            }
             fn subscriptions_of(&self, subscriber: &str) -> Vec<Subscription> {
                 self.db
                     .subscriptions()
@@ -113,13 +85,6 @@ macro_rules! impl_store_reads {
             }
             fn epics_under(&self, parent: i64) -> Vec<Epic> {
                 self.db.epics().parent_epic_id().filter(&parent).collect()
-            }
-            fn epics_in_workspace(&self, workspace_id: i64) -> Vec<Epic> {
-                self.db
-                    .epics()
-                    .workspace_id()
-                    .filter(&workspace_id)
-                    .collect()
             }
             fn epics_created_by(&self, who: &str) -> Vec<Epic> {
                 self.db
@@ -139,13 +104,6 @@ macro_rules! impl_store_reads {
                     .tasks()
                     .created_by()
                     .filter(&who.to_string())
-                    .collect()
-            }
-            fn packages_in_workspace(&self, workspace_id: i64) -> Vec<WorkPackage> {
-                self.db
-                    .work_packages()
-                    .workspace_id()
-                    .filter(&workspace_id)
                     .collect()
             }
             fn packages_created_by(&self, who: &str) -> Vec<WorkPackage> {
@@ -257,18 +215,16 @@ macro_rules! impl_store_reads {
             fn poll_owners_of(&self, scope_id: i64) -> Vec<PollOwner> {
                 self.db.poll_owners().scope_id().filter(&scope_id).collect()
             }
-            fn learnings_in_workspace(&self, workspace_id: i64) -> Vec<Learning> {
-                self.db
-                    .learnings()
-                    .workspace_id()
-                    .filter(&workspace_id)
-                    .collect()
-            }
-            fn learnings_by_author(&self, author: &str) -> Vec<Learning> {
+            fn all_learnings(&self) -> Vec<Learning> {
+                // A view handle has no `.iter()`; an unbounded range over a
+                // live index reads every row.
                 self.db
                     .learnings()
                     .author()
-                    .filter(&author.to_string())
+                    .filter((
+                        std::ops::Bound::<&str>::Unbounded,
+                        std::ops::Bound::<&str>::Unbounded,
+                    ))
                     .collect()
             }
             fn hosts_owned_by(&self, owner: &str) -> Vec<Host> {
@@ -291,20 +247,6 @@ macro_rules! impl_store_reads {
             fn archived_task(&self, id: i64) -> Option<ArchivedTask> {
                 self.db.archived_tasks().id().find(id)
             }
-            fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<ArchivedTask> {
-                self.db
-                    .archived_tasks()
-                    .workspace_id()
-                    .filter(&workspace_id)
-                    .collect()
-            }
-            fn archived_tasks_owned_by(&self, who: &str) -> Vec<ArchivedTask> {
-                self.db
-                    .archived_tasks()
-                    .owner()
-                    .filter(&who.to_string())
-                    .collect()
-            }
             fn all_archived_tasks(&self) -> Vec<ArchivedTask> {
                 ($all_archived)(self)
             }
@@ -312,8 +254,8 @@ macro_rules! impl_store_reads {
     };
 }
 
-// A view handle has no `.iter()`, and no view serves the operator (the only
-// caller of `all_archived_tasks`), so the view answers empty.
+// A view handle has no `.iter()`, and no view serves the archive (only the
+// procedures call `all_archived_tasks`), so the view answers empty.
 impl_store_reads!(ReducerContext, |s: &ReducerContext| s
     .db
     .archived_tasks()
@@ -337,62 +279,44 @@ fn dedup_by<T, K: Ord>(rows: impl IntoIterator<Item = T>, key: impl Fn(&T) -> K)
         .collect()
 }
 
-/// `own_epics`: what the caller created, while it is still visible to them.
+/// `own_epics`: what the caller created.
 pub fn own_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
-    dedup_by(
-        r.epics_created_by(who)
-            .into_iter()
-            .filter(|e| epic_visible_to(r, e, who)),
-        |e| e.id,
-    )
+    r.epics_created_by(who)
 }
 
-/// `own_tasks`: what the caller created, and the epic-less tasks they own,
-/// while visible, and the tasks run on their hosts ([`hosted_tasks_of`]).
+/// `own_tasks`: what the caller created, the epic-less tasks they own, and
+/// the tasks run on their hosts ([`hosted_tasks_of`]).
 pub fn own_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     dedup_by(
         r.tasks_created_by(who)
             .into_iter()
             .chain(r.tasks_owned_by(who))
-            .filter(|t| task_visible_to(r, t, who))
             .chain(hosted_tasks_of(r, who)),
         |t| t.id,
     )
 }
 
-/// `own_packages`: what the caller created, while visible.
+/// `own_packages`: what the caller created.
 pub fn own_packages_of(r: &impl StoreReads, who: &str) -> Vec<WorkPackage> {
-    dedup_by(
-        r.packages_created_by(who)
-            .into_iter()
-            .filter(|p| package_visible_to(r, p, who)),
-        |p| p.id,
-    )
+    r.packages_created_by(who)
 }
 
-/// `own_subscriptions`: the caller's own follows, while the followed epic is
-/// still visible to them. Never another person's follow, so a private epic's id
-/// and its followers reach nobody who cannot see it.
+/// `own_subscriptions`: the caller's own follows of epics that still exist.
 pub fn own_subscriptions_of(r: &impl StoreReads, who: &str) -> Vec<Subscription> {
     r.subscriptions_of(who)
         .into_iter()
-        .filter(|s| {
-            r.epic(s.epic_id)
-                .is_some_and(|e| epic_visible_to(r, &e, who))
-        })
+        .filter(|s| r.epic(s.epic_id).is_some())
         .collect()
 }
 
 /// `covered_epics`: the epics the caller follows and every descendant, at any
-/// depth. The walk stops at an epic the caller cannot see: a private epic hides
-/// its whole subtree, so nothing below it is theirs either.
+/// depth.
 pub fn covered_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
     let mut covered: BTreeMap<i64, Epic> = BTreeMap::new();
     let mut pending: Vec<Epic> = r
         .subscriptions_of(who)
         .iter()
         .filter_map(|s| r.epic(s.epic_id))
-        .filter(|e| epic_visible_to(r, e, who))
         .collect();
     while let Some(epic) = pending.pop() {
         let id = epic.id;
@@ -402,14 +326,13 @@ pub fn covered_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
         pending.extend(
             r.epics_under(id)
                 .into_iter()
-                .filter(|child| !covered.contains_key(&child.id) && epic_visible_to(r, child, who)),
+                .filter(|child| !covered.contains_key(&child.id)),
         );
     }
     covered.into_values().collect()
 }
 
-/// `covered_tasks`: the tasks of the covered epics. A task in a visible epic is
-/// visible, so no per-task check is made.
+/// `covered_tasks`: the tasks of the covered epics.
 pub fn covered_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     dedup_by(
         covered_epics_of(r, who)
@@ -419,47 +342,14 @@ pub fn covered_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     )
 }
 
-/// The workspaces `who` belongs to.
-fn workspaces_of(r: &impl StoreReads, who: &str) -> Vec<i64> {
-    let mut ids: Vec<i64> = r
-        .memberships_of(who)
-        .iter()
-        .map(|m| m.workspace_id)
-        .collect();
-    ids.sort_unstable();
-    ids.dedup();
-    ids
-}
-
-/// `visible_epics`: every epic the caller sees in a workspace they belong to.
-pub fn visible_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
+/// The epics the board holds: the caller's own and the covered ones. One
+/// person uses the store, so this narrows by delivery, not by access.
+pub fn held_epics_of(r: &impl StoreReads, who: &str) -> Vec<Epic> {
     dedup_by(
-        workspaces_of(r, who)
+        own_epics_of(r, who)
             .into_iter()
-            .flat_map(|ws| r.epics_in_workspace(ws))
-            .filter(|e| epic_visible_to(r, e, who)),
+            .chain(covered_epics_of(r, who)),
         |e| e.id,
-    )
-}
-
-/// `visible_tasks`: the tasks of the visible epics.
-pub fn visible_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
-    dedup_by(
-        visible_epics_of(r, who)
-            .iter()
-            .flat_map(|e| r.tasks_in_epic(e.id)),
-        |t| t.id,
-    )
-}
-
-/// `visible_packages`: every package the caller sees in their workspaces.
-pub fn visible_packages_of(r: &impl StoreReads, who: &str) -> Vec<WorkPackage> {
-    dedup_by(
-        workspaces_of(r, who)
-            .into_iter()
-            .flat_map(|ws| r.packages_in_workspace(ws))
-            .filter(|p| package_visible_to(r, p, who)),
-        |p| p.id,
     )
 }
 
@@ -476,14 +366,13 @@ pub fn held_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
 }
 
 /// The tasks with a current agent, or an open dispatch or session request, on
-/// a host `who` owns, while `who` still sees them.
+/// a host `who` owns.
 ///
 /// A host's reactor serves the requests and agents of its machine, and acts on
 /// the task they name. A caller who dispatched a teammate's task from an epic
 /// and then unfollowed it holds no follow over the task, so without this arm
 /// `get_task` answers None while the agent runs: the wrap-up's rebase fails as
-/// "task deleted" and the agent's subagent rows leave the tree. Sight still
-/// bounds it: a task the caller can no longer see is not carried to them.
+/// "task deleted" and the agent's subagent rows leave the tree.
 pub fn hosted_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
     let task_ids: Vec<i64> = rows_on_owned_hosts(r, who, |h| r.agents_on_host(h))
         .into_iter()
@@ -502,13 +391,7 @@ pub fn hosted_tasks_of(r: &impl StoreReads, who: &str) -> Vec<Task> {
                 .map(|s| s.task_id),
         )
         .collect();
-    dedup_by(
-        task_ids
-            .into_iter()
-            .filter_map(|id| r.task(id))
-            .filter(|t| task_visible_to(r, t, who)),
-        |t| t.id,
-    )
+    dedup_by(task_ids.into_iter().filter_map(|id| r.task(id)), |t| t.id)
 }
 
 /// Rows about a task, one read per held task, ordered by `key`.
@@ -524,10 +407,10 @@ fn rows_about_held_tasks<T, K: Ord>(
     )
 }
 
-/// Rows on the machines `who` owns, whatever `who` can see of their task.
+/// Rows on the machines `who` owns, whatever task they are about.
 ///
 /// A request, and the agent it starts, belongs to the machine that serves it.
-/// Serving it by sight of the task alone loses it the moment the caller stops
+/// Serving it by the held task alone loses it the moment the caller stops
 /// holding the task (an unfollowed epic): the reactor never sees a wrap-up it
 /// must act on, and the requester's read-back never finds its own row.
 fn rows_on_owned_hosts<T>(
@@ -603,33 +486,31 @@ pub fn verdicts_of_held(r: &impl StoreReads, who: &str) -> Vec<LearningVerdict> 
     rows_about_held_tasks(r, who, |t| r.verdicts_of(t), |l| l.id)
 }
 
-/// `own_bookmarks`: the caller's own bookmarks, on tasks they can still see
+/// `own_bookmarks`: the caller's own bookmarks, on tasks that still exist
 /// (`core.allium: Bookmark`).
 pub fn own_bookmarks_of(r: &impl StoreReads, who: &str) -> Vec<Bookmark> {
     dedup_by(
-        r.bookmarks_of(who).into_iter().filter(|b| {
-            r.task(b.task_id)
-                .is_some_and(|t| task_visible_to(r, &t, who))
-        }),
+        r.bookmarks_of(who)
+            .into_iter()
+            .filter(|b| r.task(b.task_id).is_some()),
         |b| b.id.clone(),
     )
 }
 
-/// `own_unseen_tasks`: the caller's own marks, on tasks they can still see.
+/// `own_unseen_tasks`: the caller's own marks, on tasks that still exist.
 pub fn own_unseen_of(r: &impl StoreReads, who: &str) -> Vec<UnseenTask> {
     dedup_by(
-        r.unseen_of(who).into_iter().filter(|u| {
-            r.task(u.task_id)
-                .is_some_and(|t| task_visible_to(r, &t, who))
-        }),
+        r.unseen_of(who)
+            .into_iter()
+            .filter(|u| r.task(u.task_id).is_some()),
         |u| u.id.clone(),
     )
 }
 
 /// `visible_poll_owners`: a claim follows its scope. An epic-scoped row is
-/// served while the epic is visible, a task-scoped one while the task is held.
+/// served while the caller holds the epic, a task-scoped one the task.
 pub fn poll_owners_visible_to(r: &impl StoreReads, who: &str) -> Vec<PollOwner> {
-    let epic_rows = visible_epics_of(r, who)
+    let epic_rows = held_epics_of(r, who)
         .into_iter()
         .flat_map(|e| r.poll_owners_of(e.id))
         .filter(|p| p.scope == POLL_SCOPE_EPIC);
@@ -640,38 +521,21 @@ pub fn poll_owners_visible_to(r: &impl StoreReads, who: &str) -> Vec<PollOwner> 
     dedup_by(epic_rows.chain(task_rows), |p| p.id)
 }
 
-/// `visible_work_package_links`: a link is served when the caller sees both the
-/// package and the item it names.
+/// `visible_work_package_links`: the links of the packages the caller holds,
+/// which are the ones they created.
 pub fn links_visible_to(r: &impl StoreReads, who: &str) -> Vec<WorkPackageLink> {
     dedup_by(
-        visible_packages_of(r, who)
+        own_packages_of(r, who)
             .iter()
-            .flat_map(|p| r.links_of_package(p.id))
-            .filter(|l| match l.kind.as_str() {
-                WORK_PACKAGE_ITEM_TASK => r
-                    .task(l.item_id)
-                    .is_some_and(|t| task_visible_to(r, &t, who)),
-                WORK_PACKAGE_ITEM_EPIC => r
-                    .epic(l.item_id)
-                    .is_some_and(|e| epic_visible_to(r, &e, who)),
-                _ => false,
-            }),
+            .flat_map(|p| r.links_of_package(p.id)),
         |l| l.id.clone(),
     )
 }
 
-/// `visible_learnings`: the learnings `LearningVisibility` lets the caller see.
-pub fn learnings_visible_to(r: &impl StoreReads, who: &str) -> Vec<Learning> {
-    dedup_by(
-        workspaces_of(r, who)
-            .into_iter()
-            .flat_map(|ws| r.learnings_in_workspace(ws))
-            .chain(r.learnings_by_author(who))
-            // A learning that predates workspaces has no author.
-            .chain(r.learnings_by_author(""))
-            .filter(|l| learning_seen_by(r, l, who)),
-        |l| l.id,
-    )
+/// `visible_learnings`: every learning. One person uses the store, so none is
+/// withheld; a full read is the accepted cost.
+pub fn learnings_visible_to(r: &impl StoreReads) -> Vec<Learning> {
+    r.all_learnings()
 }
 
 /// `own_settings`: the settings of the hosts the caller owns (D9).
@@ -782,27 +646,18 @@ pub struct DeleteCheck {
     /// lowest id first; for each requested task, the task itself when it is
     /// not done.
     pub blockers: Vec<DeleteBlocker>,
-    /// A refusal that names no task: a subtree this caller cannot fully see,
-    /// or one nested too deep to delete.
+    /// A refusal that names no task: a subtree nested too deep to delete.
     pub refusal: Option<String>,
 }
 
 /// `delete_task`, `delete_epic` and `batch_delete`'s validation pass, read-only
 /// and over one snapshot: the rules those reducers apply before they delete
-/// anything. A row the caller cannot see, or that is gone, is skipped, as in
-/// the reducers (the delete is then a no-op). Mirrored by
+/// anything. A row that is gone is skipped, as in the reducers (the delete is then a no-op). Mirrored by
 /// `MemoryReducerCaller::apply_check_deletable`.
-pub fn delete_check_for(
-    r: &impl StoreReads,
-    operator: bool,
-    who: &str,
-    task_ids: &[i64],
-    epic_ids: &[i64],
-) -> DeleteCheck {
+pub fn delete_check_for(r: &impl StoreReads, task_ids: &[i64], epic_ids: &[i64]) -> DeleteCheck {
     let mut check = DeleteCheck::default();
     for &id in epic_ids {
-        let Some(epic) = r.epic(id) else { continue };
-        if !operator && !epic_visible_to(r, &epic, who) {
+        if r.epic(id).is_none() {
             continue;
         }
         let mut doomed = std::collections::HashSet::new();
@@ -811,16 +666,6 @@ pub fn delete_check_for(
             if doomed.insert(next) {
                 stack.extend(r.epics_under(next).into_iter().map(|e| e.id));
             }
-        }
-        if !operator
-            && !doomed
-                .iter()
-                .all(|e| r.epic(*e).is_none_or(|e| epic_visible_to(r, &e, who)))
-        {
-            // The reducer's own wording: it must not reveal that an epic the
-            // caller cannot see exists (`workspaces.allium: UnseenIsAsMissing`).
-            check.refusal = Some(format!("epic {id}: cannot delete right now"));
-            return check;
         }
         if crate::rules::subtree_exceeds_depth(
             id,
@@ -853,9 +698,6 @@ pub fn delete_check_for(
     }
     for &id in task_ids {
         let Some(task) = r.task(id) else { continue };
-        if !operator && !task_visible_to(r, &task, who) {
-            continue;
-        }
         if task.status != DONE {
             check.blockers.push(DeleteBlocker {
                 epic_id: 0,
@@ -866,30 +708,6 @@ pub fn delete_check_for(
         }
     }
     check
-}
-
-/// `visible_workspaces`: the workspaces the caller belongs to, or every one
-/// for a super-admin (read through the always-true `listed` index).
-pub fn workspaces_visible_to(r: &impl StoreReads, who: &str) -> Vec<Workspace> {
-    if r.profile(who).is_some_and(|p| p.is_super_admin) {
-        return r.listed_workspaces();
-    }
-    dedup_by(
-        workspaces_of(r, who)
-            .into_iter()
-            .filter_map(|id| r.workspace(id)),
-        |w| w.id,
-    )
-}
-
-/// `visible_memberships`: the membership rows of the visible workspaces.
-pub fn memberships_visible_to(r: &impl StoreReads, who: &str) -> Vec<Membership> {
-    dedup_by(
-        workspaces_visible_to(r, who)
-            .iter()
-            .flat_map(|w| r.members_of(w.id)),
-        |m| m.id,
-    )
 }
 
 // -- The views ----------------------------------------------------------------
@@ -921,21 +739,6 @@ fn covered_epics(ctx: &ViewContext) -> Vec<Epic> {
 #[spacetimedb::view(accessor = covered_tasks, public)]
 fn covered_tasks(ctx: &ViewContext) -> Vec<Task> {
     covered_tasks_of(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = visible_epics, public)]
-fn visible_epics(ctx: &ViewContext) -> Vec<Epic> {
-    visible_epics_of(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = visible_tasks, public)]
-fn visible_tasks(ctx: &ViewContext) -> Vec<Task> {
-    visible_tasks_of(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = visible_packages, public)]
-fn visible_packages(ctx: &ViewContext) -> Vec<WorkPackage> {
-    visible_packages_of(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_agents, public)]
@@ -1005,20 +808,10 @@ fn visible_work_package_links(ctx: &ViewContext) -> Vec<WorkPackageLink> {
 
 #[spacetimedb::view(accessor = visible_learnings, public)]
 fn visible_learnings(ctx: &ViewContext) -> Vec<Learning> {
-    learnings_visible_to(ctx, &sender(ctx))
+    learnings_visible_to(ctx)
 }
 
 #[spacetimedb::view(accessor = own_settings, public)]
 fn own_settings(ctx: &ViewContext) -> Vec<Setting> {
     settings_visible_to(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = visible_workspaces, public)]
-fn visible_workspaces(ctx: &ViewContext) -> Vec<Workspace> {
-    workspaces_visible_to(ctx, &sender(ctx))
-}
-
-#[spacetimedb::view(accessor = visible_memberships, public)]
-fn visible_memberships(ctx: &ViewContext) -> Vec<Membership> {
-    memberships_visible_to(ctx, &sender(ctx))
 }

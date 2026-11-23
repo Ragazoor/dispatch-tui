@@ -52,8 +52,8 @@ enum Sent {
     MarkTaskSeen(String, TaskId),
     SetBookmark(String, TaskId, bool),
     SetDisplayName(String),
-    /// Any of the workspace and super-admin reducers, by name.
-    Workspace(&'static str),
+    /// A call recorded by name only.
+    Named(&'static str),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     UpdateTask(
         TaskId,
@@ -67,7 +67,7 @@ enum Sent {
     SetTaskEpic(TaskId, i64, String),
     CreateEpic(Box<bindings::Epic>),
     PatchEpic(i64),
-    UpdateEpic(i64, Option<i64>, Option<String>),
+    UpdateEpic(i64),
     DeleteEpic(i64),
     BatchDelete(Vec<i64>, Vec<i64>),
     Regroup(i64),
@@ -132,7 +132,6 @@ enum Sent {
     UpdateWorkPackageWithLinks {
         id: i64,
         patch: Box<bindings::WorkPackagePatch>,
-        visibility: Option<String>,
         unlink: Vec<(String, i64)>,
         link: Vec<(String, i64)>,
     },
@@ -296,79 +295,6 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::SetDisplayName(name))
     }
 
-    async fn claim_super_admin(&self) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("claim_super_admin"))
-    }
-
-    async fn grant_super_admin(&self, _user: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("grant_super_admin"))
-    }
-
-    async fn revoke_super_admin(&self, _user: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("revoke_super_admin"))
-    }
-
-    async fn set_epic_visibility(
-        &self,
-        _id: crate::models::EpicId,
-        _visibility: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("set_epic_visibility"))
-    }
-
-    async fn move_epic_to_workspace(
-        &self,
-        _id: crate::models::EpicId,
-        _workspace_id: i64,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("move_epic_to_workspace"))
-    }
-
-    async fn set_work_package_visibility(
-        &self,
-        _id: crate::models::WorkPackageId,
-        _visibility: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("set_work_package_visibility"))
-    }
-
-    async fn super_admin_delete_unseen_item(
-        &self,
-        _kind: String,
-        _item_id: i64,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("super_admin_delete_unseen_item"))
-    }
-
-    async fn create_workspace(&self, _name: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("create_workspace"))
-    }
-
-    async fn rename_workspace(&self, _id: i64, _name: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("rename_workspace"))
-    }
-
-    async fn delete_workspace(&self, _id: i64) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("delete_workspace"))
-    }
-
-    async fn add_member(
-        &self,
-        _id: i64,
-        _user: String,
-        _role: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("add_member"))
-    }
-
-    async fn set_member_role(&self, _id: i64, _role: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("set_member_role"))
-    }
-
-    async fn remove_member(&self, _id: i64) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::Workspace("remove_member"))
-    }
-
     async fn mark_task_seen(
         &self,
         subscriber: String,
@@ -447,10 +373,8 @@ impl ReducerCaller for RecordingCaller {
         &self,
         id: EpicId,
         _patch: bindings::EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
     ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::UpdateEpic(id.0, workspace_id, visibility))
+        self.answer(Sent::UpdateEpic(id.0))
     }
 
     async fn delete_epic(&self, id: EpicId) -> anyhow::Result<ReducerOutcome> {
@@ -650,7 +574,7 @@ impl ReducerCaller for RecordingCaller {
         _task_ids: Vec<TaskId>,
         _epic_ids: Vec<crate::models::EpicId>,
     ) -> anyhow::Result<bindings::DeleteCheck> {
-        self.record(Sent::Workspace("check_deletable"))?;
+        self.record(Sent::Named("check_deletable"))?;
         Ok(bindings::DeleteCheck {
             blockers: vec![],
             refusal: None,
@@ -661,7 +585,7 @@ impl ReducerCaller for RecordingCaller {
         &self,
         _id: TaskId,
     ) -> anyhow::Result<Option<bindings::ArchivedTask>> {
-        self.record(Sent::Workspace("read_archived_task"))?;
+        self.record(Sent::Named("read_archived_task"))?;
         Ok(None)
     }
 
@@ -670,7 +594,7 @@ impl ReducerCaller for RecordingCaller {
         _epic_id: Option<crate::models::EpicId>,
         _repo_paths: Vec<String>,
     ) -> anyhow::Result<Vec<bindings::ArchivedTask>> {
-        self.record(Sent::Workspace("list_archived_tasks"))?;
+        self.record(Sent::Named("list_archived_tasks"))?;
         Ok(vec![])
     }
 
@@ -895,14 +819,12 @@ impl ReducerCaller for RecordingCaller {
         &self,
         id: WorkPackageId,
         patch: bindings::WorkPackagePatch,
-        visibility: Option<String>,
         unlink: Vec<WorkPackageItem>,
         link: Vec<WorkPackageItem>,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::UpdateWorkPackageWithLinks {
             id: id.0,
             patch: Box::new(patch),
-            visibility,
             unlink: kind_ids(&unlink),
             link: kind_ids(&link),
         })

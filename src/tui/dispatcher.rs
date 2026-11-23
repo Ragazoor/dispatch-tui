@@ -58,8 +58,5 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
 
         // ── Work packages ──
         Message::WorkPackage(wm) => wm.route(app),
-
-        // ── Admin screen ──
-        Message::Admin(am) => am.route(app),
     }
 }

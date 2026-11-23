@@ -134,7 +134,11 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
                 "Board filter: [{}] next tab  [{}] toggle  [{}] close",
                 key(N::BoardFilter, "filter_next_tab", "Tab"),
                 key(N::BoardFilter, "filter_toggle_row", "Space"),
-                hint_keys(t, N::BoardFilter, &[("filter_close", "q"), ("filter_back", "Esc")]),
+                hint_keys(
+                    t,
+                    N::BoardFilter,
+                    &[("filter_close", "q"), ("filter_back", "Esc")]
+                ),
             ),
             CYAN,
         ),
@@ -150,7 +154,11 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::ConfirmDeleteRepoPath => hint(
             format!(
                 "Delete repo path? {} to confirm, any key to cancel",
-                key(N::BoardConfirmDeleteRepoPath, "confirm_delete_repo_path_yes", "y")
+                key(
+                    N::BoardConfirmDeleteRepoPath,
+                    "confirm_delete_repo_path_yes",
+                    "y"
+                )
             ),
             YELLOW,
         ),
@@ -172,29 +180,7 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             YELLOW,
         ),
         InputMode::InputBaseBranch => hint_text(app, "Base branch: ", YELLOW),
-        InputMode::InputWrapUpMode => {
-            hint_text(app, &crate::tui::ui::wrap_up_prompt(t), YELLOW)
-        }
-        InputMode::InputPlacement => {
-            let ns = N::BoardPickerPlacement;
-            hint(
-                format!(
-                    "[{}] public/private  [{}] workspace  [{}] create  [{}] cancel",
-                    key(ns, "placement_picker_visibility", "Tab"),
-                    hint_keys(
-                        t,
-                        ns,
-                        &[
-                            ("placement_picker_workspace_down", "j"),
-                            ("placement_picker_workspace_up", "k")
-                        ]
-                    ),
-                    hint_row_keys(t, ns, "placement_picker_create", &["Space", "Enter"]),
-                    key(ns, "placement_picker_cancel", "Esc"),
-                ),
-                YELLOW,
-            )
-        }
+        InputMode::InputWrapUpMode => hint_text(app, &crate::tui::ui::wrap_up_prompt(t), YELLOW),
         InputMode::InputModel => {
             let seeded = app.input.task_draft.as_ref().and_then(|d| d.model);
             hint_text(app, &crate::tui::ui::model_prompt(t, seeded), YELLOW)
@@ -202,7 +188,11 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::ReparentEpic(_) => hint(
             format!(
                 "Select new parent: navigate tree above, {} to select",
-                key(N::BoardPickerReparentEpic, "reparent_picker_confirm", "Enter")
+                key(
+                    N::BoardPickerReparentEpic,
+                    "reparent_picker_confirm",
+                    "Enter"
+                )
             ),
             PURPLE,
         ),
@@ -214,7 +204,11 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::MoveTaskToEpic(_) => hint(
             format!(
                 "Select target epic: navigate tree above, {} to select",
-                key(N::BoardPickerMoveToEpic, "move_to_epic_picker_confirm", "Enter")
+                key(
+                    N::BoardPickerMoveToEpic,
+                    "move_to_epic_picker_confirm",
+                    "Enter"
+                )
             ),
             PURPLE,
         ),
@@ -261,40 +255,23 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             ),
             CYAN,
         ),
-        InputMode::Admin => hint(
-            format!(
-                "Admin: [{}] pane  [{}] move  [{}] close  (keys for the pane are shown on the screen)",
-                key(N::BoardAdmin, "admin_next_pane", "Tab"),
-                hint_keys(
-                    t,
-                    N::BoardAdmin,
-                    &[("admin_navigate_down", "j"), ("admin_navigate_up", "k")]
-                ),
-                key(N::BoardAdmin, "admin_close", "Esc"),
-            ),
-            CYAN,
-        ),
-        InputMode::InputAdminText => hint(format!("Admin: type a name  {}", text_keys("send")), CYAN),
-        InputMode::ConfirmAdmin => hint(
-            format!(
-                "Admin: confirm with [{}], any other key cancels",
-                key(N::BoardConfirmAdmin, "confirm_admin_yes", "y")
-            ),
-            YELLOW,
-        ),
         InputMode::InputDisplayName => hint(
             format!("Display name: type a name  {}", text_keys("save")),
             CYAN,
         ),
-        InputMode::RenameWorkPackage(_) => hint(
-            format!("Rename work package: {}", text_keys("save")),
-            CYAN,
-        ),
+        InputMode::RenameWorkPackage(_) => {
+            hint(format!("Rename work package: {}", text_keys("save")), CYAN)
+        }
         InputMode::ConfirmDeleteWorkPackage(id) => {
             // The status message auto-clears after STATUS_MESSAGE_TTL while
             // the mode lives on, so rebuild the titled prompt.
             let fallback = app.board.find_work_package(*id).map_or_else(
-                || format!("Delete work package? Its tasks and epics are kept {}", yes_no(N::BoardConfirmDeleteWorkPackage)),
+                || {
+                    format!(
+                        "Delete work package? Its tasks and epics are kept {}",
+                        yes_no(N::BoardConfirmDeleteWorkPackage)
+                    )
+                },
                 |package| crate::tui::update::delete_work_package_prompt(t, package),
             );
             hint_text(app, &fallback, RED)

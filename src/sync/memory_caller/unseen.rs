@@ -15,11 +15,11 @@ impl MemoryReducerCaller {
         let id = self.apply_create_task(row)?;
         let mut tables = self.lock();
         let epic_id = tables.tasks.get(&id.0).map_or(0, |t| t.epic_id);
-        self.mark_task_unseen_for_viewers(&mut tables, id.0, epic_id);
+        self.mark_task_unseen_for_everyone(&mut tables, id.0, epic_id);
         Ok(id)
     }
 
-    pub(super) fn mark_task_unseen_for_viewers(
+    pub(super) fn mark_task_unseen_for_everyone(
         &self,
         tables: &mut Tables,
         task_id: i64,
@@ -28,7 +28,7 @@ impl MemoryReducerCaller {
         if epic_id == 0 {
             return;
         }
-        let viewers = tables.epic_viewers(&self.scope(), epic_id);
+        let viewers = tables.known_people(&self.scope());
         for subscriber in viewers {
             let id = module::unseen_id(&subscriber, task_id);
             if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -76,7 +76,7 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         let mut tables = self.lock();
-        if tables.visible_task(&scope, task_id.0).is_none() {
+        if !tables.tasks.contains_key(&task_id.0) {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         let id = module::unseen_id(&subscriber, task_id.0);

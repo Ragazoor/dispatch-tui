@@ -64,10 +64,6 @@ impl App {
                 Message::KeepAwake(crate::tui::messages::KeepAwakeMessage::Toggle),
             ),
             "set_display_name" => keyed(self, Message::Input(InputMessage::StartSetDisplayName)),
-            "open_admin_screen" => keyed(
-                self,
-                Message::Admin(crate::tui::messages::AdminMessage::Open),
-            ),
             "open_board_filter" => keyed(self, Message::BoardFilter(BoardFilterMessage::Start)),
             "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());
@@ -149,15 +145,6 @@ impl App {
                 Some(id) => keyed(
                     self,
                     Message::WorkPackage(crate::tui::messages::WorkPackageMessage::Enter(id)),
-                ),
-                None => vec![],
-            },
-            "toggle_work_package_visibility" => match self.selected_work_package_id() {
-                Some(id) => keyed(
-                    self,
-                    Message::WorkPackage(
-                        crate::tui::messages::WorkPackageMessage::ToggleVisibility(id),
-                    ),
                 ),
                 None => vec![],
             },

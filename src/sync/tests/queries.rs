@@ -22,8 +22,10 @@ fn queries() -> Vec<String> {
 }
 
 /// The private tables a per-caller view serves. A board that asked for one
-/// directly would be refused by the store.
-const PRIVATE_TABLES: [&str; 22] = [
+/// directly would be refused by the store. They are private as schema left
+/// from the multi-user store: one person uses it now, but the board still
+/// reads them through the views.
+const PRIVATE_TABLES: [&str; 20] = [
     "tasks",
     "epics",
     "work_packages",
@@ -37,8 +39,6 @@ const PRIVATE_TABLES: [&str; 22] = [
     "learning_retrievals",
     "learning_verdicts",
     "settings",
-    "workspaces",
-    "memberships",
     "usage_events",
     "task_subagents",
     "task_watchers",
@@ -90,9 +90,6 @@ fn every_source_the_board_reads_is_asked_for() {
         "own_packages",
         "visible_work_package_links",
         "visible_poll_owners",
-        "visible_workspaces",
-        "visible_memberships",
-        "unseen_items",
         "own_unseen_tasks",
         "own_bookmarks",
         "own_subscriptions",

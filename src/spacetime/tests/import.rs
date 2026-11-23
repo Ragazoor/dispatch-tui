@@ -450,3 +450,31 @@ async fn the_source_snapshot_is_unchanged_by_an_import() {
 
     assert_eq!(source.canonical_rows(), before);
 }
+
+/// `spacetime-seed.allium: SharedTable`, `RestoreSnapshot`, `ImportOldStore`:
+/// the dead `workspaces` and `memberships` tables are ignored. A snapshot
+/// carrying their rows restores and imports, and neither writes one of them.
+#[tokio::test]
+async fn a_restore_and_an_import_write_no_row_of_a_dead_table() {
+    let mut snapshot = snapshot_of_a_populated_board().await;
+    for extract in snapshot.extracts_mut() {
+        if extract.table.restore_ignores() {
+            extract.rows = vec![super::module_row(extract.table, &[("id", Value::from(1))])];
+        }
+    }
+
+    let restored = store_for(&snapshot);
+    restore(&restored, &snapshot).await.unwrap();
+    let imported = store_for(&snapshot);
+    let report = import_old_store(&imported, &snapshot, OPERATOR)
+        .await
+        .unwrap();
+
+    for table in [SharedTable::Workspaces, SharedTable::Memberships] {
+        assert!(table.restore_ignores());
+        assert!(rows(&restored, table).await.is_empty(), "{}", table.name());
+        assert!(rows(&imported, table).await.is_empty(), "{}", table.name());
+        assert_eq!(report.imported(table), 0, "{}", table.name());
+    }
+    assert!(!rows(&restored, SharedTable::Tasks).await.is_empty());
+}

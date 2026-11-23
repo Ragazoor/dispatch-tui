@@ -59,7 +59,6 @@ fn plain_epic_with(store: &Store, title: &str, parent: i64, feed_command: &str) 
         title: title.into(),
         parent_epic_id: parent,
         feed_command: feed_command.into(),
-        workspace_id: TEST_WORKSPACE,
         ..blank_epic()
     };
     store

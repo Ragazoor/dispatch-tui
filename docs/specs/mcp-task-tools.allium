@@ -22,6 +22,7 @@ use "./schedules.allium" as schedules
 use "./settings.allium" as settings
 use "./store-split.allium" as split
 use "./tasks.allium" as tasks
+use "./people.allium" as people
 
 ------------------------------------------------------------
 -- Contracts
@@ -84,8 +85,7 @@ rule ToolsAdvertiseAnnotations {
     -- MCP behaviour hints. readOnlyHint is true exactly for a tool that changes
     -- nothing (task_search, epic_search, learning_search,
     -- usage_read, context_read, keybinding_search, work-package_search,
-    -- workspace_search, unseen-item_search, review-command_read,
-    -- feed-config_read). The core/Retrieval rows learning_search records are
+    -- review-command_read, feed-config_read). The core/Retrieval rows learning_search records are
     -- bookkeeping of what the caller was shown, not a change the caller makes,
     -- so they do not count. A tool that reads in one call and writes in
     -- another is split (docs/adr/0002, decision 4): review-command_set,
@@ -95,11 +95,7 @@ rule ToolsAdvertiseAnnotations {
     -- destructiveHint is true only where a call removes or closes something
     -- that cannot be restored by another call (learning_delete, session_exit,
     -- task_update, whose status="done" form tears down the agent's window and
-    -- closes a pr-typed url's PR; work-package_delete; workspace_delete;
-    -- unseen-item_delete).
-    -- workspace-member_set is not on that list although it has a remove form:
-    -- a removed person is added back with a role and their private items are
-    -- seen again, so it is idempotent, not destructive.
+    -- closes a pr-typed url's PR; work-package_delete).
     -- it is false on a read-only tool. idempotentHint is true where repeating
     -- the identical call leaves the same state. openWorldHint is false on every
     -- tool: dispatch reaches no system outside itself through them.
@@ -156,13 +152,7 @@ rule OldToolNameRedirects {
     -- verify-command_set"), set_review_command ("call review-command_read to
     -- read it, review-command_set to set it"), managed_feed_config ("call
     -- feed-config_read to read, feed-config_set to change"), set_display_name
-    -- ("call display-name_set"), list_workspaces ("call workspace_search"),
-    -- create_workspace ("call workspace_create"), update_workspace ("call
-    -- workspace_update to rename; to delete call workspace_delete"),
-    -- set_workspace_member ("call workspace-member_set"), set_super_admin
-    -- ("call super-admin_set"), claim_super_admin ("call super-admin_claim"),
-    -- list_unseen_items ("call unseen-item_search"), delete_unseen_item
-    -- ("call unseen-item_delete"), query_usage ("call usage_read"),
+    -- ("call display-name_set"), query_usage ("call usage_read"),
     -- read_context ("call context_read") and list_keybindings ("call
     -- keybinding_search; with no arguments it returns an index of namespaces,
     -- so pass namespace or query").
@@ -812,38 +802,32 @@ rule CreateTaskViaMcp {
       if schedule != null and schedule != "":
             schedules/ScheduleSet(task: task, cron: schedule)
 
-    -- SignalMarksTheTaskForEveryoneWhoSeesIt. When signal is true and the
-    -- task lands in an epic, one core/UnseenTask row is written for every
-    -- member of that epic's workspace who can see the epic
-    -- (core/Epic.visible_to), in the same store transaction as the task. The
-    -- epic is the one the task LANDS in (route_target's), not the argument.
+    -- SignalMarksTheTaskForEveryone. When signal is true and the task lands
+    -- in an epic, one core/UnseenTask row is written for every known person
+    -- (every people/UserProfile), in the same store transaction as the task.
+    -- The epic is the one the task LANDS in (route_target's), not the
+    -- argument.
       if signal = true and task.epic != null:
-            for m in task.epic.workspace.memberships where task.epic.visible_to(m.user):
-                core/UnseenTask.created(subscriber: m.user, task: task)
+            for p in people/UserProfiles:
+                core/UnseenTask.created(subscriber: p.identity, task: task)
 
     -- signal is optional and defaults to false. Absent or false writes no
     -- row. With no epic there is no epic to light up, so signal is silently
     -- ignored and the task is created normally; the call is not refused.
     @guidance
-        -- SIGHT, NOT FOLLOWING. Everyone the epic is shown to is marked: every
-        -- member of its workspace when it is public all the way up, only the
-        -- private holder when it is private. A core/Subscription plays no
-        -- part: an operator's own epics reach their board without one, and
-        -- whoever can see the epic is who the colour is for.
+        -- EVERY PROFILE, NOT FOLLOWING. A core/Subscription plays no part: an
+        -- operator's own epics reach their board without one. A mark on a
+        -- card the board does not hold draws nothing.
         --
-        -- WHO IS SIGNALLED IS DECIDED AT CREATION. A person who joins the
-        -- workspace, or is shown the epic, afterwards is not marked for a task
-        -- that already exists: the signal says "something new arrived", and
-        -- it arrived before they could see it. Recorded because the
-        -- alternative (derive "unseen" at read time from a join date) was
-        -- considered and rejected as a second clock to keep honest. Leaving
-        -- the workspace ends the marks (workspaces.allium: RemoveMember,
-        -- MoveEpicToWorkspace). An epic turned private keeps other members'
-        -- rows, but they draw nothing: a person is shown a mark only on cards
-        -- they can see.
+        -- WHO IS SIGNALLED IS DECIDED AT CREATION. An identity whose profile
+        -- is registered afterwards is not marked for a task that already
+        -- exists: the signal says "something new arrived", and it arrived
+        -- before that identity connected. Recorded because the alternative
+        -- (derive "unseen" at read time from a registration date) was
+        -- considered and rejected as a second clock to keep honest.
         --
-        -- The caller counts like anyone who sees the epic. An agent that
-        -- wants no mark for its operator omits signal.
+        -- The caller counts like anyone else. An agent that wants no mark for
+        -- its operator omits signal.
         --
         -- Only task_create takes it as an argument. task_update does not.
         -- The one other creation path that turns it on is the reviews feed:
@@ -1054,9 +1038,7 @@ rule GetArchivedTaskViaMcp {
     requires: exists core/ArchivedTask{id: task_id}
 
     -- Read-only, read from the store on demand (the board does not hold
-    -- archived records). Visibility is the record's own, frozen at archive
-    -- time (core/ArchivedTask); a record the caller may not see is answered
-    -- exactly as an id that never existed.
+    -- archived records). Every caller may read every record.
     ensures: ArchivedTaskRetrieved(task_id)
 
     @guidance
@@ -2454,8 +2436,8 @@ surface McpTaskTools {
         --
         -- Every reply in this file that says "task <id>" or "epic <id>" means these forms.
         -- A tool never resolves an epic by title: titles are not unique, so an agent
-        -- that holds only a title asks which epic was meant. The unseen-items tools
-        -- and the `Task <id> not found` errors keep bare ids on purpose.
+        -- that holds only a title asks which epic was meant. The
+        -- `Task <id> not found` errors keep bare ids on purpose.
 
     @guarantee TaskRefAcceptsAgentName
         -- Anywhere an MCP tool takes a task id it also takes the name of one of the

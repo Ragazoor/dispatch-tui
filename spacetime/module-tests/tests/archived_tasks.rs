@@ -29,7 +29,7 @@ fn archived(store: &Store, id: i64) -> Option<ArchivedTask> {
 
 fn read_as(store: &Store, who: &str, id: i64) -> Option<ArchivedTask> {
     store
-        .call(who, |ctx| Ok(archived_task_for(ctx, false, &identity_of(who), id)))
+        .call(who, |ctx| Ok(ctx.archived_task(id)))
         .expect("read")
 }
 
@@ -155,7 +155,6 @@ fn deleting_an_epic_archives_every_task_of_its_subtree_with_the_epic_title() {
                 ctx,
                 Epic {
                     title: "Child".into(),
-                    workspace_id: TEST_WORKSPACE,
                     parent_epic_id: epic,
                     ..blank_epic()
                 },
@@ -174,8 +173,10 @@ fn deleting_an_epic_archives_every_task_of_its_subtree_with_the_epic_title() {
     let rb = archived(&store, b).expect("b archived");
     assert_eq!((ra.epic_id, ra.epic_title.as_str()), (epic, "Parent"));
     assert_eq!((rb.epic_id, rb.epic_title.as_str()), (child, "Child"));
-    assert_eq!(ra.workspace_id, TEST_WORKSPACE);
+    // The dead columns hold their defaults (R8).
+    assert_eq!(ra.workspace_id, 0);
     assert!(!ra.private);
+    assert!(ra.private_holder.is_empty());
 }
 
 #[test]
@@ -193,8 +194,10 @@ fn a_batch_delete_archives_its_plain_tasks_and_epic_subtrees() {
     assert!(archived(&store, inner).is_some());
 }
 
+/// R2: no record is withheld; anyone reads and lists every record, another
+/// person's epic-less one included.
 #[test]
-fn an_epic_less_record_is_read_only_by_its_owner() {
+fn every_record_is_read_and_listed_by_anyone() {
     let store = Store::new();
     let id = done_user_task(&store, "mine", "alice");
     store
@@ -202,64 +205,11 @@ fn an_epic_less_record_is_read_only_by_its_owner() {
         .expect("delete_task");
 
     assert!(read_as(&store, "alice", id).is_some());
-    assert!(read_as(&store, "bob", id).is_none(), "another person sees nothing");
-    let as_operator = store
-        .call("bob", |ctx| Ok(archived_task_for(ctx, true, "anyone", id)))
-        .expect("read");
-    assert!(as_operator.is_some(), "the operator reads every record");
-}
-
-/// K3: the operator's listing holds every record, including another person's
-/// epic-less one that no workspace index reaches.
-#[test]
-fn the_operator_lists_every_record() {
-    let store = Store::new();
-    let id = done_user_task(&store, "mine", "alice");
-    store
-        .call("alice", |ctx| delete_task(ctx, id))
-        .expect("delete_task");
-
+    assert!(read_as(&store, "bob", id).is_some());
     let listed = store
-        .call("bob", |ctx| {
-            Ok(archived_tasks_for(ctx, true, "operator", 0, &[]))
-        })
+        .call("bob", |ctx| Ok(archived_tasks_for(ctx, 0, &[])))
         .expect("list");
     assert_eq!(listed.iter().map(|a| a.id).collect::<Vec<_>>(), vec![id]);
-}
-
-#[test]
-fn a_record_from_a_private_epic_is_read_only_by_its_holder() {
-    let store = Store::new();
-    let epic = store.create_epic("alice", "Secret", false);
-    store
-        .call("alice", |ctx| {
-            set_epic_visibility(ctx, epic, VISIBILITY_PRIVATE.into())
-        })
-        .expect("make private");
-    let id = store.create("alice", epic_task("hidden", epic, "done"));
-    store.enrol("bob");
-    store
-        .call("alice", |ctx| delete_task(ctx, id))
-        .expect("delete_task");
-
-    let record = archived(&store, id).expect("archived");
-    assert!(record.private);
-    assert_eq!(record.private_holder, identity_of("alice"));
-    assert!(read_as(&store, "alice", id).is_some());
-    assert!(read_as(&store, "bob", id).is_none());
-}
-
-#[test]
-fn a_public_epic_record_is_read_by_workspace_members_after_the_epic_is_gone() {
-    let store = Store::new();
-    let epic = store.create_epic("alice", "Shared", false);
-    let id = store.create("alice", epic_task("work", epic, "done"));
-    store
-        .call("alice", |ctx| delete_epic(ctx, epic))
-        .expect("delete_epic");
-    store.enrol("bob");
-
-    assert!(read_as(&store, "bob", id).is_some());
 }
 
 #[test]
@@ -278,9 +228,8 @@ fn the_listing_filters_by_epic_and_repo() {
         .call("alice", |ctx| delete_epic(ctx, epic))
         .expect("delete_epic");
 
-    let who = identity_of("alice");
     let by_epic = store
-        .call("alice", |ctx| Ok(archived_tasks_for(ctx, false, &who, epic, &[])))
+        .call("alice", |ctx| Ok(archived_tasks_for(ctx, epic, &[])))
         .expect("list");
     let mut ids: Vec<i64> = by_epic.iter().map(|r| r.id).collect();
     ids.sort_unstable();
@@ -288,7 +237,7 @@ fn the_listing_filters_by_epic_and_repo() {
 
     let by_repo = store
         .call("alice", |ctx| {
-            Ok(archived_tasks_for(ctx, false, &who, 0, &["/other".to_string()]))
+            Ok(archived_tasks_for(ctx, 0, &["/other".to_string()]))
         })
         .expect("list");
     assert_eq!(by_repo.iter().map(|r| r.id).collect::<Vec<_>>(), vec![other]);

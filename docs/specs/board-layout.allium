@@ -1662,8 +1662,7 @@ surface TextInputField {
 
     -- The shared single-line text buffer and its caret, used by every
     -- InputMode that types free text into the app's shared input field: task
-    -- title, epic title, work-package title and rename, display name, the
-    -- admin screen's name input, base branch, repo-path query and
+    -- title, epic title, work-package title and rename, display name, base branch, repo-path query and
     -- quick-dispatch query. Task and epic DESCRIPTION are not this surface:
     -- they open an external $EDITOR, and the board takes only Esc meanwhile
     -- (keybindings.allium: DescriptionEditorTakesOnlyEsc). The board search (`/`) and the board

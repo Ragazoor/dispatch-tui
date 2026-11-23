@@ -2,13 +2,11 @@
 //! real module and to the twin (task #99227, K5).
 //!
 //! Every person-made delete path (`delete_task`, `batch_delete`, `delete_epic`)
-//! archives what it deletes, and who reads a record is frozen at archive time:
-//! the record of a task in a private epic is its holder's alone, though the
-//! workspace's other member shares the workspace. Both stores must write the
-//! same record and answer the same read and listing to each person.
+//! archives what it deletes, and every record is served to anyone who asks
+//! (`docs/plans/2026-11-23-remove-workspaces.md`, R2). Both stores must write
+//! the same record and answer the same read and listing to each person.
 
-use super::loss_of_sight::{make_epic, make_task};
-use super::move_paths::World;
+use super::move_paths::{make_epic, make_task, World};
 use super::*;
 
 macro_rules! both_apply {
@@ -61,7 +59,7 @@ async fn read_as(
 }
 
 #[test]
-fn every_delete_path_archives_the_same_record_for_the_same_readers() {
+fn every_delete_path_archives_the_same_record_for_every_reader() {
     if !spacetime_available_or_skip() {
         return;
     }
@@ -74,20 +72,13 @@ fn every_delete_path_archives_the_same_record_for_the_same_readers() {
         let world = World::start(instance).await;
         let p = world.pair();
 
-        // A private epic of the first user, in the workspace both users share,
-        // and a public one.
-        let private = make_epic(
-            &p,
-            bindings::Epic {
-                visibility: "private".into(),
-                ..blank_epic()
-            },
-        )
-        .await;
-        let public = make_epic(&p, blank_epic()).await;
-        let by_delete_task = make_task(&p, private).await;
-        let by_batch = make_task(&p, private).await;
-        let by_epic_delete = make_task(&p, public).await;
+        // Two epics of the first user: one keeps its tasks' records, the other
+        // is deleted whole.
+        let kept = make_epic(&p, blank_epic()).await;
+        let deleted = make_epic(&p, blank_epic()).await;
+        let by_delete_task = make_task(&p, kept).await;
+        let by_batch = make_task(&p, kept).await;
+        let by_epic_delete = make_task(&p, deleted).await;
         let epic_less = {
             let row = bindings::Task {
                 created_by: p.identity.clone(),
@@ -113,18 +104,18 @@ fn every_delete_path_archives_the_same_record_for_the_same_readers() {
 
         both_apply!(p, |c| c.delete_task(by_delete_task));
         both_apply!(p, |c| c.batch_delete(vec![by_batch], vec![]));
-        both_apply!(p, |c| c.delete_epic(EpicId(public)));
+        both_apply!(p, |c| c.delete_epic(EpicId(deleted)));
         both_apply!(p, |c| c.delete_task(epic_less));
 
         let ids = [by_delete_task, by_batch, by_epic_delete, epic_less];
         for (who, real, mem) in [
             (
-                "the holder",
+                "the person who deleted them",
                 p.real as &dyn ReducerCaller,
                 p.mem as &dyn ReducerCaller,
             ),
             (
-                "a member who is not the holder",
+                "another person",
                 p.other_real as &dyn ReducerCaller,
                 p.other_mem as &dyn ReducerCaller,
             ),
@@ -134,19 +125,7 @@ fn every_delete_path_archives_the_same_record_for_the_same_readers() {
             assert_eq!(real_records, mem_records, "{who}: the records differ");
             // Ids are aligned across the two sides, so the listings match too.
             assert_eq!(real_listed, mem_listed, "{who}: the listings differ");
-            if who == "the holder" {
-                assert!(real_records.iter().all(Option::is_some), "{who} reads all");
-            } else {
-                assert!(
-                    real_records[0].is_none() && real_records[1].is_none(),
-                    "{who} reads a private record"
-                );
-                assert!(real_records[2].is_some(), "{who} misses a public one");
-                assert!(
-                    real_records[3].is_none(),
-                    "{who} reads another's epic-less record"
-                );
-            }
+            assert!(real_records.iter().all(Option::is_some), "{who} reads all");
         }
     });
 }

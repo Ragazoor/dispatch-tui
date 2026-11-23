@@ -109,8 +109,6 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 
 **Your name** — `u` sets the display name other people see beside what you create; agents can set it with the `display-name_set` tool. Until you set one, people see the first eight characters of your identity.
 
-**Workspaces and people** — `A` opens the admin screen: the workspaces you administer and their members (a super-admin sees every workspace, the super-admins and the private items nobody can see any more). Add people by display name, flip a member between admin and member, create, rename and delete workspaces, and claim the first super-admin. Agents have the same through `workspace_search`, `workspace_create`, `workspace_update`, `workspace_delete`, `workspace-member_set`, `super-admin_set`, `super-admin_claim`, `unseen-item_search` and `unseen-item_delete`. The rules are in `docs/specs/admin-surfaces.allium`.
-
 **Knowledge base** — agents record what they learn. Dispatch injects the relevant entries into the next agent's prompt.
 
 **Feeds** — a shell command that pulls work onto the board on a schedule, such as open pull requests or CVE alerts.

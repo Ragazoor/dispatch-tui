@@ -47,8 +47,6 @@ macro_rules! every_seed_reducer {
         $each!(seed_usage_events);
         $each!(seed_retired_feed_items);
         $each!(seed_user_profiles);
-        $each!(seed_workspaces);
-        $each!(seed_memberships);
     };
 }
 
@@ -103,7 +101,7 @@ fn a_store_with_no_recorded_publisher_refuses_boards() {
 }
 
 #[test]
-fn a_board_cannot_make_itself_super_admin_through_seeding() {
+fn a_board_cannot_seed_a_profile() {
     let store = published_by("publisher");
     let me = identity_of("board");
     let row = UserProfile {
@@ -180,7 +178,6 @@ fn a_created_epic_is_attributed_to_its_caller_whatever_the_row_says() {
     store.enrol("alice");
     let row = Epic {
         title: "E".into(),
-        workspace_id: TEST_WORKSPACE,
         created_by: identity_of("bob"),
         ..blank_epic()
     };
@@ -197,7 +194,6 @@ fn a_created_work_package_is_attributed_to_its_caller_whatever_the_row_says() {
     store.enrol("alice");
     let row = WorkPackage {
         title: "P".into(),
-        workspace_id: TEST_WORKSPACE,
         created_by: identity_of("bob"),
         ..blank_work_package()
     };
@@ -213,7 +209,6 @@ fn the_store_itself_may_name_the_creator_of_an_epic() {
     let store = Store::new();
     let row = Epic {
         title: "E".into(),
-        workspace_id: TEST_WORKSPACE,
         created_by: identity_of("bob"),
         ..blank_epic()
     };

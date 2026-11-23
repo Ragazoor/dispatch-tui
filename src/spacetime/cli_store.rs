@@ -306,7 +306,12 @@ impl SnapshotTarget for SpacetimeCliStore {
         if rows.is_empty() {
             return Ok(());
         }
-        let reducer = seed_reducer(table);
+        let Some(reducer) = seed_reducer(table) else {
+            bail!(
+                "{} is dead schema: nothing writes its rows (spacetime-seed.allium: SharedTable)",
+                table.name()
+            );
+        };
         let shapes = self.column_shapes(table)?;
 
         let mut batch: Vec<String> = Vec::new();
@@ -418,8 +423,10 @@ impl SnapshotTarget for SpacetimeCliStore {
     }
 }
 
-fn seed_reducer(table: SharedTable) -> &'static str {
-    match table {
+/// The reducer that writes `table`'s rows, or `None` for a dead table, which
+/// has none (`spacetime-seed.allium: SharedTable`).
+fn seed_reducer(table: SharedTable) -> Option<&'static str> {
+    Some(match table {
         SharedTable::Tasks => "seed_tasks",
         SharedTable::Epics => "seed_epics",
         SharedTable::Todos => "seed_todos",
@@ -444,9 +451,8 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::Agents => "seed_agents",
         SharedTable::HandedOutAgentNames => "seed_handed_out_agent_names",
         SharedTable::UserProfiles => "seed_user_profiles",
-        SharedTable::Workspaces => "seed_workspaces",
-        SharedTable::Memberships => "seed_memberships",
-    }
+        SharedTable::Workspaces | SharedTable::Memberships => return None,
+    })
 }
 
 /// Read just the schema out of a `--format json` result, ignoring any rows.

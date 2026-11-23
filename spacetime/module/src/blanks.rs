@@ -87,26 +87,6 @@ pub fn blank_epic() -> Epic {
     }
 }
 
-pub fn blank_workspace() -> Workspace {
-    Workspace {
-        id: 0,
-        name: String::new(),
-        created_by: String::new(),
-        created_at: String::new(),
-        listed: true,
-    }
-}
-
-pub fn blank_membership() -> Membership {
-    Membership {
-        id: 0,
-        workspace_id: 0,
-        user: String::new(),
-        role: String::new(),
-        created_at: String::new(),
-    }
-}
-
 pub(crate) fn blank_todo() -> Todo {
     Todo {
         id: 0,

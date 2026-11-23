@@ -118,52 +118,6 @@ pub fn is_sibling(path_a: &str, gh_a: &str, path_b: &str, gh_b: &str) -> bool {
     }
 }
 
-/// `core.allium: SavedRepoPath`, verify-command scope: the hosts whose rows a
-/// write by `caller` may reach. A host qualifies when its owner is `caller` or
-/// shares a workspace with `caller`. A host with no owner and a row with no host
-/// never qualify, so no stranger's choice of command runs on someone else's
-/// agents.
-pub fn hosts_sharing_a_workspace(
-    hosts: &[Host],
-    memberships: &[Membership],
-    caller: &str,
-) -> std::collections::HashSet<String> {
-    let mine: std::collections::HashSet<i64> = memberships
-        .iter()
-        .filter(|m| m.user == caller)
-        .map(|m| m.workspace_id)
-        .collect();
-    let sharing: std::collections::HashSet<&str> = memberships
-        .iter()
-        .filter(|m| mine.contains(&m.workspace_id))
-        .map(|m| m.user.as_str())
-        .collect();
-    hosts
-        .iter()
-        .filter(|h| !h.owner.is_empty() && (h.owner == caller || sharing.contains(h.owner.as_str())))
-        .map(|h| h.id.clone())
-        .collect()
-}
-
-/// The rows of `rows` a write by `caller` may reach, plus the row `keep`
-/// (the one the caller named, which `require_acting_for` already vouched for).
-pub fn rows_within_reach(
-    rows: &[RepoPath],
-    reach: &std::collections::HashSet<String>,
-    keep: Option<i64>,
-) -> Vec<RepoPath> {
-    rows.iter()
-        .filter(|r| reach.contains(&r.host) || Some(r.id) == keep)
-        .cloned()
-        .collect()
-}
-
-fn reach_of(ctx: &ReducerContext, caller: &str) -> std::collections::HashSet<String> {
-    let hosts: Vec<Host> = ctx.db.hosts().iter().collect();
-    let memberships: Vec<Membership> = ctx.db.memberships().iter().collect();
-    hosts_sharing_a_workspace(&hosts, &memberships, caller)
-}
-
 /// Record a repo path for `host`, or touch the row it already has.
 ///
 /// A path is one row per `(path, host)`: two machines that both have
@@ -194,10 +148,6 @@ pub fn save_repo_path(
         .find(|r| r.path == path && r.host == host)
         .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
         .cloned();
-    // The join and the share see only the rows of people who share a workspace
-    // with the caller (`core.allium: SavedRepoPath`).
-    let reach = reach_of(ctx, &caller_identity(ctx));
-    let rows = rows_within_reach(&all, &reach, own.as_ref().map(|r| r.id));
     let row = match own {
         Some(existing) => {
             let github_path = if github_path.is_empty() {
@@ -205,7 +155,7 @@ pub fn save_repo_path(
             } else {
                 github_path
             };
-            let repository = repository_verify_command(&rows, existing.id, &path, &github_path);
+            let repository = repository_verify_command(&all, existing.id, &path, &github_path);
             let verify_command = resaved_verify_command(&existing, &github_path, &repository);
             ctx.db.repo_paths().id().update(RepoPath {
                 last_used,
@@ -216,7 +166,7 @@ pub fn save_repo_path(
             })
         }
         None => {
-            let verify_command = repository_verify_command(&rows, 0, &path, &github_path);
+            let verify_command = repository_verify_command(&all, 0, &path, &github_path);
             ctx.db.repo_paths().insert(RepoPath {
                 id: 0,
                 path,
@@ -228,7 +178,7 @@ pub fn save_repo_path(
         }
     };
     // Give the row's command to the rows of its repository that have none.
-    for sibling in rows_without_the_repository_command(&rows, &row) {
+    for sibling in rows_without_the_repository_command(&all, &row) {
         ctx.db.repo_paths().id().update(RepoPath {
             verify_command: row.verify_command.clone(),
             ..sibling.clone()
@@ -313,15 +263,6 @@ pub fn delete_repo_path(ctx: &ReducerContext, path: String, host: String) -> Res
 /// with no `github_path` is its own repository by path, as `is_sibling` says.
 pub fn unify_repo_verify_commands(ctx: &ReducerContext) {
     let rows: Vec<RepoPath> = ctx.db.repo_paths().iter().collect();
-    let hosts: Vec<Host> = ctx.db.hosts().iter().collect();
-    let memberships: Vec<Membership> = ctx.db.memberships().iter().collect();
-    let owner_of = |r: &RepoPath| {
-        hosts
-            .iter()
-            .find(|h| h.id == r.host)
-            .map(|h| h.owner.clone())
-            .unwrap_or_default()
-    };
     let key = |r: &RepoPath| {
         if r.github_path.is_empty() {
             format!("path:{}", r.path)
@@ -334,19 +275,16 @@ pub fn unify_repo_verify_commands(ctx: &ReducerContext) {
         groups.entry(key(row)).or_default().push(row);
     }
     for group in groups.values() {
-        // Each row takes the command of the most recently used row among those
-        // its owner shares a workspace with (`core.allium: SavedRepoPath`).
+        // Every row takes the command of the group's most recently used row
+        // that has one (`core.allium: SavedRepoPath`).
+        let Some(winner) = group
+            .iter()
+            .filter(|r| !r.verify_command.is_empty())
+            .max_by(|a, b| (&a.last_used, a.id).cmp(&(&b.last_used, b.id)))
+        else {
+            continue;
+        };
         for row in group {
-            let owner = owner_of(row);
-            let reach = hosts_sharing_a_workspace(&hosts, &memberships, &owner);
-            let Some(winner) = group
-                .iter()
-                .filter(|r| !r.verify_command.is_empty())
-                .filter(|r| r.id == row.id || reach.contains(&r.host))
-                .max_by(|a, b| (&a.last_used, a.id).cmp(&(&b.last_used, b.id)))
-            else {
-                continue;
-            };
             if row.verify_command != winner.verify_command {
                 ctx.db.repo_paths().id().update(RepoPath {
                     verify_command: winner.verify_command.clone(),
@@ -385,11 +323,9 @@ pub fn set_verify_command(
     else {
         return Err(format!("no repo path {path} for host {host}"));
     };
-    // The command belongs to the repository, among people who share a
-    // workspace with the caller: every such row that is the same one.
-    let reach = reach_of(ctx, &caller_identity(ctx));
-    let rows = rows_within_reach(&all, &reach, Some(named.id));
-    let repository = rows_of_the_repository_of(&rows, named);
+    // The command belongs to the repository: every row that is the same one,
+    // whatever host owns it.
+    let repository = rows_of_the_repository_of(&all, named);
     for row in repository {
         ctx.db.repo_paths().id().update(RepoPath {
             verify_command: command.clone(),
@@ -597,7 +533,7 @@ pub fn subscribe_to_epic(
         return Err("cannot subscribe without an identity".into());
     }
     require_own_identity(ctx, &subscriber)?;
-    if visible_epic(ctx, epic_id).is_none() {
+    if ctx.db.epics().id().find(epic_id).is_none() {
         return Err(format!("no epic {epic_id}"));
     }
     let id = subscription_id(&subscriber, epic_id);
@@ -640,11 +576,9 @@ pub fn unsubscribe_from_epic(
     require_own_identity(ctx, &subscriber)?;
     let id = subscription_id(&subscriber, epic_id);
     if ctx.db.subscriptions().id().find(&id).is_none() {
-        // The sight check (`sync.allium: UnsubscribeFromEpic`): a caller with
-        // no row who cannot see the epic is told it is missing, so the answer
-        // never confirms that a private epic exists. A caller who still holds
-        // a row may always remove it.
-        if visible_epic(ctx, epic_id).is_none() {
+        // A caller with no row is told when the epic itself is missing
+        // (`sync.allium: UnsubscribeFromEpic`).
+        if ctx.db.epics().id().find(epic_id).is_none() {
             return Err(format!("no epic {epic_id}"));
         }
         return Err(format!("not subscribed to epic {epic_id}"));
@@ -672,19 +606,18 @@ pub fn unsubscribe_from_epic(
         epics_losing_coverage(epic_id, &remaining, &parents)
             .into_iter()
             .collect();
-    release_poll_claims(ctx, &released, |_, owner| owner == subscriber);
+    release_poll_claims(ctx, &released, |owner| owner == subscriber);
     Ok(())
 }
 
-/// `workspaces.allium: RemoveMember`, `MoveEpicToWorkspace` (task #98746, V6):
-/// release every epic-scoped poll claim on an epic in `epics` held by a host
-/// whose owner `loses_sight(epic_id, owner)` of it, so another host can claim
-/// the feed instead of the epic stalling on a host that can no longer read it.
-/// The twin of the release in [`unsubscribe_from_epic`].
+/// Release every epic-scoped poll claim on an epic in `epics` held by a host
+/// whose owner `releases(owner)`, so another host can claim the feed:
+/// an unfollow (`sync.allium: UnsubscribeFromEpic`) and a feed command set by
+/// someone else (`feeds.allium: FeedCommandAuthority`).
 pub(crate) fn release_poll_claims(
     ctx: &ReducerContext,
     epics: &std::collections::HashSet<i64>,
-    loses_sight: impl Fn(i64, &str) -> bool,
+    releases: impl Fn(&str) -> bool,
 ) {
     let stale: Vec<i64> = epics
         .iter()
@@ -695,7 +628,7 @@ pub(crate) fn release_poll_claims(
                 .hosts()
                 .id()
                 .find(&p.host)
-                .is_some_and(|h| loses_sight(p.scope_id, &h.owner))
+                .is_some_and(|h| releases(&h.owner))
         })
         .map(|p| p.id)
         .collect();
@@ -737,128 +670,6 @@ pub(crate) fn release_claims_of_non_setter_hosts(ctx: &ReducerContext) {
     for row_id in stale {
         ctx.db.poll_owners().id().delete(row_id);
     }
-}
-
-/// `workspaces.allium: ClaimsFollowSight` (task #98911, M10): the task-scoped
-/// twin of [`release_poll_claims`]. Releases every task-scoped claim on a task
-/// of an epic in `epics` held by a host whose owner `loses_sight(epic_id,
-/// owner)` of that epic. A task's sight is its epic's, so the epic id is what
-/// the closure judges. Epic-less tasks are their owner's alone and never move
-/// with an epic, so they are not walked.
-pub(crate) fn release_task_poll_claims(
-    ctx: &ReducerContext,
-    epics: &std::collections::HashSet<i64>,
-    loses_sight: impl Fn(i64, &str) -> bool,
-) {
-    let stale: Vec<i64> = epics
-        .iter()
-        .flat_map(|epic_id| ctx.db.tasks().epic_id().filter(epic_id))
-        .flat_map(|task| {
-            ctx.db
-                .poll_owners()
-                .scope_id()
-                .filter(&task.id)
-                .filter(|p| p.scope == POLL_SCOPE_TASK)
-                .filter(|p| {
-                    ctx.db
-                        .hosts()
-                        .id()
-                        .find(&p.host)
-                        .is_some_and(|h| loses_sight(task.epic_id, &h.owner))
-                })
-                .map(|p| p.id)
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    for row_id in stale {
-        ctx.db.poll_owners().id().delete(row_id);
-    }
-}
-
-/// `workspaces.allium: ClaimsFollowSight` (task #98851, M4; task-scoped claims
-/// #98911, M10): the one helper every loss-of-sight path calls once the
-/// change is written. Releases the epic-scoped claims on `epics`, and the
-/// task-scoped claims on their tasks, held by a host whose owner no longer
-/// sees that epic, judged on the store as it is now. A path that can take
-/// sight away MUST call this (or, for the two paths that judge by membership,
-/// both release functions);
-/// `every_loss_of_sight_path_releases_the_claims_it_strands`
-/// (`src/sync/memory_caller/tests/feed_authority.rs`) runs each one.
-pub(crate) fn release_claims_without_sight(
-    ctx: &ReducerContext,
-    epics: &std::collections::HashSet<i64>,
-) {
-    let loses_sight = |epic_id: i64, owner: &str| {
-        ctx.db
-            .epics()
-            .id()
-            .find(epic_id)
-            .is_none_or(|epic| !epic_visible_to(ctx, &epic, owner))
-    };
-    release_poll_claims(ctx, epics, loses_sight);
-    release_task_poll_claims(ctx, epics, loses_sight);
-}
-
-/// `workspaces.allium: ClaimsFollowSight`, B1 (task #98992): the one helper an
-/// EPIC-level loss-of-sight path calls once its change is written. Releases
-/// the claims ([`release_claims_without_sight`]) and ends every unseen mark
-/// and bookmark on a task of `epics` whose person no longer sees that task,
-/// judged on the store as it is now. A path that can take sight away MUST call
-/// this, or [`on_task_sight_lost`] for a single task;
-/// `every_loss_of_sight_path_releases_the_claims_it_strands` runs each one.
-pub(crate) fn on_sight_lost(ctx: &ReducerContext, epics: &std::collections::HashSet<i64>) {
-    release_claims_without_sight(ctx, epics);
-    let tasks: std::collections::HashSet<i64> = epics
-        .iter()
-        .flat_map(|epic_id| ctx.db.tasks().epic_id().filter(epic_id))
-        .map(|t| t.id)
-        .collect();
-    drop_marks_of_those_who_cannot_see(ctx, &tasks);
-}
-
-/// [`on_sight_lost`] for one task whose own sight changed: a move into a
-/// private epic, or a detach onto a user board.
-pub(crate) fn on_task_sight_lost(ctx: &ReducerContext, task_id: i64) {
-    let Some(task) = ctx.db.tasks().id().find(task_id) else {
-        return;
-    };
-    let stale: Vec<i64> = ctx
-        .db
-        .poll_owners()
-        .scope_id()
-        .filter(&task_id)
-        .filter(|p| p.scope == POLL_SCOPE_TASK)
-        .filter(|p| {
-            ctx.db
-                .hosts()
-                .id()
-                .find(&p.host)
-                .is_some_and(|h| !task_visible_to(ctx, &task, &h.owner))
-        })
-        .map(|p| p.id)
-        .collect();
-    for row_id in stale {
-        ctx.db.poll_owners().id().delete(row_id);
-    }
-    drop_marks_of_those_who_cannot_see(ctx, &std::collections::HashSet::from([task_id]));
-}
-
-fn drop_marks_of_those_who_cannot_see(
-    ctx: &ReducerContext,
-    tasks: &std::collections::HashSet<i64>,
-) {
-    if tasks.is_empty() {
-        return;
-    }
-    crate::bookmark::drop_marks_where(ctx, None, |task_id, subscriber| {
-        tasks.contains(&task_id)
-            && ctx
-                .db
-                .tasks()
-                .id()
-                .find(task_id)
-                .is_some_and(|t| !task_visible_to(ctx, &t, subscriber))
-    });
 }
 
 /// The epics in `unfollowed`'s subtree (itself included) that a person whose
@@ -1006,23 +817,18 @@ pub fn check_deletable(
     task_ids: Vec<i64>,
     epic_ids: Vec<i64>,
 ) -> DeleteCheck {
-    let who = ctx.sender().to_hex().to_string();
-    let operator = ctx.sender() == ctx.database_identity();
-    ctx.with_tx(|tx| delete_check_for(tx, operator, &who, &task_ids, &epic_ids))
+    ctx.with_tx(|tx| delete_check_for(tx, &task_ids, &epic_ids))
 }
 
-/// One archived task, when the caller may see it (`mcp-task-tools.allium:
-/// GetArchivedTaskViaMcp`). A procedure, not a view: no board subscribes to
-/// the archive, which grows without bound. Body is [`archived_task_for`].
+/// One archived task (`mcp-task-tools.allium: GetArchivedTaskViaMcp`). A procedure, not a view: no board subscribes to
+/// the archive, which grows without bound. Every record is served to anyone who asks.
 #[cfg(target_arch = "wasm32")]
 #[spacetimedb::procedure]
 pub fn read_archived_task(ctx: &mut spacetimedb::ProcedureContext, id: i64) -> Option<ArchivedTask> {
-    let who = ctx.sender().to_hex().to_string();
-    let operator = ctx.sender() == ctx.database_identity();
-    ctx.with_tx(|tx| archived_task_for(tx, operator, &who, id))
+    ctx.with_tx(|tx| tx.archived_task(id))
 }
 
-/// The caller-visible archived tasks in `epic_id` (`0` for any) and
+/// The archived tasks in `epic_id` (`0` for any) and
 /// `repo_paths` (empty for any) (`mcp-task-tools.allium:
 /// ListArchivedTasksViaMcp`). Body is [`archived_tasks_for`].
 #[cfg(target_arch = "wasm32")]
@@ -1032,7 +838,5 @@ pub fn list_archived_tasks(
     epic_id: i64,
     repo_paths: Vec<String>,
 ) -> Vec<ArchivedTask> {
-    let who = ctx.sender().to_hex().to_string();
-    let operator = ctx.sender() == ctx.database_identity();
-    ctx.with_tx(|tx| archived_tasks_for(tx, operator, &who, epic_id, &repo_paths))
+    ctx.with_tx(|tx| archived_tasks_for(tx, epic_id, &repo_paths))
 }

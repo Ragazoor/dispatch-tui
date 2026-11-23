@@ -82,8 +82,7 @@ impl MemoryReducerCaller {
     fn request_feed_refresh_body(&self, epic_id: i64, host: &str) -> Result<(), String> {
         let mut tables = self.lock();
         self.acting_for(&tables, host)?;
-        // The module's `visible_epic`: an epic the caller cannot see is not there.
-        let epic = tables.visible_epic(&self.scope(), epic_id);
+        let epic = tables.epics.get(&epic_id).cloned();
         let owner_row = tables
             .poll_owners
             .values()

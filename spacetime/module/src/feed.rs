@@ -538,26 +538,17 @@ fn ensure_role_epic(
         .epics()
         .parent_epic_id()
         .filter(&parent_epic_id)
-        // A ROOT counts only when the caller can see it and made it: a managed
-        // root in a workspace they are not in must not be reused or rewritten,
-        // and another person's root is never theirs (`epics.allium:
-        // ProvisionManagedEpics`, V9). A SUB-EPIC's parent is already the
-        // caller's own root, so any child holding the role fills the slot,
-        // seen or not (`core.allium: UniqueFeedRolePerParent`): inserting
-        // beside a private one would duplicate it.
-        .find(|e| {
-            e.feed_role == role
-                && (parent_epic_id != 0
-                    || (e.created_by == created_by && visible_epic(ctx, e.id).is_some()))
-        });
+        // A ROOT counts only when the caller made it: each identity's board
+        // provisions its own managed roots (`epics.allium:
+        // ProvisionManagedEpics`). A SUB-EPIC's parent is already the
+        // caller's own root, so any child holding the role fills the slot
+        // (`core.allium: UniqueFeedRolePerParent`).
+        .find(|e| e.feed_role == role && (parent_epic_id != 0 || e.created_by == created_by));
     if let Some(epic) = existing {
-        // A root its creator finds still public is the one members used to
-        // share: it becomes private, so only they see and signal on it.
-        let make_private = parent_epic_id == 0 && epic.visibility != VISIBILITY_PRIVATE;
         let retarget = command.is_some_and(|(cmd, interval)| {
             epic.feed_command != cmd || epic.feed_interval_secs != interval
         });
-        if !make_private && !retarget {
+        if !retarget {
             return epic.id;
         }
         let id = epic.id;
@@ -565,9 +556,6 @@ fn ensure_role_epic(
             updated_at: now(ctx),
             ..epic
         };
-        if make_private {
-            row.visibility = VISIBILITY_PRIVATE.to_string();
-        }
         if let Some((cmd, interval)) = command {
             if row.feed_command != cmd {
                 row.feed_command_set_by = created_by.to_string();
@@ -576,56 +564,25 @@ fn ensure_role_epic(
             row.feed_interval_secs = interval;
         }
         ctx.db.epics().id().update(row);
-        // `ClaimsFollowSight` (M4): the managed root turned private above
-        // takes the shared PR Reviews tree from every member but its creator.
-        if make_private {
-            crate::config::on_sight_lost(
-                ctx,
-                &crate::tasks_epics::collect_epic_subtree_ids(ctx, id),
-            );
-        }
         return id;
     }
     let (feed_command, feed_interval_secs) =
         command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
-    let row = inherit_workspace(
-        ctx,
-        Epic {
-            title: managed_role_title(role).to_string(),
-            parent_epic_id,
-            feed_role: role.to_string(),
-            feed_command_set_by: if feed_command.is_empty() {
-                String::new()
-            } else {
-                created_by.to_string()
-            },
-            feed_command,
-            feed_interval_secs,
-            created_by: created_by.to_string(),
-            // A managed root is private to its creator (V9); its sub-epics
-            // inherit that from it.
-            visibility: if parent_epic_id == 0 {
-                VISIBILITY_PRIVATE.to_string()
-            } else {
-                blank_epic().visibility
-            },
-            created_at: now(ctx),
-            updated_at: now(ctx),
-            ..blank_epic()
+    let row = Epic {
+        title: managed_role_title(role).to_string(),
+        parent_epic_id,
+        feed_role: role.to_string(),
+        feed_command_set_by: if feed_command.is_empty() {
+            String::new()
+        } else {
+            created_by.to_string()
         },
-    );
-    // A managed root epic lives in the caller's first workspace; a caller in
-    // none gets no root epic rather than one in a workspace that is not there.
-    let row = if row.workspace_id == 0 {
-        match first_workspace_of(ctx, created_by) {
-            Some(workspace_id) => Epic {
-                workspace_id,
-                ..row
-            },
-            None => return 0,
-        }
-    } else {
-        row
+        feed_command,
+        feed_interval_secs,
+        created_by: created_by.to_string(),
+        created_at: now(ctx),
+        updated_at: now(ctx),
+        ..blank_epic()
     };
     ctx.db.epics().insert(row).id
 }

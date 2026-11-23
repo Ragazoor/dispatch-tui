@@ -11,8 +11,6 @@ use super::epic_patch_type::EpicPatch;
 pub(super) struct UpdateEpicArgs {
     pub id: i64,
     pub patch: EpicPatch,
-    pub workspace_id: Option<i64>,
-    pub visibility: Option<String>,
 }
 
 impl From<UpdateEpicArgs> for super::Reducer {
@@ -20,8 +18,6 @@ impl From<UpdateEpicArgs> for super::Reducer {
         Self::UpdateEpic {
             id: args.id,
             patch: args.patch,
-            workspace_id: args.workspace_id,
-            visibility: args.visibility,
         }
     }
 }
@@ -41,14 +37,8 @@ pub trait update_epic {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`update_epic:update_epic_then`] to run a callback after the reducer completes.
-    fn update_epic(
-        &self,
-        id: i64,
-        patch: EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
-    ) -> __sdk::Result<()> {
-        self.update_epic_then(id, patch, workspace_id, visibility, |_, _| {})
+    fn update_epic(&self, id: i64, patch: EpicPatch) -> __sdk::Result<()> {
+        self.update_epic_then(id, patch, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `update_epic` to run as soon as possible,
@@ -61,8 +51,6 @@ pub trait update_epic {
         &self,
         id: i64,
         patch: EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -75,21 +63,12 @@ impl update_epic for super::RemoteReducers {
         &self,
         id: i64,
         patch: EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp.invoke_reducer_with_callback(
-            UpdateEpicArgs {
-                id,
-                patch,
-                workspace_id,
-                visibility,
-            },
-            callback,
-        )
+        self.imp
+            .invoke_reducer_with_callback(UpdateEpicArgs { id, patch }, callback)
     }
 }

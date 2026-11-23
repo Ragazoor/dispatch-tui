@@ -78,7 +78,7 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -87,7 +87,7 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
@@ -124,7 +124,7 @@ fn memory_caller_ingests_a_feed_like_the_real_module() {
         assert_eq!(mem.create_epic(parent).await.unwrap().0, root);
 
         // Nobody follows the reviews parent: a new review request is marked
-        // for everyone who sees it (`feeds.allium: NewReviewRequestIsSignalled`).
+        // for every known person (`feeds.allium: NewReviewRequestIsSignalled`).
         // Task ids are not compared across the two stores: each numbers the
         // role groups' inserts in its own order. The PR names a task in both.
         let unseen_prs = |rows: &SharedRows| {
@@ -508,7 +508,7 @@ fn grouped_ingest_moves_a_task_between_present_sub_epics() {
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -517,7 +517,7 @@ fn grouped_ingest_moves_a_task_between_present_sub_epics() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller
@@ -669,7 +669,7 @@ fn ingest_keeps_a_worked_on_feed_task_like_the_real_module() {
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -678,7 +678,7 @@ fn ingest_keeps_a_worked_on_feed_task_like_the_real_module() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
         for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
             caller

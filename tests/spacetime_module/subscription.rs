@@ -91,8 +91,7 @@ const COLD_START_CEILING: Duration = Duration::from_secs(10);
 /// and the wake-up but not that the SDK ever calls it. This one closes that
 /// gap: the row is written through the CLI — a different process, standing in
 /// for a teammate's board — and the only thing connecting the two is the
-/// subscription. The board belongs to the epic's workspace and follows it, so
-/// `covered_epics` serves it (`docs/architecture.md`, "Read enforcement: per-caller views").
+/// subscription. The board follows the epic, so `covered_epics` serves it (`docs/architecture.md`, "Read enforcement: per-caller views").
 #[test]
 fn a_row_written_elsewhere_arrives_through_the_subscription() {
     if !spacetime_available_or_skip() {
@@ -118,7 +117,6 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
             ))
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
-        admit(&instance, &[&accepted.identity]);
         follow(&instance, &accepted.identity, 1);
 
         assert!(
@@ -170,7 +168,6 @@ fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
             .connect(&instance.host(), None)
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
-        admit(&instance, &[&accepted.identity]);
         follow(&instance, &accepted.identity, 1);
         call_ok(
             &instance,
@@ -258,7 +255,6 @@ fn unfollowing_one_epic_keeps_the_deep_rows_of_another() {
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let me = accepted.identity.clone();
-        admit(&instance, &[&me]);
         follow(&instance, &me, 1);
         follow(&instance, &me, 9);
         call_ok(
@@ -340,10 +336,9 @@ fn unfollowing_one_epic_keeps_the_deep_rows_of_another() {
 /// Host A is the `create_learning` reducer call — a different process,
 /// standing in for a teammate's board, the same convention
 /// `a_row_written_elsewhere_arrives_through_the_subscription` uses. Host B is
-/// this test's own `SharedRows`, subscribed with nothing followed. Both are
-/// members of workspace 1, and each learning comes from a task in it, so it
-/// lands in that workspace and `visible_learnings` serves it to every member
-/// (`workspaces.allium: LearningVisibility`).
+/// this test's own `SharedRows`, subscribed with nothing followed. Every
+/// reader sees every learning, so `visible_learnings` serves both to it
+/// (`learnings.allium`, Scope Model).
 #[test]
 fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     if !spacetime_available_or_skip() {
@@ -373,7 +368,6 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
             .connect(&instance.host(), None)
             .await
             .unwrap_or_else(|e| panic!("connect: {e}"));
-        admit(&instance, &[&instance.identity(), &accepted.identity]);
         call_ok(
             &instance,
             "seed_epics",
@@ -452,34 +446,6 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
     });
 }
 
-/// Workspace 1, with `members` in it. A board sees an epic only in a workspace
-/// it belongs to (`workspaces.allium: Epic.visible_to`).
-fn admit(instance: &Instance, members: &[&str]) {
-    call_ok(
-        instance,
-        "seed_workspaces",
-        serde_json::json!([{
-            "id": 1, "name": "Shared", "created_by": "", "created_at": "2026-10-30 10:00:00",
-            "listed": true,
-        }]),
-    );
-    let memberships: Vec<serde_json::Value> = members
-        .iter()
-        .enumerate()
-        .map(|(i, user)| {
-            serde_json::json!({
-                "id": i as i64 + 1, "workspace_id": 1, "user": user, "role": "member",
-                "created_at": "2026-10-30 10:00:00",
-            })
-        })
-        .collect();
-    call_ok(
-        instance,
-        "seed_memberships",
-        serde_json::Value::from(memberships),
-    );
-}
-
 /// `who` follows `epic`. Seeded, because `subscribe_to_epic` refuses a
 /// subscriber that is not the caller and the CLI is not this board.
 fn follow(instance: &Instance, who: &str, epic: i64) {
@@ -492,11 +458,9 @@ fn follow(instance: &Instance, who: &str, epic: i64) {
     );
 }
 
-/// A public epic in workspace 1.
+/// An epic with nothing but a title and a parent.
 fn shared_epic(id: i64, title: &str, parent: i64) -> serde_json::Value {
-    let mut epic = epic_json(id, title, "backlog", parent);
-    epic["workspace_id"] = serde_json::json!(1);
-    epic
+    epic_json(id, title, "backlog", parent)
 }
 
 fn epic_ids(rows: &SharedRows) -> Vec<i64> {

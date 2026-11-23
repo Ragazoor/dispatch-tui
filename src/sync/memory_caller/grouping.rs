@@ -160,9 +160,8 @@ impl MemoryReducerCaller {
 
     /// Mirrors `regroup_epic`.
     pub(super) fn apply_regroup_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
-        let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, root.0).is_none() {
+        if !tables.epics.contains_key(&root.0) {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         Ok(match self.regroup_epic_rows(&mut tables, root.0) {
@@ -211,13 +210,9 @@ impl MemoryReducerCaller {
         group_by_repo: bool,
     ) -> Result<ReducerOutcome> {
         {
-            let scope = self.scope();
             let tables = self.lock();
-            if tables.visible_epic(&scope, id.0).is_none() {
-                return Ok(ReducerOutcome::Refused(format!(
-                    "epic {} does not exist",
-                    id.0
-                )));
+            if let Err(why) = tables.require_epic(id.0) {
+                return Ok(ReducerOutcome::Refused(why));
             }
         }
         let patch = || bindings::EpicPatch {
@@ -245,9 +240,8 @@ impl MemoryReducerCaller {
         if matches!(written, ReducerOutcome::Refused(_)) {
             return Ok(written);
         }
-        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(epic) = tables.visible_epic(&scope, id.0) else {
+        let Some(epic) = tables.epics.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         if !epic.feed_command.is_empty() {
@@ -271,9 +265,8 @@ impl MemoryReducerCaller {
 
     /// Mirrors `flatten_epic`.
     pub(super) fn apply_flatten_epic(&self, root: EpicId) -> Result<ReducerOutcome> {
-        let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, root.0).is_none() {
+        if !tables.epics.contains_key(&root.0) {
             return Ok(ReducerOutcome::Applied(vec![]));
         }
         Ok(match self.flatten_epic_rows(&mut tables, root.0) {

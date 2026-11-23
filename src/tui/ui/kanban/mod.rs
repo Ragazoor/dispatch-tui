@@ -14,10 +14,9 @@ mod tests;
 
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
-    input_epic_description_lines, input_epic_title_lines, input_model_lines, input_placement_lines,
-    input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
-    quick_dispatch_lines, FormStyles, MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
-    WRAP_UP_STEP_LINES,
+    input_epic_description_lines, input_epic_title_lines, input_model_lines, input_repo_path_lines,
+    input_tag_lines, input_title_lines, input_wrap_up_mode_lines, quick_dispatch_lines, FormStyles,
+    MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES, WRAP_UP_STEP_LINES,
 };
 use super::shared::{render_top_indicators, rounded_block, HintBar};
 use crate::keybindings::{KeyBinding, KeyContext, KeyContext as C, KeyNamespace};
@@ -40,9 +39,9 @@ use ratatui::{
 
 use columns::{compute_columns_data, render_columns};
 use popups::{
-    render_admin_overlay, render_board_filter_overlay, render_error_popup, render_help_overlay,
-    render_move_task_overlay, render_reparent_epic_overlay, render_task_detail_overlay,
-    render_work_package_picker_overlay, render_work_package_rename_overlay,
+    render_board_filter_overlay, render_error_popup, render_help_overlay, render_move_task_overlay,
+    render_reparent_epic_overlay, render_task_detail_overlay, render_work_package_picker_overlay,
+    render_work_package_rename_overlay,
 };
 #[cfg(test)]
 pub(in crate::tui) use status_bar::batch_action_hints;
@@ -234,8 +233,7 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
         | InputMode::InputDescription
         | InputMode::ConfirmRetry(_)
         | InputMode::InputEpicTitle
-        | InputMode::InputEpicDescription
-        | InputMode::InputPlacement => 8,
+        | InputMode::InputEpicDescription => 8,
         _ => 0,
     }
 }
@@ -295,7 +293,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_move_task_overlay(frame, app, area);
     render_work_package_picker_overlay(frame, app, area);
     render_work_package_rename_overlay(frame, app, area);
-    render_admin_overlay(frame, app, area);
     // Last, so a refusal is never hidden under an overlay.
     render_error_popup(frame, app, area);
 }
@@ -559,17 +556,13 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
         InputMode::InputEpicTitle => input_epic_title_lines(app, area, &styles),
         InputMode::InputEpicDescription => input_epic_description_lines(app, area, &styles),
-        InputMode::InputPlacement => input_placement_lines(app, area, &styles),
         _ => return false,
     };
 
     let is_epic_input = matches!(
         app.input.mode,
         InputMode::InputEpicTitle | InputMode::InputEpicDescription
-    ) || matches!(
-        app.input.placement.as_ref().map(|p| &p.target),
-        Some(crate::tui::types::PlacementFor::Epic)
-    ) && app.input.mode == InputMode::InputPlacement;
+    );
 
     let block_title = match &app.input.mode {
         InputMode::QuickDispatch => " Quick Dispatch ",

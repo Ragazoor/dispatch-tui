@@ -24,9 +24,8 @@
 //! `(some: String | none: ())`"; so are `IS NULL`, `!= none` and `some('x')`.
 //!
 //! A subscription IS a `WHERE` clause. An optional column is therefore one no
-//! client can subscribe by — and subscribing is the entire mechanism that keeps
-//! a colleague's private work off somebody else's machine
-//! (`sync.allium: SendsOnlyWhatWasSubscribedTo`).
+//! client can subscribe by — and subscribing is how a board narrows what the
+//! store delivers to it (`sync.allium: SendsOnlyWhatWasSubscribedTo`).
 //!
 //! Only `tasks.owner` and `tasks.epic_id` are filtered on today. The rest is
 //! future-proofing, done now because **changing a column's type is not
@@ -74,6 +73,7 @@ mod feed;
 mod feed_ingest;
 mod feed_request;
 mod grouping;
+mod identity;
 mod learning;
 mod names;
 mod packages;
@@ -90,8 +90,6 @@ mod tasks_epics;
 mod unseen;
 mod user_profile;
 mod views;
-mod visibility;
-mod workspace;
 
 pub use agent::*;
 pub use archive::*;
@@ -104,6 +102,7 @@ pub use feed::*;
 pub use feed_ingest::*;
 pub use feed_request::*;
 pub use grouping::*;
+pub use identity::*;
 pub use learning::*;
 pub use names::*;
 pub use packages::*;
@@ -120,8 +119,6 @@ pub use tasks_epics::*;
 pub use unseen::*;
 pub use user_profile::*;
 pub use views::*;
-pub use visibility::*;
-pub use workspace::*;
 
 #[cfg(test)]
 mod tests;
@@ -304,7 +301,7 @@ pub struct RulesVersion {
 #[spacetimedb::reducer(client_connected)]
 pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     // Before the early return below: every reconnect registers the caller, not
-    // only the first after a publish (`workspaces.allium: RegisterUserProfile`).
+    // only the first after a publish (`people.allium: RegisterUserProfile`).
     register_user_profile(ctx);
     let row = RulesVersion {
         id: 1,
@@ -327,13 +324,6 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     // (`agents.allium: BackfillCurrentAgents`). Idempotent, so a store already
     // backfilled loses nothing to a later bump.
     backfill_all_agents(ctx);
-    // Likewise once, and only when the store comes from a module older than
-    // the one that added workspaces, so a later bump never brings back a
-    // default workspace a super-admin deleted
-    // (`workspaces.allium: MigrateStoreToWorkspaces`).
-    if previous < WORKSPACES_RULES_VERSION {
-        migrate_store_to_workspaces(ctx);
-    }
     // Once, for the claims held before the setter rule: only new claims are
     // gated, so a claim by a host that may not run the command would stall
     // the feed for good (`feeds.allium: FeedCommandRunsOnSettersHost`).

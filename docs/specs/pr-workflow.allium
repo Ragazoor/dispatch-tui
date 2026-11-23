@@ -203,7 +203,7 @@ rule PollPrStatus {
         --
         -- A host-less task with no PollOwner row is claimed here, through
         -- feeds.allium's ClaimPollOwner (the claim_poll_owner reducer, which
-        -- checks the caller's host and sight), by whichever host's tick
+        -- checks the caller's host), by whichever host's tick
         -- reaches this point first for it. The claim is permanent
         -- (core/PollOwner): there is no expiry, no automatic failover and no
         -- way to reassign a task-scope claim to another host. Unlike

@@ -52,11 +52,6 @@ impl App {
 
     pub(in crate::tui) fn handle_error(&mut self, msg: String) -> Vec<Command> {
         self.status.error_popup = Some(msg);
-        // A refused create must not move the admin cursor onto a workspace
-        // that already has that name.
-        if let Some(screen) = self.input.admin.as_mut() {
-            screen.select_workspace_named = None;
-        }
         vec![]
     }
 
@@ -435,7 +430,12 @@ impl App {
             }
             InputMode::InputEpicDescription => {
                 super::epic_input::apply_epic_description(&mut self.input, value);
-                self.begin_placement(PlacementFor::Epic)
+                let draft = self.input.epic_draft.take().unwrap_or_default();
+                self.input.mode = InputMode::Normal;
+                self.status.clear();
+                vec![Command::Epic(crate::tui::commands::EpicCommand::Insert(
+                    draft,
+                ))]
             }
             _ => vec![],
         }

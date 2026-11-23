@@ -108,11 +108,9 @@ impl MemoryReducerCaller {
             .map_err(StoreRefusal)?;
         let scope = self.scope();
         let mut tables = self.lock();
-        // The store places a learning itself (`LearningVisibility`).
+        // The store stamps the author itself (`IdentitiesAreTheCallers`).
         let row = tables.settle_new_learning(&scope, row);
-        if !tables.learning_visible(&scope, &row)
-            || !module::epic_scope_ref_names_an_epic(&*tables, &row)
-        {
+        if !module::epic_scope_ref_names_an_epic(&*tables, &row) {
             return Err(StoreRefusal(format!(
                 "{} {} does not exist",
                 row.scope,
@@ -133,9 +131,8 @@ impl MemoryReducerCaller {
         patch: bindings::LearningPatch,
     ) -> Result<ReducerOutcome> {
         let id = id.0;
-        let scope = self.scope();
         let mut tables = self.lock();
-        let Some(mut row) = tables.visible_learning(&scope, id) else {
+        let Some(mut row) = tables.learnings.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         let patch = module::LearningPatch::from(patch);
@@ -150,11 +147,8 @@ impl MemoryReducerCaller {
 
     pub(super) fn apply_delete_learning(&self, id: LearningId) -> Result<ReducerOutcome> {
         let id = id.0;
-        let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_learning(&scope, id).is_none()
-            || !self.delete_learning_cascade(&mut tables, id)
-        {
+        if !tables.learnings.contains_key(&id) || !self.delete_learning_cascade(&mut tables, id) {
             return Ok(ReducerOutcome::Refused(format!("learning {id} not found")));
         }
         Ok(ReducerOutcome::Applied(vec![]))
@@ -183,13 +177,11 @@ impl MemoryReducerCaller {
     pub(super) fn rescope_learnings(&self, tables: &mut Tables, from: i64, to: i64) {
         let from_ref = from.to_string();
         let to_ref = to.to_string();
-        let to_workspace = tables.epics.get(&to).map(|e| e.workspace_id);
         self.update_matching_learnings(
             tables,
             |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
             |row| module::Learning {
                 scope_ref: Some(to_ref.clone()),
-                workspace_id: to_workspace.unwrap_or(row.workspace_id),
                 ..row
             },
         );
@@ -200,13 +192,7 @@ impl MemoryReducerCaller {
         from: EpicId,
         to: EpicId,
     ) -> Result<ReducerOutcome> {
-        let scope = self.scope();
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, from.0).is_none()
-            || tables.visible_epic(&scope, to.0).is_none()
-        {
-            return Ok(ReducerOutcome::Applied(vec![]));
-        }
         self.rescope_learnings(&mut tables, from.0, to.0);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -220,12 +206,8 @@ impl MemoryReducerCaller {
         let task_id = task_id.0;
         let learning_id = learning_id.0;
         let source = source.as_str().to_string();
-        let scope = self.scope();
         let mut tables = self.lock();
-        if scope.on()
-            && (tables.visible_task(&scope, task_id).is_none()
-                || tables.visible_learning(&scope, learning_id).is_none())
-        {
+        if !tables.tasks.contains_key(&task_id) || !tables.learnings.contains_key(&learning_id) {
             return Ok(ReducerOutcome::Refused(format!(
                 "task {task_id} or learning {learning_id} does not exist"
             )));
@@ -249,8 +231,8 @@ impl MemoryReducerCaller {
     /// `not_retrieved_message`.
     ///
     /// A real reducer's `Err` rolls back every mutation the transaction already
-    /// made, so this validates before it writes: every entry must be a learning the
-    /// caller sees (else `learning N not found`) and have a retrieval for
+    /// made, so this validates before it writes: every entry must be a learning that
+    /// exists (else `learning N not found`) and have a retrieval for
     /// `task_id` first (a refusal for the batch), and the second pass
     /// works on a copy of the verdict table and the learnings it touches,
     /// installed only once every entry has applied. Entries naming one learning
@@ -262,14 +244,13 @@ impl MemoryReducerCaller {
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<ReducerOutcome> {
         let task_id = task_id.0;
-        let scope = self.scope();
         let mut tables = self.lock();
         // A missing task is refused whatever the rules, like an unseen one.
-        if tables.visible_task(&scope, task_id).is_none() {
+        if !tables.tasks.contains_key(&task_id) {
             return Ok(ReducerOutcome::Refused(format!("task {task_id} not found")));
         }
         for (learning_id, _) in &verdicts {
-            if tables.visible_learning(&scope, learning_id.0).is_none() {
+            if !tables.learnings.contains_key(&learning_id.0) {
                 return Ok(ReducerOutcome::Refused(format!(
                     "learning {} not found",
                     learning_id.0
@@ -375,22 +356,9 @@ impl MemoryReducerCaller {
         let cutoff = encode::stamp(cutoff);
         let mut tables = self.lock();
         let now = self.now();
-        let scope = self.scope();
-        let seen: std::collections::HashSet<i64> = tables
-            .learnings
-            .values()
-            .filter(|l| tables.learning_visible(&scope, l))
-            .map(|l| l.id)
-            .collect();
         self.update_matching_learnings(
             &mut tables,
-            // `ArchiveStaleLearning` (V7): only what the caller sees.
-            |l| {
-                l.status == "approved"
-                    && l.upvote_count <= 0
-                    && l.updated_at <= cutoff
-                    && seen.contains(&l.id)
-            },
+            |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
             |row| module::Learning {
                 status: "archived".to_string(),
                 updated_at: now.clone(),

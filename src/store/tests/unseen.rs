@@ -1,9 +1,10 @@
 //! The new-task signal through the store handle
-//! (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`,
+//! (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`,
 //! `tasks.allium: SeeTaskByLandingOnIt`).
 use super::*;
 
-/// An epic the test user sees but does not follow: sight alone earns a mark.
+/// An epic the test user does not follow: a signal marks every known person,
+/// so no follow is needed for a mark.
 async fn epic_seen(db: &Store) -> crate::models::EpicId {
     db.create_epic("E", "", None).await.unwrap().id
 }

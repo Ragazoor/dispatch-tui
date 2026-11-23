@@ -490,8 +490,6 @@ impl TuiRuntime {
             params.feed_interval_secs = Some(applied.feed_interval_secs);
             edit.feed_interval_secs = Some(applied.feed_interval_secs);
         }
-        params.visibility = applied.visibility;
-        edit.visibility = applied.visibility;
         // A change TO a non-empty command, for the take-over prompt below.
         let feed_command_changed = matches!(edit.feed_command, Some(Some(_)));
         if params.updated_field_names().is_empty() {

@@ -13,7 +13,6 @@ use crate::mcp::trajectory;
 use crate::mcp::McpState;
 use chrono::Utc;
 
-use super::admin;
 use super::context;
 use super::epics;
 use super::keybindings;
@@ -103,17 +102,6 @@ pub(super) const OLD_TOOL_NAMES: &[(&str, &str)] = &[
         "call feed-config_read to read, feed-config_set (at least one field) to change",
     ),
     ("set_display_name", "call display-name_set"),
-    ("list_workspaces", "call workspace_search"),
-    ("create_workspace", "call workspace_create"),
-    (
-        "update_workspace",
-        "call workspace_update to rename. To delete a workspace, call workspace_delete",
-    ),
-    ("set_workspace_member", "call workspace-member_set"),
-    ("set_super_admin", "call super-admin_set"),
-    ("claim_super_admin", "call super-admin_claim"),
-    ("list_unseen_items", "call unseen-item_search"),
-    ("delete_unseen_item", "call unseen-item_delete"),
     ("query_usage", "call usage_read"),
     ("read_context", "call context_read"),
     (
@@ -325,7 +313,7 @@ usually the right answer.",
                 },
                 "signal": {
                     "type": "boolean",
-                    "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Everyone who can see the epic when the task is created is marked. Ignored when epic_id is null. Defaults to false."
+                    "description": "When true, signal the user that a new task arrived: the new task and every epic on the path to it are marked on the board until the user enters the epic. Every known person is marked when the task is created. Ignored when epic_id is null. Defaults to false."
                 }
             },
             "required": ["title", "repo_path", "epic_id"]
@@ -412,22 +400,17 @@ also moves on later edits.",
         };
 
     async write "epic_create" => epics::handle_epic_create,
-        "Create a new epic on the kanban board. Pass either workspace_id (a root epic) or \
-parent_epic_id (a sub-epic), never both and never neither: a root epic needs a workspace_id (a \
-refusal lists yours), and a sub-epic takes its parent's workspace and refuses one. An epic groups \
-related tasks and derives its status from theirs, so you do not set an epic's status directly. \
-visibility is public (every member of the \
-workspace sees it, the default) or private (only you do). Epics carry no repo_path — that lives \
-on each subtask, and passing it here is rejected.",
+        "Create a new epic on the kanban board. Pass parent_epic_id to make it a sub-epic; leave it \
+out for a root epic. An epic groups related tasks and derives its status from theirs, so you do \
+not set an epic's status directly. Epics carry no repo_path — that lives on each subtask, and \
+passing it here is rejected.",
         {
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "Epic title" },
                 "description": { "type": "string", "description": "Epic description" },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "parent_epic_id": { "type": "integer", "description": "Makes this a sub-epic of the epic with this id, in that epic's workspace, so pass no workspace_id with it. Leave it out for a root epic." },
-                "workspace_id": { "type": "integer", "description": "The workspace a root epic lives in: required for a root epic (no parent_epic_id), refused for a sub-epic. A refusal lists the workspaces you belong to." },
-                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only you do. Default public." }
+                "parent_epic_id": { "type": "integer", "description": "Makes this a sub-epic of the epic with this id. Leave it out for a root epic." }
             },
             "required": ["title"]
         };
@@ -477,10 +460,7 @@ epic_id for those. Each row shows the epic's updated and completed times (ISO 86
     async idempotent "epic_update" => epics::handle_epic_update,
         "Update an epic in place. Accepts title, description, status, plan_path, sort_order, \
 parent_epic_id, and the feed settings feed_command, feed_interval_secs, group_by_repo and \
-feed_append_only, and visibility (public or private), and workspace_id, which moves a root epic and its whole tree \
-(sub-epics, tasks, their learnings) to that workspace: allowed to a super-admin or an admin of both \
-the source and the destination workspace, refused for a sub-epic, and it drops work package links \
-into the tree and follows by people outside the destination. Every field left out is untouched; the nullable ones take an explicit null to \
+feed_append_only. Every field left out is untouched; the nullable ones take an explicit null to \
 clear. Setting status by hand is rarely right — an epic's status is recalculated from its \
 subtasks whenever they change. Re-parenting is cycle-checked and rejected if it would create a \
 loop.",
@@ -497,9 +477,7 @@ loop.",
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default)." },
                 "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
                 "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task from the TUI once it is done: deleting it retires its external id under this epic forever, so an append-only feed never recreates it. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
-                "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." },
-                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does. Changeable by the creator or a workspace admin." },
-                "workspace_id": { "type": "integer", "description": "Move this root epic and its tree to the workspace with this id (see workspace_search). Super-admin, or admin of both workspaces." }
+                "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." }
             },
             "required": ["epic_id"]
         };
@@ -509,21 +487,17 @@ loop.",
 wherever they sit in the epic tree, so work spread across several epics can be followed as one \
 board. A package only links; it never owns its items, and one item can belong to many packages. Pass \
 link_task_ids and link_epic_ids to link items at once; every id is checked first, and an unknown \
-one creates nothing. Needs a workspace_id (a refusal lists yours) and links only items in that \
-workspace, or tasks on your main board. visibility is public (the default) or private (only you \
-see it). Returns the new package's id. To group new work under a parent, use epic_create \
-instead.",
+one creates nothing. Returns the new package's id. To group new work under a parent, use \
+epic_create instead.",
         {
             "type": "object",
             "properties": {
                 "title": { "type": "string", "description": "Package title, for example the maintenance window it covers. Must not be blank." },
                 "description": { "type": "string", "description": "Free-text notes, for example the plan for the window." },
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
-                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link. A linked epic shows as one card; its subtasks are not linked one by one." },
-                "workspace_id": { "type": "integer", "description": "The workspace the package lives in. Required; a refusal lists the workspaces you belong to." },
-                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only you do. Default public." }
+                "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link. A linked epic shows as one card; its subtasks are not linked one by one." }
             },
-            "required": ["title", "workspace_id"]
+            "required": ["title"]
         };
 
     async read_only "work-package_search" => work_packages::handle_work_package_search,
@@ -547,7 +521,7 @@ the items. A package's sort order is shown when it has been set. Filter by when 
         };
 
     async idempotent "work-package_update" => work_packages::handle_work_package_update,
-        "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), set visibility (public or private), and change \
+        "Update a work package in place: rename it with title, rewrite description, set sort_order (lower values show first among the package cards), and change \
 its links with link_task_ids, unlink_task_ids, link_epic_ids and unlink_epic_ids. Unlinks apply \
 before links, linking an item already linked and unlinking one not linked are both silent, and \
 the tasks and epics themselves are never changed. Every id is checked before anything is written, \
@@ -560,7 +534,6 @@ and at least one must be given. To delete a package, call work-package_delete.",
                 "title": { "type": "string", "description": "New title. Must not be blank." },
                 "description": { "type": "string", "description": "New description." },
                 "sort_order": { "type": "integer", "description": "Display order within column (lower values appear first)" },
-                "visibility": { "type": "string", "enum": ["public", "private"], "description": "public: every member of the workspace sees it. private: only its creator does." },
                 "link_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing tasks to link." },
                 "unlink_task_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of tasks to unlink." },
                 "link_epic_ids": { "type": "array", "items": { "type": "integer" }, "description": "Ids of existing epics to link." },
@@ -844,125 +817,6 @@ Returns the saved name.",
                 "name": { "type": "string", "description": "The display name, 1 to 64 characters after trimming." }
             },
             "required": ["name"]
-        };
-
-    async read_only "workspace_search" => admin::handle_workspace_search,
-        "List the workspaces you can see, who is in each and in which role, who the super-admins are, \
-and the directory of every person by display name and short identity. Use it to find the \
-workspace_id and the person to name in epic_create, workspace-member_set and super-admin_set: \
-people are named by display name, and the directory tells two people with one name apart by \
-identity. A person sees the workspaces they belong to; a super-admin sees all of them. It \
-also says when super-admin_claim would work. It returns no epics, tasks or other content.",
-        {
-            "type": "object",
-            "properties": {
-                "workspace_id": { "type": "integer", "description": "Show only this workspace and its members, and leave out the directory of people. Omit to list every workspace you can see." }
-            }
-        };
-
-    async write "workspace_create" => admin::handle_workspace_create,
-        "Create a workspace: a place where people collaborate, holding epics and work packages. Only a \
-super-admin may. The new workspace has no members, not even you; add people, yourself included, \
-with workspace-member_set. Names are unique across the store, trimmed, and at most 64 characters. \
-Returns the new workspace's id and name.",
-        {
-            "type": "object",
-            "properties": {
-                "name": { "type": "string", "description": "The workspace name, 1 to 64 characters after trimming, not already used by another workspace." }
-            },
-            "required": ["name"]
-        };
-
-    async idempotent "workspace_update" => admin::handle_workspace_update,
-        "Rename a workspace. A super-admin or an admin of the workspace may. Renaming to the name it \
-already has changes nothing. Returns what changed. To delete a workspace, call workspace_delete.",
-        {
-            "type": "object",
-            "properties": {
-                "workspace_id": { "type": "integer", "description": "The workspace to rename, from workspace_search." },
-                "name": { "type": "string", "description": "The new name, 1 to 64 characters after trimming, not used by another workspace." }
-            },
-            "required": ["workspace_id", "name"]
-        };
-
-    async destructive "workspace_delete" => admin::handle_workspace_delete,
-        "Delete a workspace. Only a super-admin may, and only an empty workspace: one still holding an \
-epic or work package, private ones included, is refused, so empty it first (unseen-item_search and \
-unseen-item_delete reach private items nobody can see). Deleting removes its memberships and its \
-learnings and cannot be undone. Returns what was deleted. To rename a workspace, call \
-workspace_update.",
-        {
-            "type": "object",
-            "properties": {
-                "workspace_id": { "type": "integer", "description": "The workspace to delete, from workspace_search." }
-            },
-            "required": ["workspace_id"]
-        };
-
-    async idempotent "workspace-member_set" => admin::handle_workspace_member_set,
-        "Add a person to a workspace, change their role there, or remove them; one call does one of the \
-three. Give role to add the person (if they are not a member) or to change their role (if they are); \
-give remove=true to take them out. A super-admin or an admin of the workspace may. Removing a \
-person does not touch their epics or packages: their public ones stay for the others, their \
-private ones are then seen by nobody until they rejoin or a super-admin deletes them. Returns what \
-changed.",
-        {
-            "type": "object",
-            "properties": {
-                "workspace_id": { "type": "integer", "description": "The workspace, from workspace_search." },
-                "person": { "type": "string", "description": "The person's display name, or their identity (or its first 8 or more characters) when two people share a name. A name more than one person has is refused with the matches." },
-                "role": { "type": "string", "enum": ["admin", "member"], "description": "The role to give: admin can manage the workspace's members, member cannot. Adds the person when they are not a member. Give this or remove, not both." },
-                "remove": { "type": "boolean", "description": "When true, remove the person from the workspace; they must be a member. Give this or role, not both. False is the same as leaving it out." }
-            },
-            "required": ["workspace_id", "person"]
-        };
-
-    async idempotent "super-admin_set" => admin::handle_super_admin_set,
-        "Make a person a super-admin or stop them being one. Only a super-admin may. A super-admin \
-manages every workspace and may delete private items nobody can see, but cannot read them. \
-Repeating a call that already holds changes nothing. Taking the role from the last super-admin is \
-refused. To become the first one yourself, use super-admin_claim. Returns the person's name and \
-their new standing.",
-        {
-            "type": "object",
-            "properties": {
-                "person": { "type": "string", "description": "The person's display name, or their identity (or its first 8 or more characters) when two people share a name." },
-                "super_admin": { "type": "boolean", "description": "true makes the person a super-admin; false revokes it." }
-            },
-            "required": ["person", "super_admin"]
-        };
-
-    async write "super-admin_claim" => admin::handle_super_admin_claim,
-        "Make yourself the first super-admin. It works only while the store has none, and then once: \
-after that it is refused and a super-admin uses super-admin_set to add more. You are the person \
-whose board this agent runs under. Takes no arguments. Returns your new standing.",
-        {
-            "type": "object",
-            "properties": {}
-        };
-
-    async read_only "unseen-item_search" => admin::handle_unseen_item_search,
-        "List private epics and work packages that nobody can see any more because their creator has \
-left the workspace. Only a super-admin sees any; for anyone else the list is empty. Each entry is \
-its kind, id, workspace, creator and created date, never a title or content. The only thing to \
-do with one is unseen-item_delete.",
-        {
-            "type": "object",
-            "properties": {}
-        };
-
-    async destructive "unseen-item_delete" => admin::handle_unseen_item_delete,
-        "Permanently delete a private epic or work package that nobody can see, chosen from \
-unseen-item_search. Only a super-admin may. An epic is deleted with its sub-epics and tasks, and is \
-refused while any task in it is not done. A public item, or an id that does not exist, is refused \
-in the same words. It cannot be undone, and you never read what you delete.",
-        {
-            "type": "object",
-            "properties": {
-                "kind": { "type": "string", "enum": ["epic", "work_package"], "description": "The kind of item, as unseen-item_search names it." },
-                "item_id": { "type": "integer", "description": "The item's id from unseen-item_search." }
-            },
-            "required": ["kind", "item_id"]
         };
 
     async idempotent "verify-command_set" => tasks::handle_verify_command_set,

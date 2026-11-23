@@ -30,8 +30,7 @@ fn learning(id: i64, scope: &str, scope_ref: Option<&str>, author: &str) -> Lear
     }
 }
 
-/// K1: a task-scoped learning in a snapshot lands retired, not readable by the
-/// workspace.
+/// K1: a task-scoped learning in a snapshot lands retired.
 #[test]
 fn a_restored_task_scoped_learning_lands_retired() {
     let store = Store::bare();
@@ -44,10 +43,10 @@ fn a_restored_task_scoped_learning_lands_retired() {
     assert_eq!(row.status, "archived");
 }
 
-/// K1: a learning of a task in a private epic loses its workspace, as the
-/// migration does it.
+/// A learning of a task in an epic takes the task's repo, as the migration
+/// does it, and keeps its author.
 #[test]
-fn a_restored_task_learning_of_a_private_epic_loses_its_workspace() {
+fn a_restored_task_learning_of_an_epic_task_takes_its_repo() {
     let store = Store::bare();
     store
         .call_as_scheduler(|ctx| {
@@ -56,8 +55,6 @@ fn a_restored_task_learning_of_a_private_epic_loses_its_workspace() {
                 vec![Epic {
                     id: 5,
                     title: "e".into(),
-                    visibility: "private".into(),
-                    workspace_id: 7,
                     ..blank_epic()
                 }],
             )
@@ -82,7 +79,6 @@ fn a_restored_task_learning_of_a_private_epic_loses_its_workspace() {
         .call_as_scheduler(|ctx| seed_learnings(ctx, vec![learning(1, "task", Some("9"), "alice")]))
         .expect("seed_learnings");
     let row = store.db().learnings().id().find(1).expect("row");
-    assert_eq!(row.workspace_id, 0);
     assert_eq!(row.author, "alice");
     assert_eq!(row.scope_ref.as_deref(), Some("/repo"));
 }

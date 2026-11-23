@@ -310,23 +310,13 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
             tracing::warn!(count, value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
             EpicOrigin::Manual
         }),
-        workspace_id: row.workspace_id,
         feed_setter: text(&row.feed_command_set_by)
             .or_else(|| text(&row.created_by))
             .map(str::to_owned),
-        visibility: visibility(T, row.id, &row.visibility)?,
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
     })
-}
-
-/// An epic's or work package's visibility. An unknown value fails the row
-/// rather than guessing: guessing public could show a private item to the
-/// whole workspace (observability.allium: `BulkReadSkipsUndecodableRow`).
-fn visibility(table: &str, row_id: i64, value: &str) -> Decoded<crate::models::Visibility> {
-    crate::models::Visibility::parse(value)
-        .ok_or_else(|| DecodeError::new(table, row_id, format!("unknown visibility {value:?}")))
 }
 
 /// A `work_packages` row (`work-packages.allium: WorkPackage`).
@@ -338,8 +328,6 @@ pub fn work_package(row: &bindings::WorkPackage) -> Decoded<WorkPackage> {
         description: row.description.clone(),
         sort_order: row.sort_order,
         created_by: text(&row.created_by).map(str::to_owned),
-        workspace_id: row.workspace_id,
-        visibility: visibility(T, row.id, &row.visibility)?,
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
     })
@@ -455,7 +443,6 @@ pub fn learning(row: &bindings::Learning) -> Decoded<Learning> {
             .transpose()?,
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
-        workspace_id: row.workspace_id,
         author: row.author.clone(),
     })
 }

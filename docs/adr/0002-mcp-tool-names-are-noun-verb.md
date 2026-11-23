@@ -86,9 +86,9 @@ the main read tool works badly:
 | `set_review_command` | `review-command_read`, `review-command_set` |
 | `managed_feed_config` | `feed-config_read`, `feed-config_set` |
 | `set_display_name` | `display-name_set` |
-| `list_workspaces`, `create_workspace`, `update_workspace`, `set_workspace_member` | `workspace_search`, `workspace_create`, `workspace_update`, `workspace-member_set`, plus `workspace_delete` split out |
-| `set_super_admin`, `claim_super_admin` | `super-admin_set`, `super-admin_claim` |
-| `list_unseen_items`, `delete_unseen_item` | `unseen-item_search`, `unseen-item_delete` |
+| `list_workspaces`, `create_workspace`, `update_workspace`, `set_workspace_member` | `workspace_search`, `workspace_create`, `workspace_update`, `workspace-member_set`, plus `workspace_delete` split out (all removed in task 99362) |
+| `set_super_admin`, `claim_super_admin` | `super-admin_set`, `super-admin_claim` (removed in task 99362) |
+| `list_unseen_items`, `delete_unseen_item` | `unseen-item_search`, `unseen-item_delete` (removed in task 99362) |
 | `query_usage`, `read_context`, `list_keybindings` | `usage_read`, `context_read`, `keybinding_search` |
 
 The same default limit and empty-result wording apply to every `_search`

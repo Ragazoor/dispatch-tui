@@ -87,13 +87,7 @@ fn shift_h_on_done_epic_moves_to_review() {
 fn shift_e_key_starts_new_epic() {
     let mut app = make_app();
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('E'))));
-    // Opening a root epic form reads the person's workspaces.
-    assert!(matches!(
-        cmds.as_slice(),
-        [Command::People(
-            crate::tui::commands::PeopleCommand::LoadWorkspaces
-        )]
-    ));
+    assert!(cmds.is_empty(), "{cmds:?}");
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 }
 
@@ -227,17 +221,15 @@ fn epic_description_submit_completes_creation() {
         title: "My Epic".to_string(),
         description: String::new(),
         parent_epic_id: None,
-        ..Default::default()
     });
-    app.update(Message::Editor(
+    let cmds = app.update(Message::Editor(
         crate::tui::messages::EditorMessage::DescriptionResult("Some description".to_string()),
     ));
-    assert_eq!(app.input.mode, InputMode::InputPlacement);
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
-    // Enter at the placement step emits the Insert command
+    // The description emits the Insert command
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+        Command::Epic(crate::tui::commands::EpicCommand::Insert(d))
+            if d.title == "My Epic" && d.description == "Some description"
     )));
     // Mode should be reset to Normal
     assert_eq!(app.input.mode, InputMode::Normal);

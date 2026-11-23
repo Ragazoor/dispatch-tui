@@ -1,4 +1,4 @@
-//! People and display names (`workspaces.allium: RegisterUserProfile`,
+//! People and display names (`people.allium: RegisterUserProfile`,
 //! `SetDisplayName`, `UserProfile.shown_name`), run against the in-memory store.
 
 mod common;

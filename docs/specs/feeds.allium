@@ -39,6 +39,7 @@ use "./epics.allium" as epics
 use "./tasks.allium" as tasks
 use "./cli.allium" as cli
 use "./startup.allium" as startup
+use "./people.allium" as people
 
 ------------------------------------------------------------
 -- Value Types
@@ -1257,7 +1258,7 @@ rule FeedTick {
                         if not exists poll_owner:
                             -- CLAIM, THEN RUN. The claim goes through
                             -- ClaimPollOwner (the claim_poll_owner reducer),
-                            -- which holds the setter and sight checks. The
+                            -- which holds the setter check. The
                             -- cycle runs only once the claim is answered and
                             -- the owner read back is this host; see "Claim
                             -- then run" below.
@@ -1407,12 +1408,11 @@ rule ClaimPollOwner {
 
     -- store-split D11: only the host's own owner may claim for it.
     requires: host.owner != null and host.owner = caller()
-    -- The caller must see the scope. An unseen epic or
-    -- task is refused as "does not exist", so a claim cannot take or stall
-    -- the poll of something its caller cannot read. A feed epic is also
-    -- refused to a host whose owner did not set its command
-    -- (FeedCommandRunsOnSettersHost).
-    requires: sees(caller(), scope, scope_id)
+    -- A scope that does not exist is refused ("does not exist");
+    -- scope_exists(scope, scope_id) is a black box: the epic or task the
+    -- pair names is a row. A feed epic is also refused to a host whose owner
+    -- did not set its command (FeedCommandRunsOnSettersHost).
+    requires: scope_exists(scope, scope_id)
     let target = core/Epic{id: scope_id}    -- only read when scope = epic
     requires: scope != epic or target.feed_command = null
         or host.owner = (target.feed_command_set_by ?? target.created_by)
@@ -1438,8 +1438,8 @@ rule OverridePollOwner {
     -- store-split D11: a client can move a scope only to a host it owns, never to
     -- someone else's machine, so a poll cannot be stolen for another host.
     requires: host.owner != null and host.owner = caller()
-    -- The same sight and setter checks as ClaimPollOwner.
-    requires: sees(caller(), scope, scope_id)
+    -- The same existence and setter checks as ClaimPollOwner.
+    requires: scope_exists(scope, scope_id)
     let target = core/Epic{id: scope_id}    -- only read when scope = epic
     requires: scope != epic or target.feed_command = null
         or host.owner = (target.feed_command_set_by ?? target.created_by)
@@ -1469,46 +1469,34 @@ rule FeedCommandAuthority {
     when: epics/EpicFeedCommandSet(epic, command)
 
     -- A host runs feed_command as a shell command, so changing it is changing
-    -- what a person's machine runs. Only the epic's creator and an admin of
-    -- the epic's workspace may change it (a super-admin and the store
-    -- operator always may). The
-    -- owner of the host that holds the poll claim has NO authority of its
-    -- own: a claim is something any host can take, so it cannot stand for
-    -- authorship. A patch that leaves feed_command as it is, or sets it to the
-    -- value it already has, is not a change and needs no authority.
+    -- what a machine runs. Anyone may change it; what keeps a command off
+    -- other machines is the setter record: only a host whose owner set the
+    -- command runs it (FeedCommandRunsOnSettersHost). A patch that leaves
+    -- feed_command as it is, or sets it to the value it already has, is not
+    -- a change.
     --
     -- Both reducers that patch an epic, patch_epic and update_epic, hold a
-    -- patch to this rule. At CREATION there is nothing to check: a new epic
-    -- that carries a feed_command records its creator as the setter
-    -- (feed_command_set_by = created_by), managed epics included.
-    requires:
-        command = epic.feed_command
-        or caller() = epic.created_by
-        or epic.workspace.is_admin(caller())
-        or is_super_admin(caller())
-        or caller_is_store_operator()
-
+    -- patch to this rule. At CREATION a new epic that carries a feed_command
+    -- records its creator as the setter (feed_command_set_by = created_by),
+    -- managed epics included.
     let changed = command != epic.feed_command
 
     ensures:
         epic.feed_command = command
         -- A real change records who made it, and drops every claim held by a
-        -- registered host whose owner is not that person
-        -- (FeedCommandRunsOnSettersHost), so the setter's own host can claim
+        -- registered host whose owner is not that person, a host with no owner
+        -- included (FeedCommandRunsOnSettersHost), so the setter's own host can claim
         -- the feed at its next tick. A claim needs a registered host and no
         -- reducer deletes a host, so every claim is held by one.
         if changed:
             epic.feed_command_set_by = caller()
             for claim in core/PollOwners where scope = epic and scope_id = epic.id
-                    and host.owner != null and host.owner != caller():
+                    and host.owner != caller():
                 not exists claim
 
     @guidance
-        -- Module: spacetime/module/src/tasks_epics.rs::patch_epic via
-        -- spacetime/module/src/tasks_epics.rs::may_change_feed_command; mirrored in
-        -- MemoryReducerCaller's apply_patch_epic. The managed root's own
-        -- reconcile (epics.allium: ProvisionManagedEpics) writes only a root
-        -- its caller created, so it needs no check of its own.
+        -- Module: spacetime/module/src/tasks_epics.rs::patch_epic; mirrored in
+        -- MemoryReducerCaller's apply_patch_epic.
 }
 
 rule SerialisedFeedCycle {
@@ -2833,8 +2821,8 @@ rule RoleRoutedFeedSync {
         -- raced back in by another writer is under-reported, never torn down
         -- (see how the report is built, under UpsertFeedTasks). "Gone" also
         -- needs the task's epic still in the board's view: a task that left
-        -- the view because its epic went private or moved out of sight during
-        -- the round trip may still exist, so it is not reported (the ingest
+        -- the view because its epic left it (an unfollow) during the round
+        -- trip may still exist, so it is not reported (the ingest
         -- deletes tasks, never epics).
         -- The cost, stated honestly: if the process dies between the commit
         -- and the teardown, the worktree is orphaned on disk with no row left
@@ -2929,11 +2917,9 @@ rule NewReviewRequestIsSignalled {
     -- A PR that RoleRoutedFeedSync INSERTS (the "Absent from the subtree"
     -- branch) and whose route(item.signals) is my_reviews or team_reviews is
     -- created with the new-task signal on. It marks exactly the people
-    -- mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt marks:
-    -- every member of the workspace who can see the epic the task lands in,
-    -- in the same store transaction as the insert. "The epic it lands in" is
-    -- the repo group under the role sub-epic when that sub-epic groups by
-    -- repo, else the role sub-epic itself.
+    -- mcp-task-tools.allium: SignalMarksTheTaskForEveryone marks: one
+    -- core/UnseenTask per people/UserProfile, in the same store transaction
+    -- as the insert.
     -- A task REOPENED by UpsertFeedTasks' coming-back clause (a done task
     -- with left_feed whose item is back — a review requested again) is
     -- signalled the same way: it is new review work, not a refresh.
@@ -2941,8 +2927,8 @@ rule NewReviewRequestIsSignalled {
         for item in items where route(item.signals) in {my_reviews, team_reviews}:
             for task in inserted_or_reopened_tasks(epic, items)
                     where task.external_id = item.external_id:
-                for m in task.epic.workspace.memberships where task.epic.visible_to(m.user):
-                    core/UnseenTask.created(subscriber: m.user, task: task)
+                for p in people/UserProfiles:
+                    core/UnseenTask.created(subscriber: p.identity, task: task)
 
     @guidance
         -- The signal is the create-time flag task_create already has; the feed
@@ -2970,7 +2956,7 @@ rule NewReviewRequestIsSignalled {
         --
         -- Implementation: spacetime/module/src/feed_ingest.rs::ingest_role_routed,
         -- through IngestStore's
-        -- mark_task_unseen_for_viewers, which the module and the board's
+        -- mark_task_unseen_for_everyone, which the module and the board's
         -- in-memory double both implement.
         -- Tests: src/feed/ingest/tests/role_routing.rs::new_my_reviews_pr_is_signalled_and_a_refresh_is_not,
         -- src/feed/ingest/tests/role_routing.rs::new_team_reviews_pr_is_signalled,
@@ -3912,7 +3898,7 @@ rule ServeFeedRefreshRequest {
         -- RE-CHECKED here, against the epic as it is now: the command may
         -- have been re-set by someone else since the request was written.
         -- So is the poll ownership: a request written for a host that has
-        -- since lost the poll (OverrideFeedOwner, a loss of sight) is failed,
+        -- since lost the poll (OverrideFeedOwner) is failed,
         -- not run, so two hosts never reconcile one epic.
         -- As for ManualFeedTrigger, the epic's last_run is NOT updated: the
         -- next automatic poll fires at its normal time.

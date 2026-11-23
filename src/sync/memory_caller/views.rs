@@ -1,7 +1,7 @@
 //! The per-caller views, served from this store's rows. Mirrors the module's
 //! `views.rs` (`docs/architecture.md`: "Read enforcement: per-caller views"): the module's own
 //! view bodies run here over [`Tables`], so the double and the module cannot
-//! disagree about who sees what. `tests/memory_caller_conformance.rs` compares
+//! disagree about what each caller receives. `tests/memory_caller_conformance.rs` compares
 //! the two against a live store.
 
 use dispatch_spacetime_module as module;
@@ -23,23 +23,6 @@ impl StoreReads for Tables {
     fn package(&self, id: i64) -> Option<module::WorkPackage> {
         self.work_packages.get(&id).cloned()
     }
-    fn workspace(&self, id: i64) -> Option<module::Workspace> {
-        self.workspaces.get(&id).cloned()
-    }
-    fn listed_workspaces(&self) -> Vec<module::Workspace> {
-        keep(self.workspaces.values().cloned(), |w| w.listed)
-    }
-    fn profile(&self, who: &str) -> Option<module::UserProfile> {
-        self.user_profiles.get(who).cloned()
-    }
-    fn members_of(&self, workspace_id: i64) -> Vec<module::Membership> {
-        keep(self.memberships.values().cloned(), |m| {
-            m.workspace_id == workspace_id
-        })
-    }
-    fn memberships_of(&self, user: &str) -> Vec<module::Membership> {
-        keep(self.memberships.values().cloned(), |m| m.user == user)
-    }
     fn subscriptions_of(&self, subscriber: &str) -> Vec<module::Subscription> {
         keep(self.subscriptions.values().cloned(), |s| {
             s.subscriber == subscriber
@@ -47,11 +30,6 @@ impl StoreReads for Tables {
     }
     fn epics_under(&self, parent: i64) -> Vec<module::Epic> {
         keep(self.epics.values().cloned(), |e| e.parent_epic_id == parent)
-    }
-    fn epics_in_workspace(&self, workspace_id: i64) -> Vec<module::Epic> {
-        keep(self.epics.values().cloned(), |e| {
-            e.workspace_id == workspace_id
-        })
     }
     fn epics_created_by(&self, who: &str) -> Vec<module::Epic> {
         keep(self.epics.values().cloned(), |e| e.created_by == who)
@@ -64,11 +42,6 @@ impl StoreReads for Tables {
     }
     fn tasks_created_by(&self, who: &str) -> Vec<module::Task> {
         keep(self.tasks.values().cloned(), |t| t.created_by == who)
-    }
-    fn packages_in_workspace(&self, workspace_id: i64) -> Vec<module::WorkPackage> {
-        keep(self.work_packages.values().cloned(), |p| {
-            p.workspace_id == workspace_id
-        })
     }
     fn packages_created_by(&self, who: &str) -> Vec<module::WorkPackage> {
         keep(self.work_packages.values().cloned(), |p| {
@@ -139,13 +112,8 @@ impl StoreReads for Tables {
             p.scope_id == scope_id
         })
     }
-    fn learnings_in_workspace(&self, workspace_id: i64) -> Vec<module::Learning> {
-        keep(self.learnings.values().cloned(), |l| {
-            l.workspace_id == workspace_id
-        })
-    }
-    fn learnings_by_author(&self, author: &str) -> Vec<module::Learning> {
-        keep(self.learnings.values().cloned(), |l| l.author == author)
+    fn all_learnings(&self) -> Vec<module::Learning> {
+        self.learnings.values().cloned().collect()
     }
     fn hosts_owned_by(&self, owner: &str) -> Vec<module::Host> {
         keep(self.hosts.values().cloned(), |h| h.owner == owner)
@@ -160,14 +128,6 @@ impl StoreReads for Tables {
     }
     fn archived_task(&self, id: i64) -> Option<module::ArchivedTask> {
         self.archived_tasks.get(&id).cloned()
-    }
-    fn archived_tasks_in_workspace(&self, workspace_id: i64) -> Vec<module::ArchivedTask> {
-        keep(self.archived_tasks.values().cloned(), |a| {
-            a.workspace_id == workspace_id
-        })
-    }
-    fn archived_tasks_owned_by(&self, who: &str) -> Vec<module::ArchivedTask> {
-        keep(self.archived_tasks.values().cloned(), |a| a.owner == who)
     }
     fn all_archived_tasks(&self) -> Vec<module::ArchivedTask> {
         self.archived_tasks.values().cloned().collect()
@@ -195,18 +155,6 @@ impl MemoryReducerCaller {
                 .map(|e| e.id)
                 .collect()),
             "covered_tasks" => ids(module::covered_tasks_of(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
-            "visible_epics" => ids(module::visible_epics_of(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
-            "visible_tasks" => ids(module::visible_tasks_of(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
-            "visible_packages" => ids(module::visible_packages_of(t, who)
                 .iter()
                 .map(|e| e.id)
                 .collect()),
@@ -254,7 +202,7 @@ impl MemoryReducerCaller {
                 .into_iter()
                 .map(|l| l.id)
                 .collect(),
-            "visible_learnings" => ids(module::learnings_visible_to(t, who)
+            "visible_learnings" => ids(module::learnings_visible_to(t)
                 .iter()
                 .map(|e| e.id)
                 .collect()),
@@ -266,14 +214,6 @@ impl MemoryReducerCaller {
                 .into_iter()
                 .map(|s| s.id)
                 .collect(),
-            "visible_workspaces" => ids(module::workspaces_visible_to(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
-            "visible_memberships" => ids(module::memberships_visible_to(t, who)
-                .iter()
-                .map(|e| e.id)
-                .collect()),
             _ => return None,
         };
         keys.sort();

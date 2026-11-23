@@ -1,10 +1,10 @@
 use super::*;
 
-/// `workspaces.allium: WritesRequireSight` ("Identities are the caller's",
-/// task #98755): the real reducers and the twin stamp the caller as owner of a
-/// task that is created with no epic or detached from its epic, whatever owner
-/// the argument names, and `unsubscribe_from_epic` refuses another person's
-/// subscriber and hides an epic the caller cannot see.
+/// `store-split.allium: IdentitiesAreTheCallers` (task #98755): the real
+/// reducers and the twin stamp the caller as owner of a task that is created
+/// with no epic or detached from its epic, whatever owner the argument names,
+/// and `unsubscribe_from_epic` refuses another person's subscriber. A new
+/// learning's author is the caller too, whatever the row names.
 ///
 /// The board never reads `owner` back, but the per-caller views deliver a user
 /// board task only to its owner. So a task the real store delivers back was
@@ -31,7 +31,7 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -40,7 +40,7 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();
@@ -103,10 +103,7 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
         wait_for!(rows_real.task(d).is_some());
         mem.align_next_task_id(d.0);
         assert_eq!(mem.create_task(inside).await.unwrap(), d);
-        // The task's creator may detach it onto their own board
-        // (`TaskMovesStayInTheWorkspace`, tasks #98852 and #98916); the
-        // refusal of everyone else is the module tests' and the twin's shared
-        // `task_detach_permitted`.
+        // Anyone may detach a task onto their own board (R7).
         let applied = |out: ReducerOutcome| matches!(out, ReducerOutcome::Applied(_));
         assert!(applied(
             real.set_task_epic(d, None, "someone-else".into())
@@ -178,5 +175,39 @@ fn memory_caller_stamps_the_caller_and_guards_unsubscribe() {
                 .unwrap(),
         );
         assert!(why.contains("no epic"), "{why}");
+
+        // -- a learning's author is the caller, whatever the row names --------
+        // (`store-split.allium: IdentitiesAreTheCallers`.) One row per scope,
+        // each naming another author and a dead workspace; both stores keep
+        // the same row, stamped with the caller.
+        let sent =
+            |scope: &str, scope_ref: Option<String>, source: Option<i64>| bindings::Learning {
+                scope: scope.into(),
+                scope_ref,
+                source_task_id: source,
+                workspace_id: 999,
+                author: "someone-else".into(),
+                ..blank_learning()
+            };
+        for row in [
+            sent("user", None, None),
+            sent("epic", Some(e.to_string()), None),
+            sent("repo", Some("/repo".into()), Some(d.0)),
+            sent("repo", Some("/repo".into()), None),
+        ] {
+            let real_id = real.create_learning(row.clone()).await.unwrap();
+            wait_for!(rows_real.learning(real_id).is_some());
+            mem.align_next_learning_id(real_id.0);
+            let mem_id = mem.create_learning(row).await.unwrap();
+            assert_eq!(
+                rows_real.learning(real_id).map(|l| learning_shape(&l)),
+                rows_mem.learning(mem_id).map(|l| learning_shape(&l)),
+                "learning {real_id:?}"
+            );
+            for (side, rows, id) in [("real", &rows_real, real_id), ("twin", &rows_mem, mem_id)] {
+                let stamped = rows.learning(id).expect("the learning");
+                assert_eq!(stamped.author, identity, "{side}: {real_id:?}");
+            }
+        }
     });
 }

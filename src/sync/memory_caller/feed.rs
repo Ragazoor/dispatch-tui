@@ -261,10 +261,8 @@ impl MemoryReducerCaller {
             return;
         };
         if finishing {
-            let scope = self.scope();
             let moved = self.patch_task_row_in(
                 tables,
-                &scope,
                 crate::models::TaskId(task.id),
                 module::left_feed_done_patch(),
                 true,
@@ -398,26 +396,22 @@ impl MemoryReducerCaller {
         parent_epic_id: i64,
         command: Option<(&str, i64)>,
     ) -> i64 {
-        let scope = self.scope();
         let existing = tables
             .epics
             .values()
-            // A root is its creator's own and visible (V9); a sub-epic's
-            // slot is filled by any child with the role. See the module's twin.
+            // A root is its creator's own; a sub-epic's slot is filled by any
+            // child with the role. See the module's twin.
             .find(|e| {
                 e.parent_epic_id == parent_epic_id
                     && e.feed_role == role
-                    && (parent_epic_id != 0
-                        || (e.created_by == self.sender
-                            && tables.visible_epic(&scope, e.id).is_some()))
+                    && (parent_epic_id != 0 || e.created_by == self.sender)
             })
             .cloned();
         if let Some(epic) = existing {
-            let make_private = parent_epic_id == 0 && epic.visibility != module::VISIBILITY_PRIVATE;
             let retarget = command.is_some_and(|(cmd, interval)| {
                 epic.feed_command != cmd || epic.feed_interval_secs != interval
             });
-            if !make_private && !retarget {
+            if !retarget {
                 return epic.id;
             }
             let id = epic.id;
@@ -425,9 +419,6 @@ impl MemoryReducerCaller {
                 updated_at: self.now(),
                 ..epic
             };
-            if make_private {
-                row.visibility = module::VISIBILITY_PRIVATE.to_string();
-            }
             if let Some((cmd, interval)) = command {
                 if row.feed_command != cmd {
                     row.feed_command_set_by = self.sender.clone();
@@ -436,32 +427,11 @@ impl MemoryReducerCaller {
                 row.feed_interval_secs = interval;
             }
             self.write_epic(tables, row);
-            // `ClaimsFollowSight`: the root turned private above.
-            if make_private {
-                let subtree = Self::collect_epic_subtree_ids(tables, id);
-                self.on_sight_lost(tables, &subtree);
-            }
             return id;
         }
         let (feed_command, feed_interval_secs) =
             command.map(|(c, i)| (c.to_string(), i)).unwrap_or_default();
         let now = self.now();
-        // A managed root epic lives in the caller's first workspace, and is
-        // not created for a caller in none (the module's `ensure_role_epic`).
-        let workspace_id = if parent_epic_id == 0 && self.workspace_rules {
-            let first = tables
-                .memberships
-                .values()
-                .filter(|m| m.user == self.sender)
-                .map(|m| m.workspace_id)
-                .min();
-            match first {
-                Some(workspace_id) => workspace_id,
-                None => return 0,
-            }
-        } else {
-            0
-        };
         self.write_epic(
             tables,
             module::Epic {
@@ -476,15 +446,8 @@ impl MemoryReducerCaller {
                 feed_command,
                 feed_interval_secs,
                 created_by: self.sender.clone(),
-                // A managed root is private to its creator (V9).
-                visibility: if parent_epic_id == 0 {
-                    module::VISIBILITY_PRIVATE.to_string()
-                } else {
-                    module::blank_epic().visibility
-                },
                 created_at: now.clone(),
                 updated_at: now,
-                workspace_id,
                 ..module::blank_epic()
             },
         )
@@ -626,8 +589,8 @@ impl module::IngestStore for TablesIngest<'_> {
         self.caller.recalculate_epic_chain(self.tables, epic_id);
     }
 
-    fn mark_task_unseen_for_viewers(&mut self, task_id: i64, epic_id: i64) {
+    fn mark_task_unseen_for_everyone(&mut self, task_id: i64, epic_id: i64) {
         self.caller
-            .mark_task_unseen_for_viewers(self.tables, task_id, epic_id);
+            .mark_task_unseen_for_everyone(self.tables, task_id, epic_id);
     }
 }

@@ -2285,8 +2285,8 @@ surface UnprovisionedIndicator {
         -- would be left in backlog under a provisioning agent.
         --
         -- Membership alone is not enough to decide this. A board sees only
-        -- the request rows naming its own host, so a teammate's board showing
-        -- the same task in a shared epic would see a genuinely-provisioning
+        -- the request rows naming its own host, so another host's board
+        -- showing the same task would see a genuinely-provisioning
         -- task as abandoned. Hence the claim-stamp fallback in
         -- dispatch_in_flight: a claim younger than the request timeout is
         -- treated as alive, whichever machine made it. Once it ages past that

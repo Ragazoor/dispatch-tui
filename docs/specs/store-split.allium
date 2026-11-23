@@ -24,7 +24,9 @@
 --           request row (a refresh asked of an epic's poll owner, a teardown
 --           asked of the host holding a feed task the stale delete removed)
 --           and its lifecycle, the owner check on host-scoped setting writes,
---           and the details still undecided.
+--           the identities every write takes from the caller
+--           (StoreWriteChecks: IdentitiesAreTheCallers), and the details
+--           still undecided.
 -- Excludes: What a host does to provision a claimed dispatch request — the
 --           worktree, the tmux window, the launch (dispatch.allium:
 --           ProvisionDispatch); what a host does to serve a claimed session
@@ -61,7 +63,7 @@
 --     rather than each client re-implementing it. Checks about the request
 --     rather than the data (an empty patch, the feed interval floor, the
 --     typed-url pair) stay at the service and MCP boundary; the module still
---     refuses a missing epic itself (tasks.allium:
+--     refuses a missing epic itself (tasks.allium: CreateTask,
 --     UpdateTaskIsOneTransaction, epics.allium: UpdateEpicIsOneTransaction).
 --   - S2, host work stays in the TUI process, and stays thin. The MCP and
 --     hook HTTP endpoint, feed script execution and PR polling run in the
@@ -190,13 +192,13 @@
 --     LocalHostOwnerIsWrittenOnce: a caller may name only itself as a host's
 --     owner, and an owned host's owner is never rewritten. A NEW host row
 --     must name its owner: host ids are public, so an ownerless row would go
---     to whichever caller registered that id next, and a teammate could lock
+--     to whichever caller registered that id next, and another identity could lock
 --     a new machine out of its own host. A legacy ownerless row may be
 --     adopted by the first caller naming itself. The board registers only
 --     once its identity has settled, and always as that identity
 --     (sync.allium: RegisterHostOnConnect). LIMIT, by decision: one person's
 --     machines share an owner, so one of their machines can name another of
---     theirs; a teammate cannot. Every other reducer that takes a host
+--     theirs; another identity cannot. Every other reducer that takes a host
 --     argument makes the same check, for example poll ownership (feeds.allium:
 --     ClaimPollOwner, OverridePollOwner), PR reports (pr-workflow.allium:
 --     ReportPrStatus, ReportPrUnreadable), the feed reducers (ingest_feed and
@@ -408,6 +410,38 @@ use "./settings.allium" as settings
 use "./tasks.allium" as tasks
 use "./sync.allium" as sync
 use "./feeds.allium" as feeds
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- Checks the store runs inside its write reducers, whichever client calls
+-- them (the StoreWriteReducers surface fulfils them). caller() is the
+-- identity the reducer runs under.
+contract StoreWriteChecks {
+    @invariant IdentitiesAreTheCallers
+        -- Every identity a write records is the caller's, never a client's
+        -- claim:
+        --   - created_by on a created task (create_task,
+        --     create_task_signalled), epic (create_epic) or work package is
+        --     the caller, whatever the row says;
+        --   - a task created with no epic, or detached from its epic
+        --     (set_task_epic, update_task), lands on the caller's own user
+        --     board: owner = the caller, whatever the argument says. A task
+        --     that joins an epic carries no owner (core.allium:
+        --     OwnerTracksUserBoardTask);
+        --   - a recorded learning's author is the caller (core.allium:
+        --     Learning.author);
+        --   - subscribe_to_epic, unsubscribe_from_epic and mark_task_seen
+        --     refuse a subscriber that is not the caller.
+        -- Only the operator (the store's own scheduled calls) may name
+        -- another identity; the owner argument stays in the signatures for
+        -- it. Only the store itself or its publisher may call the seed_*
+        -- reducers (spacetime-seed.allium: StorePublisher).
+        -- So a board never files work on, or credits it to, an identity other
+        -- than its own, and every created_by names someone a card can show
+        -- (people.allium: CreatorIsShownByName).
+}
 
 ------------------------------------------------------------
 -- Enumerations
@@ -1151,8 +1185,8 @@ rule DeletingATaskFailsItsOpenRequest {
         -- D8. In the SAME reducer that deletes the task row, and it cancels
         -- the request's scheduled timer. TaskRowDeleted is raised by every
         -- rule that deletes a task row: DeleteTask and BatchDelete
-        -- (tasks.allium), an epic delete's subtree (epics.allium: DeleteEpic,
-        -- the super-admin's delete of an unseen epic among them) and the feed
+        -- (tasks.allium), an epic delete's subtree (epics.allium: DeleteEpic)
+        -- and the feed
         -- stale delete (feeds.allium: UpsertFeedTasks,
         -- RoleRoutedFeedSync). The module runs all three delete rules from
         -- one list of side effects every such reducer calls
@@ -1710,9 +1744,6 @@ rule RequestFeedRefresh {
 
     -- host is the asking board's own host, which the caller must act for.
     requires: host.owner != null and host.owner = caller()
-    -- An epic the caller cannot see is refused as "does not exist", as for
-    -- ClaimPollOwner.
-    requires: sees(caller(), epic, epic.id)
     requires: epic.feed_command != null
     let owner = core/PollOwner{scope: epic, scope_id: epic.id}
     -- No owner yet: refused ("no poll owner yet"). The asking board then
@@ -2350,6 +2381,15 @@ surface ModuleRequestReducers {
         FeedRequestFailed(request, reporter, reason)
 }
 
+-- The store's write reducers that record an identity, whichever client calls
+-- them. They run the StoreWriteChecks contract's checks.
+surface StoreWriteReducers {
+    facing _: core/StoreClient
+
+    contracts:
+        fulfils StoreWriteChecks
+}
+
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
@@ -2360,7 +2400,7 @@ open question "A close failing a chained dispatch: CloseFailsOpenRequests fails 
 
 open question "Window left alive (W5, W7, W8): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The starting board kills the window of a row its own sweep failed (a row failed by deletion is removed with it, a separate open question above). Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
 
-open question "Seeing other machines' requests: a board's subscription delivers only request rows naming its own host. A teammate's board that shows the same task in a shared epic cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they can see?"
+open question "Seeing other machines' requests: a board's subscription delivers only request rows naming its own host. Another host's board that shows the same task cannot see the request, so its UnprovisionedIndicator falls back to the claim stamp. Should boards also receive the open requests of every task they show?"
 
 open question "Feed request prune emitters: FeedRequestRowsArePruned runs only from request_feed_refresh and from the stale delete that writes a teardown row, not from request_dispatch or request_wrap_up. A person who dispatches and wraps up but whose feed epics only run on one host therefore prunes finished teardown rows only when a stale delete writes the next one. Should every request write sweep all three tables, or is the sweep at the two feed writers acceptable?"
 

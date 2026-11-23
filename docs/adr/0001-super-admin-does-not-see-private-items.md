@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted, 2026-11-13.
+Superseded by `docs/plans/2026-11-23-remove-workspaces.md` (task 99362,
+2026-11-23): one person uses the store, so there are no super-admins and no
+private items left to withhold. Accepted 2026-11-13; the text below is kept as
+it was.
 
 ## Context
 

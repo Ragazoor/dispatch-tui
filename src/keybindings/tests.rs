@@ -157,12 +157,12 @@ fn namespace_names_are_unique_and_round_trip() {
 #[test]
 fn family_names_select_every_namespace_of_the_family() {
     let confirm = namespaces_matching("board.confirm").unwrap();
-    assert_eq!(confirm.len(), 15);
+    assert_eq!(confirm.len(), 14);
     assert!(confirm
         .iter()
         .all(|n| n.name().starts_with("board.confirm.")));
     let picker = namespaces_matching("board.picker").unwrap();
-    assert_eq!(picker.len(), 10);
+    assert_eq!(picker.len(), 9);
     assert_eq!(namespaces_matching("board.normal").unwrap().len(), 1);
     assert!(namespaces_matching("board").is_none());
     assert!(namespaces_matching("nonsense").is_none());
@@ -470,7 +470,7 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
         assert!(yes.keys.contains(&"Y"), "{}: y and Y are one row", n.name());
         assert!(yes.action.ends_with("_yes"), "{}: {}", n.name(), yes.action);
     }
-    assert_eq!(checked, 12, "twelve confirm dialogs answer y/Y");
+    assert_eq!(checked, 11, "eleven confirm dialogs answer y/Y");
 }
 
 #[test]

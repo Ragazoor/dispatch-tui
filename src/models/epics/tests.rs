@@ -227,8 +227,6 @@ fn epic_struct_fields() {
         group_by_repo: false,
         feed_append_only: false,
         feed_role: FeedRole::None,
-        workspace_id: 0,
-        visibility: crate::models::Visibility::Public,
         origin: EpicOrigin::Manual,
         feed_setter: None,
         created_at: now,

@@ -21,11 +21,11 @@ fn unseen_for(store: &Store, who: &str) -> Vec<i64> {
     ids
 }
 
-/// Everyone who can see the epic is marked, with no subscription anywhere
-/// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`), and
-/// nobody outside the workspace is.
+/// Every known person (every profile) is marked, with no subscription
+/// anywhere (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`), and
+/// nobody without a profile is.
 #[test]
-fn a_signalled_task_is_unseen_for_everyone_who_sees_its_epic() {
+fn a_signalled_task_is_unseen_for_every_known_person() {
     let store = Store::new();
     let root = store.create_epic("alice", "root", false);
     let child = store.create_epic("alice", "child", false);
@@ -51,24 +51,6 @@ fn a_signalled_task_is_unseen_for_everyone_who_sees_its_epic() {
     assert!(unseen_for(&store, "outsider").is_empty());
 }
 
-/// A private epic is seen by its holder only, so only the holder is marked.
-#[test]
-fn a_signalled_task_in_a_private_epic_marks_only_its_holder() {
-    let store = Store::new();
-    let epic = store.create_epic("alice", "mine", false);
-    store
-        .call("alice", |ctx| {
-            set_epic_visibility(ctx, epic, VISIBILITY_PRIVATE.into())
-        })
-        .expect("set_epic_visibility");
-    store.enrol("bob");
-
-    let task = store.create_signalled("alice", epic_task("new", epic, "backlog"));
-
-    assert_eq!(unseen_for(&store, "alice"), vec![task]);
-    assert!(unseen_for(&store, "bob").is_empty());
-}
-
 /// A plain `create_task` never writes a mark.
 #[test]
 fn an_ordinary_create_marks_nothing() {
@@ -81,7 +63,8 @@ fn an_ordinary_create_marks_nothing() {
     assert!(store.db().unseen_tasks().iter().next().is_none());
 }
 
-/// Someone who joins after the task exists is not marked for it.
+/// Someone whose profile is registered after the task exists is not marked
+/// for it.
 #[test]
 fn a_later_member_is_not_marked() {
     let store = Store::new();

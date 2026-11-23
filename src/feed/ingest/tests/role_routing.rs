@@ -711,9 +711,9 @@ async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
 
 // --- feeds.allium: NewReviewRequestIsSignalled ---
 
-/// A reviews parent the test user can see but does NOT follow: the signal
-/// marks everyone who sees the epic, and a subscription plays no part
-/// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
+/// A reviews parent the test user does NOT follow: the signal marks every
+/// known person, and a subscription plays no part
+/// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`).
 /// `run_role_routed_feed_sync` sets its role.
 async fn reviews_parent(db: &Store) -> crate::models::EpicId {
     db.create_epic("Reviews", "", None).await.unwrap().id

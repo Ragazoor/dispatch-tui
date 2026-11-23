@@ -123,12 +123,11 @@ pub trait TaskRead: Send + Sync {
     /// Bookmark`), ascending. Drives the board's bookmark mark and the MCP
     /// `bookmarked` line and filter.
     async fn bookmarked_task_ids(&self) -> Vec<TaskId>;
-    /// One archived task the caller may see (`core.allium: ArchivedTask`),
-    /// asked of the STORE: the board holds no archived records. `Ok(None)` is
-    /// both "never archived" and "not yours to see"; `Err` means the store
-    /// could not be asked.
+    /// One archived task (`core.allium: ArchivedTask`), asked of the STORE:
+    /// the board holds no archived records. `Ok(None)` means never archived;
+    /// `Err` means the store could not be asked.
     async fn archived_task(&self, id: TaskId) -> Result<Option<crate::models::ArchivedTask>>;
-    /// The caller-visible archived tasks in `epic_id` (`None` for any) and
+    /// The archived tasks in `epic_id` (`None` for any) and
     /// `repo_paths` (empty for any), newest archived first.
     async fn archived_tasks(
         &self,
@@ -164,9 +163,9 @@ pub trait TaskCrud: TaskRead {
         epic_ids: &[EpicId],
     ) -> Result<DeleteCheck>;
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
-    /// [`Self::create_task`], marking the task unseen for everyone who can see
-    /// its epic in the same transaction
-    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
+    /// [`Self::create_task`], marking the task unseen for every known person in
+    /// the same transaction
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`).
     async fn create_task_signalled(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
     /// `tasks.allium: SeeTaskByLandingOnIt`: a key left this board's cursor on
@@ -631,11 +630,6 @@ pub struct EpicBirth<'a> {
     pub sort_order: Option<i64>,
     pub feed_command: Option<&'a str>,
     pub feed_interval_secs: Option<i64>,
-    /// The workspace a root epic lives in; a sub-epic's is its parent's, and
-    /// the service fills it in. `0` is none: the store refuses it for a root
-    /// epic.
-    pub workspace_id: i64,
-    pub visibility: crate::models::Visibility,
 }
 
 /// Epic mutations, layered on top of the read surface. The
@@ -677,26 +671,11 @@ pub trait EpicCrud: EpicRead {
         cve_interval_secs: Option<i64>,
     ) -> Result<()>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
-    /// The patch, the workspace move and the visibility change as ONE store
-    /// transaction (`epics.allium: UpdateEpicIsOneTransaction`): a
-    /// refused part leaves nothing applied. `None` leaves the workspace or
-    /// visibility alone. A missing epic is an error here, unlike
+    /// The patch as ONE store transaction (`epics.allium:
+    /// UpdateEpicIsOneTransaction`): a refused part leaves nothing applied.
+    /// A missing epic is an error here, unlike
     /// [`patch_epic`](Self::patch_epic)'s no-op.
-    async fn update_epic(
-        &self,
-        id: EpicId,
-        patch: &EpicPatch<'_>,
-        workspace_id: Option<i64>,
-        visibility: Option<crate::models::Visibility>,
-    ) -> Result<()>;
-    /// `workspaces.allium: SetEpicVisibility`.
-    async fn set_epic_visibility(
-        &self,
-        id: EpicId,
-        visibility: crate::models::Visibility,
-    ) -> Result<()>;
-    /// `workspaces.allium: MoveEpicToWorkspace`.
-    async fn move_epic_to_workspace(&self, id: EpicId, workspace_id: i64) -> Result<()>;
+    async fn update_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
     /// `epics.allium: RegroupEpic`, decided and applied by the store in one
@@ -730,7 +709,6 @@ pub struct WorkPackageFields<'a> {
     pub title: Option<&'a str>,
     pub description: Option<&'a str>,
     pub sort_order: Option<i64>,
-    pub visibility: Option<crate::models::Visibility>,
 }
 
 #[async_trait::async_trait]
@@ -743,16 +721,8 @@ pub trait WorkPackageCrud: WorkPackageRead {
         title: &str,
         description: &str,
         links: &[WorkPackageItem],
-        workspace_id: i64,
-        visibility: crate::models::Visibility,
     ) -> Result<WorkPackageId>;
-    /// `workspaces.allium: SetWorkPackageVisibility`.
-    async fn set_work_package_visibility(
-        &self,
-        id: WorkPackageId,
-        visibility: crate::models::Visibility,
-    ) -> Result<()>;
-    /// The patch, the visibility change, then every unlink, then every link,
+    /// The patch, then every unlink, then every link,
     /// in one store transaction (`work-packages.allium:
     /// UpdateWorkPackageIsOneTransaction`). `None` leaves a field alone; an
     /// unlink of an item that is not linked is a silent success.
@@ -899,53 +869,17 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
-// PeopleStore — the caller's own profile (`workspaces.allium`)
+// PeopleStore — the caller's own profile (`people.allium`)
 // ---------------------------------------------------------------------------
 
 /// People and display names. A board reads the directory through
 /// [`BoardReads`]-style row accessors; what it WRITES is only its own name.
 #[async_trait::async_trait]
 pub trait PeopleStore: Send + Sync {
-    /// `workspaces.allium: SetDisplayName`: set the display name of the
+    /// `people.allium: SetDisplayName`: set the display name of the
     /// identity this connection writes as. The store trims, bounds and refuses
     /// a blank or over-long name; answers the name it saved.
     async fn set_display_name(&self, name: &str) -> Result<String>;
-    /// The workspaces the identity this connection writes as belongs to, by
-    /// id. Empty with no settled identity.
-    async fn my_workspaces(&self) -> Vec<crate::models::WorkspaceRef>;
-
-    /// What the admin screen and the list tools show: the workspaces the
-    /// person administers or belongs to (all, for a super-admin), the
-    /// directory, and the unseen-item listing. Read from the rows this board
-    /// holds; nothing is asked of the store.
-    async fn admin_snapshot(&self) -> crate::models::AdminSnapshot;
-    /// `workspaces.allium: ClaimSuperAdmin`.
-    async fn claim_super_admin(&self) -> Result<()>;
-    /// `GrantSuperAdmin` (`granted`) or `RevokeSuperAdmin`, for `identity`.
-    async fn set_super_admin(&self, identity: &str, granted: bool) -> Result<()>;
-    /// `CreateWorkspace`; the store trims and bounds the name.
-    async fn create_workspace(&self, name: &str) -> Result<()>;
-    /// `RenameWorkspace`.
-    async fn rename_workspace(&self, workspace_id: i64, name: &str) -> Result<()>;
-    /// `DeleteWorkspace`; refused while it holds an epic or package.
-    async fn delete_workspace(&self, workspace_id: i64) -> Result<()>;
-    /// `AddMember`.
-    async fn add_member(
-        &self,
-        workspace_id: i64,
-        identity: &str,
-        role: crate::models::MemberRole,
-    ) -> Result<()>;
-    /// `SetMemberRole`.
-    async fn set_member_role(
-        &self,
-        membership_id: i64,
-        role: crate::models::MemberRole,
-    ) -> Result<()>;
-    /// `RemoveMember`.
-    async fn remove_member(&self, membership_id: i64) -> Result<()>;
-    /// `SuperAdminDeletesUnseenItem`; `kind` is `"epic"` or `"work_package"`.
-    async fn delete_unseen_item(&self, kind: &str, item_id: i64) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1310,7 +1244,7 @@ pub const MEMORY_USER_ID: &str = "test-user";
 impl Store {
     /// `identity` as a card or tool result names them: their display name, or
     /// the identity's prefix when they have set none
-    /// (`workspaces.allium: UserProfile.shown_name`).
+    /// (`people.allium: UserProfile.shown_name`).
     pub fn shown_name_of(&self, identity: &str) -> String {
         self.rows.shown_name_of(identity)
     }
@@ -1379,6 +1313,23 @@ impl Store {
         self.plant_undecodable_task_in_epic(id, 0);
     }
 
+    /// Plant epic `id` under `parent`, an epic the board does not hold, as
+    /// the subscription would deliver a sub-epic whose parent is gone. The
+    /// store refuses to create one, so a test about the missing parent plants
+    /// it.
+    #[cfg(test)]
+    pub(crate) fn plant_orphan_epic(&self, id: i64, title: &str, parent: i64) {
+        let mut row = crate::sync::encode::create_epic_row(
+            title,
+            "",
+            Some(EpicId(parent)),
+            MEMORY_USER_ID,
+            "2026-10-11 12:00:00.000",
+        );
+        row.id = id;
+        self.rows.upsert_epic(&row);
+    }
+
     /// [`Self::plant_undecodable_task`], filed under `epic_id`: the board's
     /// copy of a subtree task it cannot decode, while the store still holds
     /// the readable row.
@@ -1412,13 +1363,9 @@ impl Store {
                 .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
         );
         // A real connection registers its profile on connect
-        // (`workspaces.allium: RegisterUserProfile`); a memory store has no
+        // (`people.allium: RegisterUserProfile`); a memory store has no
         // connect event, so the fixture does it.
         memory.register_user_profile();
-        // The first connection to a real store also creates its default
-        // workspace and makes every known person a member
-        // (`MigrateStoreToWorkspaces`), so a root epic has somewhere to go.
-        memory.migrate_store_to_workspaces();
         let caller: Arc<dyn s::ReducerCaller> = memory.clone();
         let identity = Arc::new(s::SettledIdentity::default());
         identity.settle(MEMORY_USER_ID);
@@ -1451,7 +1398,6 @@ impl Store {
                 .with_registered_host(MEMORY_HOST_ID, MEMORY_USER_ID),
         );
         memory.register_user_profile();
-        memory.migrate_store_to_workspaces();
         let caller: Arc<dyn crate::sync::ReducerCaller> = memory.clone();
         lagging.caller = caller;
         lagging.memory_caller = Some(memory);

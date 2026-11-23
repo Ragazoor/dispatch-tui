@@ -90,8 +90,8 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
 }
 
-/// A task that left this board's view because its epic did (it went private
-/// or moved out of sight during the round trip) still exists, so it is not
+/// A task that left this board's view because its epic did (it was unfollowed
+/// during the round trip) still exists, so it is not
 /// reported removed: `FeedCycle` would tear down its worktree and window.
 #[tokio::test]
 async fn a_task_that_left_the_view_with_its_epic_is_not_reported_removed() {
@@ -562,9 +562,7 @@ async fn every_store_mutation_reaches_the_transport() {
     .await
     .unwrap();
 
-    db.create_work_package("W", "", &[], 1, crate::models::Visibility::Public)
-        .await
-        .unwrap();
+    db.create_work_package("W", "", &[]).await.unwrap();
     db.patch_work_package(WorkPackageId(1), Some("W2"), None, None)
         .await
         .unwrap();

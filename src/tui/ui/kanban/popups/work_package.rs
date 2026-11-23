@@ -148,7 +148,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
 }
 
 /// Draw the one-line rename input over a package card, or the one-line
-/// display-name input (`workspaces.allium: SetOwnNameFromBoard`): the same
+/// display-name input (`people.allium: SetOwnNameFromBoard`): the same
 /// box with a different title and label.
 pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
     frame: &mut Frame,

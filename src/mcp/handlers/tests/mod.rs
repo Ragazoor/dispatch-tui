@@ -1,4 +1,3 @@
-mod admin;
 mod context;
 mod epics;
 mod hooks;
@@ -1403,21 +1402,6 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("work-package_search", json!({})),
         ("work-package_update", json!({"work_package_id": 1})),
         ("work-package_delete", json!({"work_package_id": 1})),
-        ("workspace_search", json!({})),
-        ("workspace_create", json!({"name": "n"})),
-        ("workspace_update", json!({"workspace_id": 1, "name": "n"})),
-        ("workspace_delete", json!({"workspace_id": 1})),
-        (
-            "workspace-member_set",
-            json!({"workspace_id": 1, "person": "p"}),
-        ),
-        (
-            "super-admin_set",
-            json!({"person": "p", "super_admin": true}),
-        ),
-        ("super-admin_claim", json!({})),
-        ("unseen-item_search", json!({})),
-        ("unseen-item_delete", json!({"kind": "epic", "item_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1596,8 +1580,6 @@ fn tool_definitions_carry_annotations() {
         "context_read",
         "keybinding_search",
         "work-package_search",
-        "workspace_search",
-        "unseen-item_search",
         "review-command_read",
         "feed-config_read",
     ];
@@ -1606,8 +1588,6 @@ fn tool_definitions_carry_annotations() {
         "session_exit",
         "task_update",
         "work-package_delete",
-        "workspace_delete",
-        "unseen-item_delete",
     ];
     let defs = tool_definitions();
     for tool in defs["tools"].as_array().unwrap() {
@@ -1878,10 +1858,10 @@ fn learning_old_names_redirect_to_their_replacements() {
     }
 }
 
-/// mcp-task-tools.allium: OldToolNameRedirects. Each old config, admin and
+/// mcp-task-tools.allium: OldToolNameRedirects. Each old config, people and
 /// context name is in the table and its hint names the tool that replaced it.
 #[test]
-fn config_admin_and_context_old_names_redirect_to_their_replacements() {
+fn config_people_and_context_old_names_redirect_to_their_replacements() {
     for (old, new) in [
         ("set_verify_command", "verify-command_set"),
         ("set_review_command", "review-command_read"),
@@ -1889,15 +1869,6 @@ fn config_admin_and_context_old_names_redirect_to_their_replacements() {
         ("managed_feed_config", "feed-config_read"),
         ("managed_feed_config", "feed-config_set"),
         ("set_display_name", "display-name_set"),
-        ("list_workspaces", "workspace_search"),
-        ("create_workspace", "workspace_create"),
-        ("update_workspace", "workspace_update"),
-        ("update_workspace", "workspace_delete"),
-        ("set_workspace_member", "workspace-member_set"),
-        ("set_super_admin", "super-admin_set"),
-        ("claim_super_admin", "super-admin_claim"),
-        ("list_unseen_items", "unseen-item_search"),
-        ("delete_unseen_item", "unseen-item_delete"),
         ("query_usage", "usage_read"),
         ("read_context", "context_read"),
         ("list_keybindings", "keybinding_search"),

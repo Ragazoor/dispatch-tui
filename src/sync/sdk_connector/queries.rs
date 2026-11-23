@@ -56,8 +56,8 @@ pub(in crate::sync) fn subscription_queries(
         // needs that host to resolve to something, and which machines those
         // are is not knowable in advance.
         "SELECT * FROM hosts".to_string(),
-        // The directory of people (`workspaces.allium: UserProfile`, D7).
-        // Unfiltered: admins find people by name, and a card names its creator.
+        // The directory of people (`people.allium: UserProfile`).
+        // Unfiltered: a card names its creator.
         "SELECT * FROM user_profiles".to_string(),
         // The repo lists, unfiltered and deliberately so: a path and a branch
         // name describe the work rather than the person.
@@ -81,19 +81,12 @@ pub(in crate::sync) fn subscription_queries(
         "SELECT * FROM covered_tasks".to_string(),
         "SELECT * FROM covered_epics".to_string(),
         // Work packages are one person's grouping of their own work, and
-        // their links are served while both ends are visible to the caller.
+        // the links of every package the caller holds are served.
         "SELECT * FROM own_packages".to_string(),
         "SELECT * FROM visible_work_package_links".to_string(),
         // Poll ownership claims follow their scope: a claim on an epic or
-        // task the caller cannot see is not served.
+        // task the caller does not hold (follow or own) is not served.
         "SELECT * FROM visible_poll_owners".to_string(),
-        // Workspaces and their memberships, the caller's own.
-        "SELECT * FROM visible_workspaces".to_string(),
-        "SELECT * FROM visible_memberships".to_string(),
-        // Private items nobody can see (`admin-surfaces.allium:
-        // UnseenItemListing`): empty unless this person is a super-admin. Ids
-        // and creators only, never a title.
-        "SELECT * FROM unseen_items".to_string(),
         // This person's own unseen marks (sync.allium: own_unseen). Never
         // another person's.
         "SELECT * FROM own_unseen_tasks".to_string(),

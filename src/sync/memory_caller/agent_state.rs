@@ -541,25 +541,22 @@ impl MemoryReducerCaller {
         }
     }
 
-    /// Mirrors the module's `require_claimable_scope`: the caller sees the
-    /// scope, and a feed epic is claimed only for its setter.
+    /// Mirrors the module's `require_claimable_scope`: the scope exists, and
+    /// a feed epic is claimed only for its setter.
     fn require_claimable_scope(
         &self,
         tables: &Tables,
         scope: &str,
         scope_id: i64,
     ) -> Result<(), String> {
-        let seen = self.scope();
         if scope == POLL_SCOPE_TASK {
-            return tables
-                .visible_task(&seen, scope_id)
-                .map(|_| ())
-                .ok_or_else(|| format!("task {scope_id} does not exist"));
+            return if tables.tasks.contains_key(&scope_id) {
+                Ok(())
+            } else {
+                Err(format!("task {scope_id} does not exist"))
+            };
         }
-        match tables.visible_epic(&seen, scope_id) {
-            Some(epic) => module::check_feed_claim_by(&epic, &self.sender),
-            None => Err(format!("epic {scope_id} does not exist")),
-        }
+        module::check_feed_claim_by(tables.require_epic(scope_id)?, &self.sender)
     }
 
     pub(super) fn apply_claim_poll_owner(
@@ -604,12 +601,11 @@ impl MemoryReducerCaller {
         updates: Vec<(TaskId, SubStatus)>,
     ) -> Result<ReducerOutcome> {
         let updates = encode::sub_status_updates(&updates);
-        let scope = self.scope();
         let mut tables = self.lock();
         let stamp = self.now();
         for update in updates {
             let update = module::SubStatusUpdate::from(update);
-            let Some(row) = tables.visible_task(&scope, update.task_id) else {
+            let Some(row) = tables.tasks.get(&update.task_id).cloned() else {
                 continue;
             };
             // As the module: an entry the status does not allow is skipped.

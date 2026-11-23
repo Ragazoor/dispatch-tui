@@ -1,7 +1,5 @@
 use super::shared::text_field_hint;
-use crate::keybindings::{
-    embedded_hint, hint_key, hint_keys, hint_row_keys, KeyBinding, KeyNamespace as N,
-};
+use crate::keybindings::{embedded_hint, hint_key, hint_keys, KeyBinding, KeyNamespace as N};
 use crate::models::{TaskId, TaskModel};
 use crate::palette::{CYAN, MUTED, RED};
 use crate::tui::{App, InputMode, InputState};
@@ -757,82 +755,6 @@ pub(in crate::tui) fn input_epic_description_lines(
             styles.hint,
         )),
     ]
-}
-
-/// The last step of the new-epic and new-package forms: workspace (only when
-/// the person has several and the form names one) and visibility
-/// (`workspaces.allium: NameWorkspaceAndVisibilityFromBoard`).
-pub(in crate::tui) fn input_placement_lines(
-    app: &App,
-    area: Rect,
-    styles: &FormStyles,
-) -> Vec<Line<'static>> {
-    let Some(placement) = app.input.placement.as_ref() else {
-        return Vec::new();
-    };
-    let title = match &placement.target {
-        crate::tui::types::PlacementFor::Epic => app
-            .input
-            .epic_draft
-            .as_ref()
-            .map_or("", |d| d.title.as_str()),
-        crate::tui::types::PlacementFor::Package { title, .. } => title.as_str(),
-    };
-    let mut lines = vec![settled_line("  Title: ", title, area, styles.completed)];
-    let several = app.input.workspaces.len() > 1;
-    if placement.names_workspace && several {
-        let names: Vec<String> = app
-            .input
-            .workspaces
-            .iter()
-            .enumerate()
-            .map(|(i, w)| {
-                if i == placement.workspace {
-                    format!("[{}]", w.name)
-                } else {
-                    w.name.clone()
-                }
-            })
-            .collect();
-        lines.push(Line::from(Span::styled(
-            format!("  Workspace: {}", names.join("  ")),
-            styles.active,
-        )));
-    }
-    let visibility = match placement.visibility {
-        crate::models::Visibility::Public => "public".to_string(),
-        crate::models::Visibility::Private => "🔒 private".to_string(),
-    };
-    lines.push(Line::from(Span::styled(
-        format!("  Visibility: {visibility}"),
-        styles.active,
-    )));
-    lines.push(Line::from(""));
-    let ns = N::BoardPickerPlacement;
-    let table = app.key_table;
-    let moves = if placement.names_workspace && several {
-        let keys = hint_keys(
-            table,
-            ns,
-            &[
-                ("placement_picker_workspace_down", "j"),
-                ("placement_picker_workspace_up", "k"),
-            ],
-        );
-        format!("[{keys}] workspace  ")
-    } else {
-        String::new()
-    };
-    lines.push(Line::from(Span::styled(
-        format!(
-            "  {moves}[{}] public/private  [{}] create  [{}] cancel",
-            hint_key(table, ns, None, "placement_picker_visibility", "Tab"),
-            hint_row_keys(table, ns, "placement_picker_create", &["Space", "Enter"]),
-            hint_key(table, ns, None, "placement_picker_cancel", "Esc"),
-        ),
-        styles.hint,
-    )));
-    lines
 }
 
 #[cfg(test)]

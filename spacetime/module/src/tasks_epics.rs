@@ -251,19 +251,6 @@ pub struct TaskPatch {
     pub model: Patch<String>,
 }
 
-/// `workspaces.allium: MoveEpicToWorkspace`: `update_epic` answers an epic the
-/// caller cannot see as a missing one, except a super-admin's bare move (a
-/// workspace and nothing else). That move is the rescue for an epic nobody can
-/// see, such as one in workspace 0, and `move_epic_row` judges it on its own.
-pub fn reaches_an_unseen_epic(
-    privileged: bool,
-    patch: &EpicPatch,
-    workspace_id: Option<i64>,
-    visibility: Option<&str>,
-) -> bool {
-    privileged && workspace_id.is_some() && visibility.is_none() && patch.is_empty()
-}
-
 impl EpicPatch {
     /// True when the patch names no field.
     pub fn is_empty(&self) -> bool {
@@ -400,7 +387,7 @@ pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
 #[spacetimedb::reducer]
 pub fn create_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     check_new_task_aim(ctx, &row)?;
-    check_task_may_enter_epic(ctx, "task", row.epic_id)?;
+    check_epic_exists(ctx, "task", row.epic_id)?;
     // Into the per-repo sub-epic when the epic named is a grouped root
     // (`epics.allium`'s routing note). Every client gets the same placement.
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
@@ -430,7 +417,7 @@ fn check_new_task_aim(ctx: &ReducerContext, row: &Task) -> Result<(), String> {
 }
 
 /// The `owner` and `created_by` a created task is stored with: the caller's,
-/// whatever the row says (`workspaces.allium`: "Identities are the caller's").
+/// whatever the row says (`store-split.allium: IdentitiesAreTheCallers`).
 /// A task in an epic has no owner, so only an epic-less one is stamped.
 fn stamp_new_task(ctx: &ReducerContext, row: &Task) -> (String, String) {
     let owner = if row.epic_id == 0 {
@@ -441,9 +428,9 @@ fn stamp_new_task(ctx: &ReducerContext, row: &Task) -> (String, String) {
     (owner, caller_stamp(ctx, row.created_by.clone()))
 }
 
-/// [`create_task`], and mark the new task unseen for everyone who can see the
-/// epic it lands in (`mcp-task-tools.allium: CreateTaskViaMcp`,
-/// SignalMarksTheTaskForEveryoneWhoSeesIt).
+/// [`create_task`], and mark the new task unseen for every known person when it
+/// lands in an epic (`mcp-task-tools.allium: CreateTaskViaMcp`,
+/// SignalMarksTheTaskForEveryone).
 ///
 /// A separate reducer rather than a flag on `create_task`: the caller learns
 /// the generated id only after the row arrives, so the marks cannot be a second
@@ -452,7 +439,7 @@ fn stamp_new_task(ctx: &ReducerContext, row: &Task) -> (String, String) {
 #[spacetimedb::reducer]
 pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     check_new_task_aim(ctx, &row)?;
-    check_task_may_enter_epic(ctx, "task", row.epic_id)?;
+    check_epic_exists(ctx, "task", row.epic_id)?;
     let epic_id = route_to_repo_group(ctx, row.epic_id, &row.repo_path);
     let (owner, created_by) = stamp_new_task(ctx, &row);
     let stored = store_task(
@@ -465,7 +452,7 @@ pub fn create_task_signalled(ctx: &ReducerContext, row: Task) -> Result<(), Stri
             ..row
         }),
     )?;
-    mark_task_unseen_for_viewers(ctx, stored.id, epic_id);
+    mark_task_unseen_for_everyone(ctx, stored.id, epic_id);
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
 }
@@ -495,7 +482,7 @@ pub(crate) fn patch_task_row(
     store_owns_completion: bool,
     close_host: Option<&str>,
 ) -> Result<(), String> {
-    let Some(mut row) = visible_task(ctx, id) else {
+    let Some(mut row) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
     // Before anything is applied: a refused patch leaves the row untouched.
@@ -618,7 +605,7 @@ pub(crate) fn patch_task_row(
 /// (and everything it would have retired or torn down) untouched.
 #[spacetimedb::reducer]
 pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
     if row.status != DONE {
@@ -680,25 +667,16 @@ pub fn set_task_epic(
     move_task_row(ctx, id, epic_id, owner)
 }
 
-/// The workspace of epic `epic_id`, `None` for no epic or a missing one.
-fn epic_workspace(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
-    ctx.db.epics().id().find(epic_id).map(|e| e.workspace_id)
-}
-
 /// [`set_task_epic`]'s body, shared with [`update_task`].
 fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> Result<(), String> {
-    // A missing (or unseen) task is a refusal, not a no-op: the caller owes
-    // the operator a not-found answer a pre-read of a stale view cannot give.
-    let Some(task) = visible_task(ctx, id) else {
+    // A missing task is a refusal, not a no-op: the caller owes the operator
+    // a not-found answer a pre-read of a stale view cannot give.
+    let Some(task) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} not found"));
     };
     // The epic-exists check `patch_task` leaves to this reducer (see
     // `check_task_patch`): a missing epic would be written as a dangling id.
-    if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
-        return Err(format!("task {id}: epic {epic_id} does not exist"));
-    }
-    // An epic the caller cannot see is answered as one that does not exist.
-    check_task_may_enter_epic(ctx, &format!("task {id}"), epic_id)?;
+    check_epic_exists(ctx, &format!("task {id}"), epic_id)?;
     // Routed first, then compared: a task already in the per-repo sub-epic of
     // the grouped root it is "moved" onto is where it belongs.
     let epic_id = route_to_repo_group(ctx, epic_id, &task.repo_path);
@@ -706,15 +684,12 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
     if was_in == epic_id {
         return Ok(());
     }
-    check_task_move(ctx, &task, epic_id)?;
-    let left_workspace = epic_workspace(ctx, was_in);
-    let joined_workspace = epic_workspace(ctx, epic_id);
     write_task(
         ctx,
         Task {
             epic_id,
             // A task landing on a user board lands on the CALLER's
-            // (`workspaces.allium`: "Identities are the caller's").
+            // (`store-split.allium: IdentitiesAreTheCallers`).
             owner: if epic_id == 0 {
                 caller_stamp(ctx, owner)
             } else {
@@ -725,19 +700,6 @@ fn move_task_row(ctx: &ReducerContext, id: i64, epic_id: i64, owner: String) -> 
         },
     )?;
     clear_unseen_for_task(ctx, id);
-    // `ClaimsFollowSight`: the move can take the task out of someone's sight.
-    crate::config::on_task_sight_lost(ctx, id);
-    // A detach leaves the workspace too (`TaskMovesStayInTheWorkspace`, A8).
-    let leaves_workspace = match (left_workspace, joined_workspace) {
-        (Some(a), Some(b)) => a != b,
-        (Some(_), None) => true,
-        _ => false,
-    };
-    if leaves_workspace {
-        // `LinkedItemsShareThePackagesWorkspace`: the task's package links
-        // were the old workspace's.
-        delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, id);
-    }
     // Both, and in that order. The one it left may now be complete; the one it
     // joined may no longer be.
     recalculate_epic_chain(ctx, was_in);
@@ -780,7 +742,7 @@ pub fn update_task(
     subscriber: String,
     bookmarked: Option<bool>,
 ) -> Result<(), String> {
-    if visible_task(ctx, id).is_none() {
+    if ctx.db.tasks().id().find(id).is_none() {
         return Err(format!("task {id} not found"));
     }
     // Every refusal that can be read off the row and the patch is raised
@@ -788,10 +750,7 @@ pub fn update_task(
     // sub-status the row will hold) is raised by a write, and the reducer's
     // rolled-back transaction undoes the half already done.
     if let Some(epic_id) = epic_id {
-        if epic_id != 0 && ctx.db.epics().id().find(epic_id).is_none() {
-            return Err(format!("task {id}: epic {epic_id} does not exist"));
-        }
-        check_task_may_enter_epic(ctx, &format!("task {id}"), epic_id)?;
+        check_epic_exists(ctx, &format!("task {id}"), epic_id)?;
     }
     let relink_first = patch.repo_path.is_some();
     match epic_id {
@@ -829,7 +788,7 @@ pub fn batch_patch_sub_status(
 ) -> Result<(), String> {
     let stamp = now(ctx);
     for update in updates {
-        let Some(row) = visible_task(ctx, update.task_id) else {
+        let Some(row) = ctx.db.tasks().id().find(update.task_id) else {
             continue;
         };
         // An entry the status does not allow is skipped, not fatal: the batch
@@ -880,45 +839,20 @@ pub fn create_epic(ctx: &ReducerContext, row: Epic) -> Result<(), String> {
 /// placements are preserved" rule and its two auto-transitions coexist.
 #[spacetimedb::reducer]
 pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
-    if visible_epic(ctx, id).is_none() {
+    let Some(row) = ctx.db.epics().id().find(id) else {
         return Ok(());
-    }
-    patch_epic_row(ctx, id, patch)
+    };
+    patch_epic_row(ctx, row, patch)
 }
 
-/// Change an epic's fields, its workspace and its visibility in one
-/// transaction: a refusal of any part leaves the epic as it was
-/// (`epics.allium: UpdateEpicIsOneTransaction`).
+/// Change an epic's fields in one transaction: a refusal of any part leaves
+/// the epic as it was (`epics.allium: UpdateEpicIsOneTransaction`).
 ///
-/// `workspace_id` is `None` to leave the workspace alone; `visibility` likewise.
 /// Unlike [`patch_epic`], a missing epic is an error: this is the board's
-/// user-facing update. The parts run in the order the board used to issue
-/// them as separate calls (patch, move, visibility), and the reducer's
-/// rolled-back transaction undoes the parts already done when a later one
-/// refuses.
+/// user-facing update.
 #[spacetimedb::reducer]
-pub fn update_epic(
-    ctx: &ReducerContext,
-    id: i64,
-    patch: EpicPatch,
-    workspace_id: Option<i64>,
-    visibility: Option<String>,
-) -> Result<(), String> {
-    if visible_epic(ctx, id).is_none() {
-        let privileged = is_operator(ctx)
-            || crate::visibility::is_super_admin(ctx, &caller_identity(ctx));
-        if !reaches_an_unseen_epic(privileged, &patch, workspace_id, visibility.as_deref()) {
-            return Err(format!("epic {id} does not exist"));
-        }
-    }
-    patch_epic_row(ctx, id, patch)?;
-    if let Some(workspace_id) = workspace_id {
-        crate::visibility::move_epic_row(ctx, id, workspace_id)?;
-    }
-    if let Some(visibility) = visibility {
-        crate::visibility::set_epic_visibility_row(ctx, id, visibility)?;
-    }
-    Ok(())
+pub fn update_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
+    patch_epic_row(ctx, require_epic(ctx, id)?, patch)
 }
 
 /// Set an epic's `group_by_repo` flag and, for a non-feed epic, move its tasks
@@ -934,18 +868,15 @@ pub fn set_epic_group_by_repo(
     id: i64,
     group_by_repo: bool,
 ) -> Result<(), String> {
-    if visible_epic(ctx, id).is_none() {
-        return Err(format!("epic {id} does not exist"));
-    }
     patch_epic_row(
         ctx,
-        id,
+        require_epic(ctx, id)?,
         EpicPatch {
             group_by_repo: Some(group_by_repo),
             ..EpicPatch::default()
         },
     )?;
-    let Some(epic) = visible_epic(ctx, id) else {
+    let Some(epic) = ctx.db.epics().id().find(id) else {
         return Ok(());
     };
     // Feed epics group through ingestion, not through the toggle.
@@ -959,14 +890,13 @@ pub fn set_epic_group_by_repo(
     }
 }
 
-/// [`patch_epic`]'s body, shared with [`update_epic`]; the caller has checked
-/// the epic is visible.
-fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(), String> {
-    let Some(mut row) = visible_epic(ctx, id) else {
-        return Ok(());
-    };
+/// [`patch_epic`]'s body, shared with [`update_epic`].
+fn patch_epic_row(ctx: &ReducerContext, mut row: Epic, patch: EpicPatch) -> Result<(), String> {
+    let id = row.id;
     if let Some(parent) = patch.parent_epic_id {
-        check_epic_move(ctx, &row, parent)?;
+        if parent != 0 {
+            require_epic(ctx, parent)?;
+        }
     }
     if let Some(origin) = &patch.origin {
         check_origin_patch(&row.origin, origin)?;
@@ -974,7 +904,6 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     check_epic_patch(&row, &patch, |id| {
         ctx.db.epics().id().find(id).map(|e| e.parent_epic_id)
     })?;
-    check_feed_command_authority(ctx, &row, &patch)?;
     let prior_status = row.status.clone();
     let was_child_of = row.parent_epic_id;
     let caller_named_a_completion = patch.completed_at.is_some();
@@ -985,23 +914,6 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         .feed_command
         .as_ref()
         .is_some_and(|c| *c != row.feed_command);
-    let reparented = patch.parent_epic_id.is_some_and(|p| p != was_child_of);
-    if let Some(parent) = patch.parent_epic_id.filter(|p| *p != was_child_of) {
-        // `SightChangeNeverStrandsAHost`: before any write.
-        let moved = id;
-        if crate::visibility::epic_change_strands_a_host(
-            ctx,
-            &collect_epic_subtree_ids(ctx, id),
-            &|mut node| {
-                if node.id == moved {
-                    node.parent_epic_id = parent;
-                }
-                node
-            },
-        ) {
-            return Err(crate::visibility::epic_change_strands_refusal(id));
-        }
-    }
 
     let before = row.clone();
     apply_epic_patch(&mut row, patch);
@@ -1025,12 +937,8 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         crate::config::release_poll_claims(
             ctx,
             &std::collections::HashSet::from([id]),
-            |_, owner| owner != setter,
+            |owner| owner != setter,
         );
-    }
-    if reparented {
-        // `ClaimsFollowSight`: a new parent can change who sees the subtree.
-        crate::config::on_sight_lost(ctx, &collect_epic_subtree_ids(ctx, id));
     }
 
     // The parent chain, never the epic itself: its children did not change,
@@ -1041,48 +949,6 @@ fn patch_epic_row(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
         recalculate_epic_chain(ctx, was_child_of);
     }
     Ok(())
-}
-
-/// `feeds.allium: FeedCommandAuthority` (task #98746, V8; #98851, M2). A host
-/// runs `feed_command` as a shell command, so a patch that changes it needs
-/// the epic's creator or an admin of the epic's workspace. The operator and a
-/// super-admin always may. The owner of the host holding the epic's poll claim
-/// has no authority of its own. Setting the value the epic already has changes
-/// nothing.
-fn check_feed_command_authority(
-    ctx: &ReducerContext,
-    epic: &Epic,
-    patch: &EpicPatch,
-) -> Result<(), String> {
-    let Some(command) = &patch.feed_command else {
-        return Ok(());
-    };
-    if is_operator(ctx) {
-        return Ok(());
-    }
-    let caller = caller_identity(ctx);
-    if may_change_feed_command(ctx, epic, command, &caller) {
-        Ok(())
-    } else {
-        Err(format!(
-            "only the creator of epic {} or an admin of its workspace may change its feed command",
-            epic.id
-        ))
-    }
-}
-
-/// The pure half of [`check_feed_command_authority`], shared with
-/// `MemoryReducerCaller`.
-pub fn may_change_feed_command(
-    r: &impl StoreReads,
-    epic: &Epic,
-    command: &str,
-    caller: &str,
-) -> bool {
-    command == epic.feed_command
-        || (!epic.created_by.is_empty() && epic.created_by == caller)
-        || workspace_has_admin(r, epic.workspace_id, caller)
-        || is_super_admin(r, caller)
 }
 
 /// Delete an epic, its sub-epics and their tasks.
@@ -1110,13 +976,10 @@ pub fn may_change_feed_command(
 /// the actual safety net.
 #[spacetimedb::reducer]
 pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    let Some(row) = visible_epic(ctx, id) else {
+    let Some(row) = ctx.db.epics().id().find(id) else {
         return Ok(());
     };
     let parent = row.parent_epic_id;
-    // Sight first: validate_epic_deletable's refusals name tasks, which must
-    // not reveal what a private sub-epic holds.
-    check_subtree_all_seen(ctx, id, &collect_epic_subtree_ids(ctx, id))?;
     let doomed = validate_epic_deletable(ctx, id)?;
     rescope_repo_group_learnings(ctx, &row);
     delete_epic_subtree_with_feed_cleanup(ctx, id, &doomed);
@@ -1177,10 +1040,9 @@ pub fn batch_delete(
     // subtree must be captured before anything downstream can change it.
     let mut epic_doomed: Vec<(i64, std::collections::HashSet<i64>)> = Vec::new();
     for &id in &epic_ids {
-        if visible_epic(ctx, id).is_none() {
+        if ctx.db.epics().id().find(id).is_none() {
             continue;
         }
-        check_subtree_all_seen(ctx, id, &collect_epic_subtree_ids(ctx, id))?;
         let doomed = validate_epic_deletable(ctx, id)?;
         epic_doomed.push((id, doomed));
     }
@@ -1188,7 +1050,7 @@ pub fn batch_delete(
     // doomed epic subtrees above is validated again here if the caller passed
     // it too — harmless, since epics.allium's guard already required it done.
     for &id in &task_ids {
-        if let Some(row) = visible_task(ctx, id) {
+        if let Some(row) = ctx.db.tasks().id().find(id) {
             if row.status != DONE {
                 return Err(format!("task {id}: cannot delete because it is not done"));
             }
@@ -1218,8 +1080,8 @@ pub fn batch_delete(
         delete_epic_subtree_with_feed_cleanup(ctx, *id, doomed);
     }
     for &id in &task_ids {
-        let Some(row) = visible_task(ctx, id) else {
-            // Already gone, or never the caller's to see: one of the doomed epics above owned it too.
+        let Some(row) = ctx.db.tasks().id().find(id) else {
+            // Already gone: one of the doomed epics above owned it too.
             continue;
         };
         let epic_id = row.epic_id;
@@ -1530,7 +1392,7 @@ fn release_unseen_window(ctx: &ReducerContext, id: i64, call_host: Option<&str>)
     if window.is_empty() {
         return false;
     }
-    let Some(task) = visible_task(ctx, id) else {
+    let Some(task) = ctx.db.tasks().id().find(id) else {
         return false;
     };
     let Some(host) = window_release_host(&task.host, call_host) else {

@@ -1,4 +1,4 @@
-//! The `display-name_set` tool (`docs/specs/workspaces.allium:
+//! The `display-name_set` tool (`docs/specs/people.allium:
 //! SetDisplayNameViaMcp`): a thin wrapper over `PeopleService`.
 
 use serde::Deserialize;

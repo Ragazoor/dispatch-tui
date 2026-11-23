@@ -48,12 +48,8 @@ fn memory_caller_matches_the_real_reducers() {
         // as this connection's own, on both sides.
         let mem = mem
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
-        // The first connection to the real store also migrated it, while it was
-        // empty (`MigrateStoreToWorkspaces`): it gets its default workspace.
-        mem.migrate_store_to_workspaces();
-        mem.migrate_store_to_workspaces(); // once
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+            .with_identity_rules();
+        register_profiles(&real, &mem, &accepted.identity).await;
         for host in ["host-a", "host-b", "host-c"] {
             for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
                 caller
@@ -532,122 +528,9 @@ fn memory_caller_matches_the_real_reducers() {
             "the board's shown_name and the module's agree"
         );
 
-        // -- super-admins, workspaces and membership --------------------------------
-        // Both sides hold one profile for `me`. Each step runs on both callers and
-        // asserts the same verdict, then that the rows they hold agree.
-        macro_rules! both {
-            ($call:ident($($arg:expr),*), $verdict:ident) => {{
-                let r = real.$call($($arg),*).await.unwrap();
-                let m = mem.$call($($arg),*).await.unwrap();
-                assert!(
-                    matches!(
-                        (&r, &m),
-                        (ReducerOutcome::$verdict(..), ReducerOutcome::$verdict(..))
-                    ),
-                    "{} disagreed: real {r:?}, memory {m:?}",
-                    stringify!($call)
-                );
-            }};
-        }
-        let workspace_view = |rows: &SharedRows| {
-            rows.workspaces()
-                .into_iter()
-                // The default workspace's creator is the store itself, which a
-                // memory store has no identity for.
-                .map(|w| {
-                    let by = if w.name == "Default" {
-                        String::new()
-                    } else {
-                        w.created_by
-                    };
-                    (w.id, w.name, by)
-                })
-                .collect::<Vec<_>>()
-        };
-        let membership_view = |rows: &SharedRows| {
-            rows.memberships()
-                .into_iter()
-                .map(|m| (m.id, m.workspace_id, m.user, m.role))
-                .collect::<Vec<_>>()
-        };
-        // Claimed at the start (`join_default_workspace`).
-        wait_for!(rows_real.is_super_admin(me));
-        assert!(rows_mem.is_super_admin(me));
-        both!(claim_super_admin(), Refused); // only while none exists
-        both!(revoke_super_admin(me.to_string()), Refused); // never the last
-        both!(grant_super_admin("nobody".to_string()), Refused);
-        both!(create_workspace("  ".to_string()), Refused);
-        both!(create_workspace("Platform".to_string()), Applied);
-        both!(create_workspace(" Platform ".to_string()), Refused); // unique
-        both!(create_workspace("Other".to_string()), Applied);
-        wait_for!(rows_real.workspaces().len() == 3); // Default, Platform, Other
-        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
-        let platform = rows_real
-            .workspaces()
-            .iter()
-            .find(|w| w.name == "Platform")
-            .map(|w| w.id)
-            .unwrap();
-        both!(rename_workspace(platform, "Other".to_string()), Refused);
-        both!(rename_workspace(platform, " Core ".to_string()), Applied);
-        both!(rename_workspace(99, "X".to_string()), Refused);
-        both!(
-            add_member(platform, me.to_string(), "owner".to_string()),
-            Refused
-        );
-        both!(
-            add_member(platform, "nobody".to_string(), "member".to_string()),
-            Refused
-        );
-        both!(
-            add_member(99, me.to_string(), "member".to_string()),
-            Refused
-        );
-        both!(
-            add_member(platform, me.to_string(), "member".to_string()),
-            Applied
-        );
-        both!(
-            add_member(platform, me.to_string(), "admin".to_string()),
-            Refused
-        ); // duplicate
-        wait_for!(rows_real.memberships().len() == 2); // Default, Platform
-        let membership = rows_real
-            .memberships()
-            .iter()
-            .find(|m| m.workspace_id == platform)
-            .map(|m| m.id)
-            .unwrap();
-        both!(set_member_role(membership, "owner".to_string()), Refused);
-        both!(set_member_role(999, "admin".to_string()), Refused);
-        both!(set_member_role(membership, "admin".to_string()), Applied);
-        wait_for!(rows_real
-            .memberships()
-            .iter()
-            .any(|m| m.id == membership && m.role == "admin"));
-        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
-        assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
-        both!(remove_member(999), Refused);
-        both!(remove_member(membership), Applied);
-        both!(
-            add_member(platform, me.to_string(), "member".to_string()),
-            Applied
-        );
-        wait_for!(
-            rows_real.memberships().len() == 2
-                && !rows_real.memberships().iter().any(|m| m.id == membership)
-        );
-        // Deleting takes the workspace's memberships with it and leaves the rest.
-        both!(delete_workspace(99), Refused);
-        both!(delete_workspace(platform), Applied);
-        // Only the default workspace's membership is left.
-        wait_for!(rows_real.workspaces().len() == 2 && rows_real.memberships().len() == 1);
-        assert_eq!(workspace_view(&rows_real), workspace_view(&rows_mem));
-        assert_eq!(membership_view(&rows_real), membership_view(&rows_mem));
-
         // -- new-task signal --------------------------------------------------------
-        // A task created with the signal on is marked for everyone who sees its
-        // epic, with no subscription; seeing one task clears that task only;
+        // A task created with the signal on is marked for every known person,
+        // with no subscription; seeing one task clears that task only;
         // moving it out clears it too.
         let signalled_real = real
             .create_task_signalled(own_task_in_epic(epic2_id_real))
@@ -1640,7 +1523,7 @@ fn memory_caller_matches_the_real_reducers() {
             created_by: accepted.identity.clone(),
             created_at: "2026-01-01 00:00:00.000".into(),
             updated_at: "2026-01-01 00:00:00.000".into(),
-            workspace_id: DEFAULT_WORKSPACE,
+            workspace_id: 0,
             visibility: "public".into(),
         };
         let package_real = real.create_work_package(package_row()).await.unwrap();
@@ -1811,7 +1694,6 @@ fn memory_caller_matches_the_real_reducers() {
             .update_work_package_with_links(
                 with_links_real,
                 retitle(),
-                None,
                 vec![task_item],
                 vec![],
             )
@@ -1821,7 +1703,6 @@ fn memory_caller_matches_the_real_reducers() {
             .update_work_package_with_links(
                 with_links_mem,
                 retitle(),
-                None,
                 vec![task_item],
                 vec![],
             )
@@ -1854,11 +1735,11 @@ fn memory_caller_matches_the_real_reducers() {
             .zip(refusals(with_links_mem))
         {
             let r = real
-                .update_work_package_with_links(pr, retitle(), None, ur, lr)
+                .update_work_package_with_links(pr, retitle(), ur, lr)
                 .await
                 .unwrap();
             let m = mem
-                .update_work_package_with_links(pm, retitle(), None, um, lm)
+                .update_work_package_with_links(pm, retitle(), um, lm)
                 .await
                 .unwrap();
             assert!(!r.won() && !m.won(), "refused update");
@@ -1868,37 +1749,6 @@ fn memory_caller_matches_the_real_reducers() {
             package_links(&rows_real),
             package_links(&rows_mem),
             "a refused update writes no link"
-        );
-
-        // -- UpdateWorkPackageIsOneTransaction: a refused visibility leaves the
-        // title unchanged, on both sides.
-        for (side, caller, id) in [
-            ("real", &real as &dyn ReducerCaller, with_links_real),
-            ("memory", &mem as &dyn ReducerCaller, with_links_mem),
-        ] {
-            let outcome = caller
-                .update_work_package_with_links(
-                    id,
-                    bindings::WorkPackagePatch {
-                        title: Some("never written".into()),
-                        description: None,
-                        sort_order: None,
-                    },
-                    Some("secret".into()),
-                    vec![],
-                    vec![],
-                )
-                .await
-                .unwrap();
-            assert!(!outcome.won(), "{side}: a bad visibility is refused");
-        }
-        assert_eq!(package_shapes(&rows_real), package_shapes(&rows_mem));
-        assert!(
-            rows_real
-                .work_packages()
-                .iter()
-                .all(|p| p.title != "never written"),
-            "a refused visibility leaves the title unchanged"
         );
 
         // Later steps count on the first package being the only one.

@@ -1,8 +1,7 @@
 //! Task #99287: the learning `scope_ref` refusals, the embedding repair
-//! write, the re-scope on a manual repo-group delete and the sight order of a
+//! write, the re-scope on a manual repo-group delete and the refusal order of a
 //! package link, on the real module and on the twin.
-//! (`learnings.allium: RecordLearningViaMcp`, `ReScopeLearningsOnRepoGroupDelete`;
-//! `workspaces.allium: UnseenIsAsMissing`.)
+//! (`learnings.allium: RecordLearningViaMcp`, `ReScopeLearningsOnRepoGroupDelete`.)
 
 use super::move_paths::{refusal_of as refusal, Pair, World};
 use super::*;
@@ -17,7 +16,7 @@ async fn learning_both(p: &Pair<'_>, row: bindings::Learning) -> LearningId {
 }
 
 #[test]
-fn learning_scope_refs_and_package_sight_match_the_module() {
+fn learning_scope_refs_and_package_links_match_the_module() {
     if !spacetime_available_or_skip() {
         return;
     }
@@ -142,17 +141,17 @@ fn learning_scope_refs_and_package_sight_match_the_module() {
             "the re-scoped learning"
         );
 
-        // -- a link into an unseen package answers as for a missing one ---------
+        // -- a link into a missing package names the package, whatever the item --
         let package_row = bindings::WorkPackage {
             id: 0,
-            title: "Private plan".into(),
+            title: "Plan".into(),
             description: String::new(),
             sort_order: None,
             created_by: p.identity.clone(),
             created_at: "2026-01-01 00:00:00.000".into(),
             updated_at: "2026-01-01 00:00:00.000".into(),
-            workspace_id: DEFAULT_WORKSPACE,
-            visibility: "private".into(),
+            workspace_id: 0,
+            visibility: "public".into(),
         };
         let real_package = p
             .real
@@ -160,6 +159,19 @@ fn learning_scope_refs_and_package_sight_match_the_module() {
             .await
             .unwrap();
         let mem_package = p.mem.create_work_package(package_row).await.unwrap();
+        // Deleted again on both sides: the link below names a missing package.
+        p.real
+            .delete_work_package(real_package)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        p.mem
+            .delete_work_package(mem_package)
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
         let missing_task = dispatch_tui::models::WorkPackageItem::Task(TaskId(987_654));
         let sides: [(
             &str,

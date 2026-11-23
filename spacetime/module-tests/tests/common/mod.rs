@@ -13,34 +13,26 @@ use spacetimedb::{ConnectionId, Identity, ReducerContext, TimeDuration, Timestam
 /// 2026-10-10 12:00:00 UTC, the instant every test's clock starts at.
 const START_MICROS: i64 = 1_791_633_600_000_000;
 
-pub const TEST_WORKSPACE: i64 = 1;
-
 pub const HOST_A: &str = "host-a";
 pub const HOST_B: &str = "host-b";
 
 pub struct Store {
     ctx: TestContext,
-    /// Whether `call` enrols its caller in the test workspace first.
+    /// Whether `call` registers its caller's profile first, as a board's
+    /// connection does.
     enrol_callers: bool,
 }
 
 impl Store {
+    /// An empty store where every caller has a profile by the time it calls,
+    /// as if its board had connected (`people.allium: RegisterUserProfile`).
     pub fn new() -> Self {
         let mut store = Store::bare();
         store.enrol_callers = true;
-        // One workspace every caller belongs to, so a test that is not about
-        // workspaces runs in a store where everyone sees everything. It is
-        // workspace 1; `TEST_WORKSPACE` names it for rows built by hand.
-        store.ctx.db.workspaces().insert(Workspace {
-            name: "Test".into(),
-            created_by: "store".into(),
-            ..blank_workspace()
-        });
         store
     }
 
-    /// A store with no workspace and no enrolment: for tests about who may
-    /// see what, which set up workspaces and memberships themselves.
+    /// An empty store with no profiles: a test connects its callers itself.
     pub fn bare() -> Self {
         let ctx = TestContext::new().expect("the in-memory store initialises");
         ctx.clock
@@ -51,21 +43,17 @@ impl Store {
         }
     }
 
-    /// Make `who` a member of the test workspace, once.
+    /// Give `who` a profile, once, as their first connection does. A known
+    /// person is one with a profile: a signalled task marks every one.
     pub fn enrol(&self, who: &str) {
-        let user = identity_of(who);
+        let identity = identity_of(who);
         let db = &self.ctx.db;
-        if !db
-            .memberships()
-            .workspace_id()
-            .filter(&TEST_WORKSPACE)
-            .any(|m| m.user == user)
-        {
-            db.memberships().insert(Membership {
-                workspace_id: TEST_WORKSPACE,
-                user,
-                role: "member".into(),
-                ..blank_membership()
+        if db.user_profiles().identity().find(&identity).is_none() {
+            db.user_profiles().insert(UserProfile {
+                identity,
+                display_name: String::new(),
+                is_super_admin: false,
+                created_at: String::new(),
             });
         }
     }
@@ -123,7 +111,7 @@ impl Store {
     }
 
     /// [`Self::create`] with the new-task signal on
-    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryoneWhoSeesIt`).
+    /// (`mcp-task-tools.allium: SignalMarksTheTaskForEveryone`).
     pub fn create_signalled(&self, who: &str, row: Task) -> i64 {
         let before = self.max_task_id();
         self.call(who, |ctx| create_task_signalled(ctx, row))
@@ -138,17 +126,10 @@ impl Store {
         let row = Epic {
             title: title.into(),
             auto_dispatch,
-            workspace_id: TEST_WORKSPACE,
             ..blank_epic()
         };
-        if self.enrol_callers {
-            self.call(who, |ctx| create_epic(ctx, row))
-                .expect("create_epic");
-        } else {
-            // A bare store has no workspace to create into: this is a row
-            // written before workspaces existed.
-            self.db().epics().insert(row);
-        }
+        self.call(who, |ctx| create_epic(ctx, row))
+            .expect("create_epic");
         self.db()
             .epics()
             .iter()
@@ -161,7 +142,6 @@ impl Store {
     pub fn create_sub_epic(&self, who: &str, parent: i64) -> i64 {
         let row = Epic {
             title: format!("sub of {parent}"),
-            workspace_id: TEST_WORKSPACE,
             parent_epic_id: parent,
             ..blank_epic()
         };

@@ -17,8 +17,6 @@ impl CreateEpicParams {
             parent_epic_id: None,
             feed_command: None,
             feed_interval_secs: None,
-            workspace_id: 0,
-            visibility: crate::models::Visibility::Public,
         }
     }
 }

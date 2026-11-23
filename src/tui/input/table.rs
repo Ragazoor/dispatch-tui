@@ -42,12 +42,8 @@ impl App {
             | InputMode::InputEpicTitle
             | InputMode::InputWorkPackageTitle(_)
             | InputMode::RenameWorkPackage(_)
-            | InputMode::InputDisplayName
-            | InputMode::InputAdminText => N::BoardText,
+            | InputMode::InputDisplayName => N::BoardText,
             InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
-            InputMode::InputPlacement => N::BoardPickerPlacement,
-            InputMode::Admin => N::BoardAdmin,
-            InputMode::ConfirmAdmin => N::BoardConfirmAdmin,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
@@ -369,15 +365,6 @@ impl App {
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, label),
             N::BoardPickerWorkPackage => self.run_work_package_picker(action, label),
-            N::BoardPickerPlacement => self.run_placement_picker(action, label),
-            N::BoardAdmin => self.run_admin(action, label),
-            N::BoardConfirmAdmin => self.dispatch_keyed(
-                Message::Admin(crate::tui::messages::AdminMessage::Confirm(
-                    action.ends_with("_yes"),
-                )),
-                action,
-                label,
-            ),
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -577,51 +564,6 @@ impl App {
             _ => return vec![],
         };
         self.dispatch_keyed(Message::WorkPackage(msg), action, label)
-    }
-
-    /// The workspace and visibility step ending the new-epic and
-    /// new-package forms.
-    fn run_placement_picker(&mut self, action: &'static str, label: &str) -> Vec<Command> {
-        use crate::tui::messages::InputMessage::*;
-        let msg = match action {
-            "placement_picker_workspace_down" => PlacementMoveWorkspace(1),
-            "placement_picker_workspace_up" => PlacementMoveWorkspace(-1),
-            "placement_picker_visibility" => PlacementToggleVisibility,
-            "placement_picker_create" => SubmitPlacement,
-            "placement_picker_cancel" => CancelInput,
-            _ => return vec![],
-        };
-        self.dispatch_keyed(Message::Input(msg), action, label)
-    }
-
-    /// The admin screen (`admin-surfaces.allium`).
-    fn run_admin(&mut self, action: &'static str, label: &str) -> Vec<Command> {
-        use crate::tui::messages::AdminMessage::*;
-        let msg = match action {
-            "admin_navigate_down" => Move(1),
-            "admin_navigate_up" => Move(-1),
-            "admin_next_pane" => Pane(1),
-            "admin_previous_pane" => Pane(-1),
-            "admin_new_workspace" => NewWorkspace,
-            "admin_rename_workspace" => RenameWorkspace,
-            "admin_delete_workspace" => DeleteWorkspace,
-            "admin_add_member" => AddMember,
-            "admin_toggle_role" => ToggleRole,
-            "admin_remove_member" => RemoveMember,
-            "admin_grant_super_admin" => Grant,
-            "admin_revoke_super_admin" => Revoke,
-            "admin_claim_super_admin" => Claim,
-            "admin_delete_unseen_item" => DeleteUnseen,
-            "admin_close" => Close,
-            _ => return vec![],
-        };
-        if matches!(msg, Move(_) | Pane(_)) {
-            return self.dispatch_keyed(Message::Admin(msg), action, label);
-        }
-        // A per-pane key on another pane, or one the person may not use,
-        // does nothing: it records only when it issued a command or opened
-        // a prompt.
-        self.dispatch_prompting_handler_keyed(|a| a.update(Message::Admin(msg)), action, label)
     }
 
     /// The "reparent epic" tree picker.

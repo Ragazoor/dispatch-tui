@@ -28,7 +28,7 @@ pub use epic::EpicCommand;
 pub use feed::FeedCommand;
 pub use keep_awake::KeepAwakeCommand;
 pub use learnings::LearningCommand;
-pub use people::{AdminWrite, PeopleCommand};
+pub use people::PeopleCommand;
 pub use pr::PrCommand;
 pub use repo_filter::RepoFilterCommand;
 pub use settings::SettingsCommand;

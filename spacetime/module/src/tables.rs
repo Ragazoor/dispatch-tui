@@ -195,15 +195,14 @@ pub struct Epic {
     #[index(btree)]
     #[default("")]
     pub created_by: String,
-    /// The workspace this epic lives in (`core.allium: Epic.workspace`), as
-    /// [`Workspace::id`]. `0` until [`migrate_store_to_workspaces`] puts every
-    /// existing epic in the default workspace; a sub-epic shares its parent's.
-    /// Appended last, with a default, so the module still automigrates.
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// row writes `0`. It and its index stay because an automigration cannot
+    /// drop a column.
     #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
-    /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`]
-    /// (`core.allium: Epic.visibility`).
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// row writes [`VISIBILITY_PUBLIC`].
     #[default("public")]
     #[index(btree)]
     pub visibility: String,
@@ -288,8 +287,8 @@ pub struct RetiredFeedItem {
 ///
 /// Written by [`crate::archive_task_row`] in the same reducer that deletes the
 /// task row. Never subscribed by a board and never public: reads go through
-/// the `read_archived_task`/`list_archived_tasks` procedures, which apply
-/// [`crate::archived_task_visible_to`]. Every absent-able column is a `""`/`0`
+/// the `read_archived_task`/`list_archived_tasks` procedures, which serve
+/// every record. Every absent-able column is a `""`/`0`
 /// sentinel for the reason the module header gives.
 #[spacetimedb::table(accessor = archived_tasks)]
 #[derive(Clone, Debug, PartialEq)]
@@ -319,14 +318,15 @@ pub struct ArchivedTask {
     pub epic_id: i64,
     pub epic_title: String,
     pub agent_name: String,
-    /// The epic's workspace at archive time, `0` for an epic-less task.
-    /// Indexed: an epic record is listed per workspace the caller belongs to.
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// record writes `0`.
     #[index(btree)]
     pub workspace_id: i64,
-    /// Whether the epic chain was private at archive time. A separate flag
-    /// because a private epic with no recorded creator has an empty holder,
-    /// which is "nobody", not "everyone".
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// record writes `false`.
     pub private: bool,
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// record writes `""`.
     pub private_holder: String,
     pub archived_at: String,
     pub archived_by: String,
@@ -450,9 +450,9 @@ pub struct FilterPreset {
 /// in Phase 10 (task #4914). Never actually per-machine data — it was only
 /// ever filed that way — so unlike `Setting`/`FilterPreset` above, nothing on
 /// this table is scoped by `host`. It is subscribed to unconditionally, the
-/// same way `repo_paths` is: a learning's visibility is governed entirely by
-/// its own `scope`/`scope_ref`, not by which machine recorded it or which
-/// machine is asking.
+/// same way `repo_paths` is: every learning is served to everyone, and where
+/// it applies is governed entirely by its own `scope`/`scope_ref`, not by
+/// which machine recorded it or which machine is asking.
 ///
 /// No column here needs the `""`/`0` sentinel treatment `Task`/`Epic`
 /// use for their optional columns: that trick exists only because a
@@ -489,17 +489,14 @@ pub struct Learning {
     /// binary rather than JSON. `None` until the embedding backfill computes
     /// one (`docs/specs/learnings.allium`'s embedding backfill note).
     pub embedding: Option<Vec<u8>>,
-    /// The workspace this learning belongs to (`core.allium:
-    /// Learning.workspace`), as [`Workspace::id`]; `0` for a user-scoped
-    /// learning, which is private to its author instead. Appended last, with
-    /// a default, so the module still automigrates.
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// learning writes `0`.
     #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
     /// Who recorded it (`core.allium: Learning.author`), in `Host.owner`'s
     /// spelling, stamped by [`create_learning`]. Empty on a learning that
-    /// predates workspaces, which nobody can claim. A learning with no
-    /// workspace is seen only by its author.
+    /// predates the column.
     #[index(btree)]
     #[default("")]
     pub author: String,
@@ -718,13 +715,13 @@ pub struct WorkPackage {
     /// the module no longer automigrates over a live store.
     #[default(None)]
     pub sort_order: Option<i64>,
-    /// The workspace this package lives in (`work-packages.allium:
-    /// WorkPackage.workspace`); `0` until the migration places it. Appended
-    /// last, with a default, like every column since `sort_order`.
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// package writes `0`.
     #[index(btree)]
     #[default(0)]
     pub workspace_id: i64,
-    /// [`VISIBILITY_PUBLIC`] or [`VISIBILITY_PRIVATE`].
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// package writes [`VISIBILITY_PUBLIC`].
     #[default("public")]
     #[index(btree)]
     pub visibility: String,
@@ -756,17 +753,16 @@ pub struct WorkPackageLink {
 
 pub const WORK_PACKAGE_ITEM_TASK: &str = "task";
 
-/// `core.allium: Visibility`, in the store's spelling.
+/// The value a new row writes into the dead `visibility` columns of epics and
+/// work packages (docs/plans/2026-11-23-remove-workspaces.md, R8).
 pub const VISIBILITY_PUBLIC: &str = "public";
-
-pub const VISIBILITY_PRIVATE: &str = "private";
 
 pub const WORK_PACKAGE_ITEM_EPIC: &str = "epic";
 
 /// One person's unseen mark on one task (`core.allium: UnseenTask`).
 ///
-/// Written when a task is created with the signal on, one row per person who
-/// can see its epic; cleared when the person enters the epic, when the
+/// Written when a task is created with the signal on, one row per known person
+/// (`UserProfile`); cleared when the person lands on the card, when the
 /// task leaves its epic or finishes, and with the task. An epic's mark is never
 /// a row: it is derived from these.
 #[spacetimedb::table(accessor = unseen_tasks)]
@@ -802,11 +798,11 @@ pub struct Bookmark {
 }
 
 /// One person as the store presents them to others
-/// (`workspaces.allium: UserProfile`). One row per identity, created the first
+/// (`people.allium: UserProfile`). One row per identity, created the first
 /// time that identity connects.
 ///
 /// Public: the directory of identities and display names is readable by every
-/// connected client (`workspaces.allium`, D7).
+/// connected client.
 #[spacetimedb::table(accessor = user_profiles, public)]
 #[derive(Clone, Debug)]
 pub struct UserProfile {
@@ -816,17 +812,15 @@ pub struct UserProfile {
     /// `""` until the person sets one; [`shown_name`](crate::shown_name)
     /// stands in for it meanwhile.
     pub display_name: String,
-    /// The super-admin flag; only the rules in `workspace.rs` write it
-    /// (`workspaces.allium: ClaimSuperAdmin`).
+    /// Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). A new
+    /// profile writes `false`.
     pub is_super_admin: bool,
     pub created_at: String,
 }
 
-/// A workspace (`core.allium: Workspace`): where people collaborate.
-///
-/// Public for now, like `user_profiles`. The read-enforcement task makes it
-/// private and serves it through a per-caller view
-/// (`docs/architecture.md`, "Read enforcement: per-caller views").
+/// DEAD TABLE: a former workspace. Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). It may still hold old rows: an
+/// automigration cannot drop a table, and a restore writes none
+/// (`spacetime-seed.allium: SharedTable`).
 #[spacetimedb::table(accessor = workspaces)]
 #[derive(Clone, Debug)]
 pub struct Workspace {
@@ -838,19 +832,14 @@ pub struct Workspace {
     /// The `UserIdentity` of the super-admin who created it.
     pub created_by: String,
     pub created_at: String,
-    /// Always `true`. A view cannot scan a table, so a super-admin's
-    /// `visible_workspaces` reads every row through this index
-    /// (`docs/architecture.md`, "Read enforcement: per-caller views"). Appended last,
-    /// with a default, so the table migrates in place.
+    /// Once the index a view read every row through; kept with the table.
     #[default(true)]
     #[index(btree)]
     pub listed: bool,
 }
 
-/// One person's membership of one workspace (`core.allium: Membership`).
-///
-/// At most one row per (workspace, user): `add_member` refuses a second.
-/// Public for now, for the reason [`Workspace`] is.
+/// DEAD TABLE: a former workspace membership. Dead: nothing writes or reads it (docs/plans/2026-11-23-remove-workspaces.md, R8). Kept for the reason
+/// [`Workspace`] is.
 #[spacetimedb::table(accessor = memberships)]
 #[derive(Clone, Debug)]
 pub struct Membership {
@@ -862,7 +851,6 @@ pub struct Membership {
     /// The member's `UserIdentity`.
     #[index(btree)]
     pub user: String,
-    /// `"admin"` or `"member"` (`core.allium: WorkspaceRole`).
     pub role: String,
     pub created_at: String,
 }

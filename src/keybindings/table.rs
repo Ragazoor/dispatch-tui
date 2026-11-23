@@ -207,12 +207,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Open the work package's view: its linked tasks and epics as cards",
     ),
     normal(
-        &["V"],
-        Some(C::OnWorkPackageCard),
-        "toggle_work_package_visibility",
-        "Switch the work package between public and private",
-    ),
-    normal(
         &["w"],
         Some(C::OnTaskCard),
         "link_work_package",
@@ -436,12 +430,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         None,
         "set_display_name",
         "Set your display name, shown beside what you create",
-    ),
-    normal(
-        &["A"],
-        None,
-        "open_admin_screen",
-        "Open the admin screen: workspaces, members and super-admins",
     ),
     normal(&["?"], None, "toggle_help", "Toggle the help overlay"),
     // ---- board.detail ----
@@ -1177,128 +1165,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "work_package_picker_close",
         "Close the picker",
     ),
-    // ---- board.picker.placement ----
-    r(
-        N::BoardPickerPlacement,
-        &["j", "Down"],
-        "placement_picker_workspace_down",
-        "Move to the next of your workspaces (shown when you belong to more than one)",
-    ),
-    r(
-        N::BoardPickerPlacement,
-        &["k", "Up"],
-        "placement_picker_workspace_up",
-        "Move to the previous of your workspaces (shown when you belong to more than one)",
-    ),
-    r(
-        N::BoardPickerPlacement,
-        &["Tab", "BackTab", "h", "l"],
-        "placement_picker_visibility",
-        "Switch the new item between public and private",
-    ),
-    r(
-        N::BoardPickerPlacement,
-        &["Space", "Enter"],
-        "placement_picker_create",
-        "Create the item in the chosen workspace with the chosen visibility",
-    ),
-    r(
-        N::BoardPickerPlacement,
-        &["Esc"],
-        "placement_picker_cancel",
-        "Cancel; nothing is created",
-    ),
-    // ---- board.admin ----
-    r(
-        N::BoardAdmin,
-        &["j", "Down"],
-        "admin_navigate_down",
-        "Move down the pane",
-    ),
-    r(
-        N::BoardAdmin,
-        &["k", "Up"],
-        "admin_navigate_up",
-        "Move up the pane",
-    ),
-    r(
-        N::BoardAdmin,
-        &["Tab"],
-        "admin_next_pane",
-        "Next pane: workspaces, members, and for a super-admin super-admins and unseen items",
-    ),
-    r(
-        N::BoardAdmin,
-        &["BackTab"],
-        "admin_previous_pane",
-        "Previous pane: workspaces, members, and for a super-admin super-admins and unseen items",
-    ),
-    r(
-        N::BoardAdmin,
-        &["n"],
-        "admin_new_workspace",
-        "New workspace (super-admin; on the workspaces pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["r"],
-        "admin_rename_workspace",
-        "Rename the highlighted workspace (on the workspaces pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["d"],
-        "admin_delete_workspace",
-        "Delete the highlighted workspace, once empty (super-admin; on the workspaces pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["a"],
-        "admin_add_member",
-        "Add a person to the highlighted workspace by display name (workspaces and members panes)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["m"],
-        "admin_toggle_role",
-        "Flip the highlighted member between admin and member (on the members pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["x"],
-        "admin_remove_member",
-        "Remove the highlighted member from the workspace (on the members pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["g"],
-        "admin_grant_super_admin",
-        "Make a person a super-admin by display name (super-admin; on the super-admins pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["v"],
-        "admin_revoke_super_admin",
-        "Revoke the highlighted super-admin (super-admin; on the super-admins pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["c"],
-        "admin_claim_super_admin",
-        "Claim the first super-admin; works only while the store has none",
-    ),
-    r(
-        N::BoardAdmin,
-        &["D"],
-        "admin_delete_unseen_item",
-        "Delete the highlighted private item nobody can see (super-admin; on the unseen items pane)",
-    ),
-    r(
-        N::BoardAdmin,
-        &["Esc", "q"],
-        "admin_close",
-        "Close the admin screen",
-    ),
     // ---- BoardConfirmQuit ----
     r(
         N::BoardConfirmQuit,
@@ -1498,19 +1364,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &[ANY_OTHER_KEY],
         "confirm_delete_work_package_no",
         "Keep the work package",
-    ),
-    // ---- board.confirm.admin ----
-    r(
-        N::BoardConfirmAdmin,
-        &["y", "Y"],
-        "confirm_admin_yes",
-        "Carry out the admin action named in the prompt",
-    ),
-    r(
-        N::BoardConfirmAdmin,
-        &[ANY_OTHER_KEY],
-        "confirm_admin_no",
-        "Leave things as they are",
     ),
     row(
         N::AgentTreeTree,

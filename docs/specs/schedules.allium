@@ -41,11 +41,11 @@
 --   - S6, any running board fires a due task, but only a board whose machine
 --     holds the task's repo. A board without the repo leaves the task for one
 --     that has it, so a missing repo never marks a schedule failed.
---     Deliberately ANY person's board, not only the setter's: a shared board
---     is shared between teammates, so a scheduled task in a shared epic is
---     work any of them may run. A task that must not run on a teammate's
---     machine belongs on its owner's own board or a private epic, where no
---     one else's board sees it.
+--     Deliberately ANY board, not only the setter's: a scheduled task in an
+--     epic is work any board holding it may run. A task that must not run on
+--     another identity's machine belongs on its owner's own user board,
+--     which only that identity's boards receive (sync.allium:
+--     own_creations).
 --   - S7, a failed scheduled launch is marked, not retried. The task stays in
 --     backlog with the failure reason. A one-off stops there; a phoenix task
 --     moves on to its next due time.

@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use ratatui::widgets::ListState;
 
-use super::{ColumnAnchor, EpicDraft, InputMode, Lens, Placement, RepoFilterMode, TaskDraft};
+use super::{ColumnAnchor, EpicDraft, InputMode, Lens, RepoFilterMode, TaskDraft};
 use crate::models::{
     Epic, EpicId, PaneId, Task, TaskId, TaskStatus, WorkPackage, WorkPackageId, WorkPackageItem,
     WorkPackageLink,
@@ -290,15 +290,6 @@ pub struct InputState {
     pub caret: usize,
     pub task_draft: Option<TaskDraft>,
     pub epic_draft: Option<EpicDraft>,
-    /// The step that ends a new-epic or new-package form; set only while
-    /// `mode` is `InputPlacement`.
-    pub placement: Option<Placement>,
-    /// The person's workspaces, read when a create form opens
-    /// (`PeopleCommand::LoadWorkspaces`).
-    pub workspaces: Vec<crate::models::WorkspaceRef>,
-    /// The admin screen; set while `mode` is `Admin`, `InputAdminText` or
-    /// `ConfirmAdmin`.
-    pub admin: Option<super::AdminScreen>,
     pub repo_cursor: usize,
     /// Tracks epic_id during quick-dispatch repo selection in epic view.
     pub pending_epic_id: Option<EpicId>,
@@ -324,9 +315,6 @@ impl Default for InputState {
             caret: 0,
             task_draft: None,
             epic_draft: None,
-            placement: None,
-            workspaces: Vec::new(),
-            admin: None,
             repo_cursor: 0,
             pending_epic_id: None,
             copy_flow: false,

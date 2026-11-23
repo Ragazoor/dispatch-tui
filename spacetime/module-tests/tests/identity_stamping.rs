@@ -1,9 +1,9 @@
 //! Identities are the caller's, never a client's claim (task #98755, V4/V5;
-//! `workspaces.allium`: "Identities are the caller's").
+//! `store-split.allium: IdentitiesAreTheCallers`).
 //!
 //! A task that lands on a user board takes the CALLER as owner, and a created
 //! task is stamped `created_by = caller`; `unsubscribe_from_epic` refuses a
-//! subscriber that is not the caller and hides epics the caller cannot see;
+//! subscriber that is not the caller and answers a missing epic as missing;
 //! `claim_store_owner` records a publisher only while none is recorded.
 
 mod common;
@@ -73,48 +73,39 @@ fn a_tasks_creator_detaches_it_onto_their_own_board_whatever_owner_is_named() {
     assert_eq!(store.task(id).owner, identity_of("alice"));
 }
 
+/// R7: anyone may detach a task, and it lands on the caller's board.
 #[test]
-fn a_teammate_who_did_not_create_a_task_cannot_detach_it() {
+fn a_person_who_did_not_create_a_task_may_detach_it() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
-    let why = store
-        .call("bob", |ctx| set_task_epic(ctx, id, 0, "bob".into()))
-        .unwrap_err();
-    assert!(
-        why.contains("only its creator or an admin may detach"),
-        "{why}"
-    );
-    assert_eq!(store.task(id).epic_id, epic);
+    store
+        .call("bob", |ctx| set_task_epic(ctx, id, 0, "alice".into()))
+        .expect("anyone may detach");
+    assert_eq!(store.task(id).epic_id, 0);
+    assert_eq!(store.task(id).owner, identity_of("bob"));
 }
 
 #[test]
-fn update_task_detaches_under_the_same_authority() {
+fn update_task_detaches_onto_the_callers_board() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
     let id = store.create("alice", epic_task("T", epic, "backlog"));
-    let detach = |who: &'static str| {
-        store.call(who, |ctx| {
+    store
+        .call("bob", |ctx| {
             update_task(
                 ctx,
                 id,
                 Some(0),
-                identity_of(who),
+                identity_of("alice"),
                 String::new(),
                 TaskPatch::default(), String::new(), None,
             )
         })
-    };
-
-    let why = detach("bob").unwrap_err();
-    assert!(
-        why.contains("only its creator or an admin may detach"),
-        "{why}"
-    );
-    assert_eq!(store.task(id).epic_id, epic);
-    detach("alice").expect("the creator may detach");
+        .expect("anyone may detach");
     assert_eq!(store.task(id).epic_id, 0);
+    assert_eq!(store.task(id).owner, identity_of("bob"));
 }
 
 #[test]
@@ -158,10 +149,9 @@ fn unsubscribe_removes_the_callers_own_follow() {
 }
 
 #[test]
-fn unsubscribe_answers_an_epic_the_caller_cannot_see_as_missing() {
+fn unsubscribe_answers_a_missing_epic_as_missing() {
     let store = Store::new();
     let epic = store.create_epic("alice", "E", false);
-    // Carol is in no workspace that holds the epic: bare store, no sight.
     let err = store
         .call("carol", |ctx| {
             unsubscribe_from_epic(ctx, identity_of("carol"), epic + 100)

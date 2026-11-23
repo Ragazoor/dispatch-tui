@@ -93,8 +93,7 @@ impl MemoryReducerCaller {
         let mut tables = self.lock();
         self.acting_for(&tables, host)?;
         module::validate_wrap_up_action(action)?;
-        let scope = self.scope();
-        let Some(task) = tables.visible_task(&scope, task_id) else {
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} no longer exists"));
         };
         module::validate_wrap_up_request(
@@ -220,8 +219,7 @@ impl MemoryReducerCaller {
         pr_url: &str,
     ) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        let scope = self.scope();
-        let Some(task) = tables.visible_task(&scope, task_id) else {
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} no longer exists"));
         };
         let sessions: Vec<module::SessionRequest> = tables
@@ -290,8 +288,7 @@ impl MemoryReducerCaller {
     /// the caller's own. One transaction, which the held lock stands for.
     fn close_task_body(&self, task_id: i64, host: &str) -> Result<Vec<i64>, String> {
         let mut tables = self.lock();
-        let scope = self.scope();
-        let Some(task) = tables.visible_task(&scope, task_id) else {
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} no longer exists"));
         };
         let stamp = self.now();

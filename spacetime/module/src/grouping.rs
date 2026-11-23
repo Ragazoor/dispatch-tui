@@ -58,18 +58,15 @@ pub(crate) fn find_or_create_repo_group(
     }
     ctx.db
         .epics()
-        .insert(inherit_workspace(
-            ctx,
-            Epic {
-                title: title.to_string(),
-                parent_epic_id: root,
-                origin: REPO_GROUP_ORIGIN.to_string(),
-                created_by,
-                created_at: now(ctx),
-                updated_at: now(ctx),
-                ..blank_epic()
-            },
-        ))
+        .insert(Epic {
+            title: title.to_string(),
+            parent_epic_id: root,
+            origin: REPO_GROUP_ORIGIN.to_string(),
+            created_by,
+            created_at: now(ctx),
+            updated_at: now(ctx),
+            ..blank_epic()
+        })
         .id
 }
 
@@ -187,14 +184,14 @@ pub(crate) fn reroute_on_repo_change(ctx: &ReducerContext, task_id: i64) -> Resu
 /// then the root's chain once, rather than per moved task.
 #[spacetimedb::reducer]
 pub fn regroup_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
-    if visible_epic(ctx, root_id).is_none() {
+    if ctx.db.epics().id().find(root_id).is_none() {
         return Ok(());
     }
     regroup_epic_rows(ctx, root_id)
 }
 
 /// [`regroup_epic`]'s body, shared with `set_epic_group_by_repo`; the caller
-/// has checked the epic is visible.
+/// has checked the epic exists.
 pub(crate) fn regroup_epic_rows(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     let tasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&root_id).collect();
     let mut joined = std::collections::BTreeSet::new();
@@ -222,14 +219,14 @@ pub(crate) fn regroup_epic_rows(ctx: &ReducerContext, root_id: i64) -> Result<()
 /// load-bearing.
 #[spacetimedb::reducer]
 pub fn flatten_epic(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
-    if visible_epic(ctx, root_id).is_none() {
+    if ctx.db.epics().id().find(root_id).is_none() {
         return Ok(());
     }
     flatten_epic_rows(ctx, root_id)
 }
 
 /// [`flatten_epic`]'s body, shared with `set_epic_group_by_repo`; the caller
-/// has checked the epic is visible.
+/// has checked the epic exists.
 pub(crate) fn flatten_epic_rows(ctx: &ReducerContext, root_id: i64) -> Result<(), String> {
     let subs: Vec<Epic> = ctx
         .db

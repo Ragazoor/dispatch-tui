@@ -53,11 +53,6 @@ mod agents;
 #[cfg(test)]
 mod schedules;
 
-/// `admin-surfaces.allium: UnseenItemListing`, as the pure function the
-/// `unseen_items` view runs (`visibility.rs`).
-#[cfg(test)]
-mod unseen_items;
-
 /// `docs/architecture.md`, "Read enforcement: per-caller views", as the functions the views run
 /// (`views.rs`), over a plain in-test store.
 #[cfg(test)]

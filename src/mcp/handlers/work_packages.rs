@@ -11,8 +11,8 @@ use crate::service::{CreateWorkPackageParams, UpdateWorkPackageParams, WorkPacka
 
 use super::time_filter;
 use super::types::{
-    deserialize_flexible_id, deserialize_optional_flexible_i64, deserialize_optional_flexible_id,
-    parse_args, reject_alongside, service_err_to_response, FlexibleId, JsonRpcResponse,
+    deserialize_flexible_id, deserialize_optional_flexible_id, parse_args, reject_alongside,
+    service_err_to_response, FlexibleId, JsonRpcResponse,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,10 +29,6 @@ struct CreateWorkPackageArgs {
     link_task_ids: Vec<FlexibleId<TaskId>>,
     #[serde(default)]
     link_epic_ids: Vec<FlexibleId<EpicId>>,
-    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
-    workspace_id: Option<i64>,
-    #[serde(default)]
-    visibility: Option<crate::models::Visibility>,
 }
 
 #[derive(Deserialize)]
@@ -68,8 +64,6 @@ struct UpdateWorkPackageArgs {
     link_epic_ids: Vec<FlexibleId<EpicId>>,
     #[serde(default)]
     unlink_epic_ids: Vec<FlexibleId<EpicId>>,
-    #[serde(default)]
-    visibility: Option<crate::models::Visibility>,
 }
 
 #[derive(Deserialize)]
@@ -110,16 +104,6 @@ pub(super) async fn handle_work_package_create(
         Err(resp) => return resp,
     };
     tracing::info!(title = %parsed.title, "MCP work-package_create");
-    let Some(workspace_id) = parsed.workspace_id else {
-        return super::types::tool_error(
-            id,
-            format!(
-                "a work package needs a workspace_id. {}",
-                super::epics::workspace_choices(state).await
-            ),
-        );
-    };
-    let visibility = parsed.visibility.unwrap_or_default();
     let link = items(parsed.link_task_ids, parsed.link_epic_ids);
     let linked = link.len();
     let title = parsed.title.clone();
@@ -129,8 +113,6 @@ pub(super) async fn handle_work_package_create(
             title: parsed.title,
             description: parsed.description,
             link,
-            workspace_id,
-            visibility,
         })
         .await
     {
@@ -139,12 +121,11 @@ pub(super) async fn handle_work_package_create(
             text(
                 id,
                 format!(
-                    "Work package {package_id} (\"{title}\") created in workspace {} ({}) with {linked} linked item(s)",
-                    workspace_id, visibility
+                    "Work package {package_id} (\"{title}\") created with {linked} linked item(s)"
                 ),
             )
         }
-        Err(e) => super::epics::workspace_refusal(state, id, workspace_id, e).await,
+        Err(e) => service_err_to_response(id, e),
     }
 }
 
@@ -243,10 +224,6 @@ fn format_view(
         out.push_str(&format!("\nCreated by: {creator}"));
     }
     out.push_str(&format!(
-        "\nWorkspace: {}\nVisibility: {}",
-        p.workspace_id, p.visibility
-    ));
-    out.push_str(&format!(
         "\nCreated: {}\nUpdated: {}",
         time_filter::iso(p.created_at),
         time_filter::iso(p.updated_at)
@@ -291,7 +268,6 @@ pub(super) async fn handle_work_package_update(
         ("title", parsed.title.is_some()),
         ("description", parsed.description.is_some()),
         ("sort_order", parsed.sort_order.is_some()),
-        ("visibility", parsed.visibility.is_some()),
         ("link_task_ids", !parsed.link_task_ids.is_empty()),
         ("unlink_task_ids", !parsed.unlink_task_ids.is_empty()),
         ("link_epic_ids", !parsed.link_epic_ids.is_empty()),
@@ -308,7 +284,6 @@ pub(super) async fn handle_work_package_update(
         sort_order: parsed.sort_order,
         link: items(parsed.link_task_ids, parsed.link_epic_ids),
         unlink: items(parsed.unlink_task_ids, parsed.unlink_epic_ids),
-        visibility: parsed.visibility,
     };
     match state.work_package_svc.update_work_package(params).await {
         Ok(not_linked) => {

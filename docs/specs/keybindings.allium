@@ -111,8 +111,7 @@ contract KeybindingDriftGate {
         -- prompt, overlay footer; not the cards of the board drawn under it)
         -- is built from the row it stands for and names a key of that mode's
         -- namespace, so a hint never advertises a key the mode does not
-        -- answer. It is read on every board.filter tab and every board.admin
-        -- pane, and in board.normal and board.detail too: there the hints
+        -- answer. It is read on every board.filter tab, and in board.normal and board.detail too: there the hints
         -- read are those of the status bar and the footer. Two namespaces
         -- are not read: board.help (its body and title are the table;
         -- ReadersFollowTheRemap) and board.error (its catch-all answers any
@@ -222,7 +221,7 @@ contract KeybindingDriftGate {
 --                                                             epic title, a new work
 --                                                             package's title, a work
 --                                                             package rename, display
---                                                             name, the admin name input
+--                                                             name
 --   board_description_editor     board.description_editor     a new task's or epic's
 --                                                             description is open in
 --                                                             $EDITOR; one row,
@@ -239,8 +238,6 @@ contract KeybindingDriftGate {
 --   board_picker_move_to_epic    board.picker.move_to_epic    epic tree picker for moving a task (`m`)
 --   board_picker_reparent_epic   board.picker.reparent_epic   epic tree picker for reparenting an epic (`m`)
 --   board_picker_work_package    board.picker.work_package    work-package link picker (`w`; work-packages.allium)
---   board_picker_placement       board.picker.placement       workspace and visibility step of epic and package creation (workspaces.allium)
---   board_admin                  board.admin                  the admin screen: workspaces, members, super-admins, unseen items (`A`; admin-surfaces.allium)
 --   board_confirm_quit                    board.confirm.quit
 --   board_confirm_delete_task             board.confirm.delete_task
 --   board_confirm_batch_delete            board.confirm.batch_delete
@@ -255,7 +252,6 @@ contract KeybindingDriftGate {
 --   board_confirm_trust_repo              board.confirm.trust_repo
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
 --   board_confirm_delete_work_package     board.confirm.delete_work_package
---   board_confirm_admin                   board.confirm.admin
 --   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
 --   agent_tree_commits           agent_tree.commits           companion pane, Commits section
 --   agent_tree_agents            agent_tree.agents            companion pane, Agents section
@@ -386,14 +382,14 @@ enum KeyNamespace {
     board_picker_repo_path | board_picker_base_branch | board_picker_tag |
     board_picker_wrap_up_mode | board_picker_model | board_picker_quick_dispatch |
     board_picker_move_to_epic | board_picker_reparent_epic |
-    board_picker_work_package | board_picker_placement | board_admin |
+    board_picker_work_package |
     board_confirm_quit | board_confirm_delete_task | board_confirm_batch_delete |
     board_confirm_delete_epic | board_confirm_done | board_confirm_retry |
     board_confirm_detach_tmux | board_confirm_override_feed_owner |
     board_confirm_move_to_epic | board_confirm_reparent_epic |
     board_confirm_delete_repo_path | board_confirm_trust_repo |
     board_confirm_trust_repo_quick_dispatch |
-    board_confirm_delete_work_package | board_confirm_admin |
+    board_confirm_delete_work_package |
     agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
     tmux_global
 }
@@ -448,7 +444,7 @@ enum KeyReceiver { dispatch | tmux }
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
 --   does nothing; so do U and R outside an epic view.
--- board.normal, cursor-level (Enter, Space, i, m, w, b, V, H, L). The cursor is on at
+-- board.normal, cursor-level (Enter, Space, i, m, w, b, H, L). The cursor is on at
 -- most one of the first five (a select-all row is not a card or header);
 -- off_epic_card is the complement of on_epic_card:
 --   on_column_select_all      "on a column's select-all row"    Enter: select_all
@@ -460,8 +456,7 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                Enter: jump_to_deepest_epic;
 --                                                                m: reparent_epic; H/L;
 --                                                                w: link_work_package
---   on_work_package_card      "on a work package card"          Space: enter_work_package;
---                                                                V: toggle_work_package_visibility
+--   on_work_package_card      "on a work package card"          Space: enter_work_package
 --   on_task_card              "on a task card"                  i: open_task_detail;
 --                                                                m: move_task_to_epic (the whole
 --                                                                selection when tasks are selected);
@@ -536,10 +531,10 @@ enum KeyReceiver { dispatch | tmux }
 --   v have no applicable row and do nothing.
 --
 -- A new condition is a new literal here; a row cannot invent one inline.
--- An overlay's tab or pane is not a KeyContext: board.filter's per-tab rows
+-- An overlay's tab is not a KeyContext: board.filter's per-tab rows
 -- (repo_filter_*, filter_toggle_done_epics, filter_search_epics,
--- filter_fold_*) and board.admin's per-pane rows have no context, apply in
--- every tab or pane, and name their tab or pane in the description. Pressed
+-- filter_fold_*) have no context, apply in every tab, and name their tab
+-- in the description. Pressed
 -- elsewhere, their action does nothing and records nothing.
 enum KeyContext {
     search_active | inside_nested_view | inside_epic_view | nested_view_no_search | top_level |
@@ -690,12 +685,8 @@ entity KeyBinding {
     --   board.picker.move_to_epic   move_to_epic_picker_down, _up, _expand, _collapse
     --   board.picker.reparent_epic  reparent_picker_down, _up, _expand, _collapse
     --   board.picker.work_package   work_package_picker_down, work_package_picker_up
-    --   board.picker.placement      placement_picker_workspace_down,
-    --                               placement_picker_workspace_up
-    --   board.admin                 admin_navigate_down, admin_navigate_up;
-    --                               admin_next_pane, admin_previous_pane
     -- A row whose keys all do the same thing stays one row:
-    -- placement_picker_visibility, switch_section and cycle_agent_filter flip
+    -- switch_section and cycle_agent_filter flip
     -- between two states whichever key is pressed, and y / Y both confirm.
     action:      String
 

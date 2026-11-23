@@ -523,3 +523,37 @@ fn reparenting_an_epic_recalculates_both_parents() {
     assert_eq!(store.epic(to).status, "backlog", "a running child arrived");
     assert_eq!(store.epic(moved).status, "running", "the moved epic is untouched");
 }
+
+#[test]
+fn update_epic_on_a_missing_epic_is_refused() {
+    let store = Store::new();
+    let why = store
+        .call("alice", |ctx| update_epic(ctx, 9_999, EpicPatch::default()))
+        .expect_err("the caller learns the epic is gone");
+    assert!(why.contains("does not exist"), "{why}");
+}
+
+/// `epics.allium: UpdateEpicIsOneTransaction`: a rename under a parent that
+/// does not exist is refused whole, so the title is not written either.
+#[test]
+fn update_epic_with_a_refused_part_leaves_the_title_unchanged() {
+    let store = Store::new();
+    let epic = store.create_epic("alice", "Before", false);
+    let why = store
+        .call("alice", |ctx| {
+            update_epic(
+                ctx,
+                epic,
+                EpicPatch {
+                    title: Some("never written".into()),
+                    parent_epic_id: Some(9_999),
+                    ..EpicPatch::default()
+                },
+            )
+        })
+        .expect_err("the parent half is refused");
+    assert!(why.contains("does not exist"), "{why}");
+    let row = store.epic(epic);
+    assert_eq!(row.title, "Before");
+    assert_eq!(row.parent_epic_id, 0);
+}

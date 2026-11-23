@@ -1,12 +1,11 @@
 use super::*;
 
-/// `workspaces.allium: RepoGroupsStayPublic` and `epics.allium: FlattenEpic`
-/// (private moves and repo groups, task #98744): the real reducers and the twin
-/// refuse a private repo group and an origin change alike, and a flatten ends
-/// the unseen mark of every task it relinks.
+/// `epics.allium: RepoGroupOriginIsSetByRouting` and `FlattenEpic` (task
+/// #98744): the real reducers and the twin refuse an origin change alike, and a
+/// flatten ends the unseen mark of every task it relinks.
 #[test]
-fn memory_caller_keeps_repo_groups_public_and_clears_marks_on_relink() {
-    let instance = Instance::start("memory-caller-private-moves");
+fn memory_caller_keeps_the_repo_group_origin_and_clears_marks_on_relink() {
+    let instance = Instance::start("memory-caller-repo-group-origin");
     let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
 
@@ -28,7 +27,7 @@ fn memory_caller_keeps_repo_groups_public_and_clears_marks_on_relink() {
         // (`created_by = identity`), so the twin writes as the same identity.
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -37,7 +36,7 @@ fn memory_caller_keeps_repo_groups_public_and_clears_marks_on_relink() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();
@@ -99,16 +98,7 @@ fn memory_caller_keeps_repo_groups_public_and_clears_marks_on_relink() {
         wait_for!(rows_real.epic(EpicId(sub)).is_some());
         same_epic(sub);
 
-        // -- RepoGroupsStayPublic: no private repo group, no origin change ------
-        let why = refused(
-            real.set_epic_visibility(EpicId(sub), "private".into())
-                .await
-                .unwrap(),
-            mem.set_epic_visibility(EpicId(sub), "private".into())
-                .await
-                .unwrap(),
-        );
-        assert!(why.contains("repo-group"), "{why}");
+        // -- RepoGroupOriginIsSetByRouting: no origin change, either way ------
         let origin = bindings::EpicPatch {
             origin: Some(String::new()),
             ..blank_epic_patch()

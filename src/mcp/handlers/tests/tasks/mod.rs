@@ -22,7 +22,7 @@ async fn create_epic_minimal() {
         "tools/call",
         Some(json!({
             "name": "epic_create",
-            "arguments": { "workspace_id": 1, "title": "My Epic" }
+            "arguments": { "title": "My Epic" }
         })),
     )
     .await;
@@ -43,8 +43,7 @@ async fn create_epic_with_all_fields() {
         "tools/call",
         Some(json!({
             "name": "epic_create",
-            "arguments": { "workspace_id": 1,
-                "title": "Full Epic",
+            "arguments": { "title": "Full Epic",
                 "description": "Epic desc"
             }
         })),
@@ -64,7 +63,7 @@ async fn create_epic_missing_title() {
         "tools/call",
         Some(json!({
             "name": "epic_create",
-            "arguments": { "workspace_id": 1,}
+            "arguments": { }
         })),
     )
     .await;

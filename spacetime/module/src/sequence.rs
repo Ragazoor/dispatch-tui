@@ -62,8 +62,6 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "task_watchers" => burn_table!(task_watchers, blank_watcher()),
         "work_packages" => burn_table!(work_packages, blank_work_package()),
         "agents" => burn_table!(agents, blank_agent()),
-        "workspaces" => burn_table!(workspaces, blank_workspace()),
-        "memberships" => burn_table!(memberships, blank_membership()),
         "repo_paths" => burn_table!(repo_paths, blank_repo_path()),
         "repo_base_branches" => burn_table!(repo_base_branches, blank_repo_base_branch()),
         // Found in passing while adding the two arms below: `poll_owners` DOES
@@ -105,7 +103,11 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         | "handed_out_agent_names"
         // An archived task keeps its task's id; the burn of `tasks` passes
         // over it (`spacetime-seed.allium: BurnIdSequences`).
-        | "archived_tasks" => {}
+        | "archived_tasks"
+        // Dead tables: a restore writes none of their rows
+        // (`spacetime-seed.allium: SharedTable`), so no id can collide.
+        | "workspaces"
+        | "memberships" => {}
         other => return Err(format!("unknown table {other}")),
     }
     Ok(())

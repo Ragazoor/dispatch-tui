@@ -100,7 +100,12 @@ pub async fn restore(store: &dyn SnapshotTarget, snapshot: &Snapshot) -> Result<
     // `SnapshotTarget::advance_id_sequence_past`.
     burn_id_sequences(store, snapshot).await?;
 
-    for extract in snapshot.extracts() {
+    // The dead tables are ignored (`spacetime-seed.allium: RestoreSnapshot`).
+    for extract in snapshot
+        .extracts()
+        .iter()
+        .filter(|e| !e.table.restore_ignores())
+    {
         store
             .upsert_rows(extract.table, &extract.rows)
             .await

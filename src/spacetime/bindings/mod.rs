@@ -6,7 +6,6 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-pub mod add_member_reducer;
 pub mod adopt_repo_path_reducer;
 pub mod agent_type;
 pub mod apply_learning_verdicts_reducer;
@@ -24,7 +23,6 @@ pub mod claim_feed_request_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod claim_session_request_reducer;
 pub mod claim_store_owner_reducer;
-pub mod claim_super_admin_reducer;
 pub mod clear_setting_reducer;
 pub mod close_task_reducer;
 pub mod covered_epics_table;
@@ -35,7 +33,6 @@ pub mod create_task_reducer;
 pub mod create_task_signalled_reducer;
 pub mod create_work_package_reducer;
 pub mod create_work_package_with_links_reducer;
-pub mod create_workspace_reducer;
 pub mod delete_blocker_type;
 pub mod delete_check_type;
 pub mod delete_epic_reducer;
@@ -43,7 +40,6 @@ pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
-pub mod delete_workspace_reducer;
 pub mod dispatch_request_timeout_type;
 pub mod dispatch_request_type;
 pub mod ensure_managed_epics_reducer;
@@ -57,7 +53,6 @@ pub mod feed_request_type;
 pub mod feed_task_upsert_item_type;
 pub mod filter_preset_type;
 pub mod flatten_epic_reducer;
-pub mod grant_super_admin_reducer;
 pub mod handed_out_agent_name_type;
 pub mod handed_out_agent_names_table;
 pub mod host_type;
@@ -73,7 +68,6 @@ pub mod list_archived_tasks_procedure;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod mark_task_seen_reducer;
 pub mod membership_type;
-pub mod move_epic_to_workspace_reducer;
 pub mod override_poll_owner_reducer;
 pub mod own_bookmarks_table;
 pub mod own_epics_table;
@@ -98,8 +92,6 @@ pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
 pub mod regroup_epic_reducer;
-pub mod remove_member_reducer;
-pub mod rename_workspace_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
@@ -118,7 +110,6 @@ pub mod request_feed_refresh_reducer;
 pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod retired_feed_item_type;
-pub mod revoke_super_admin_reducer;
 pub mod rules_version_table;
 pub mod rules_version_type;
 pub mod save_repo_path_reducer;
@@ -134,7 +125,6 @@ pub mod seed_hosts_reducer;
 pub mod seed_learning_retrievals_reducer;
 pub mod seed_learning_verdicts_reducer;
 pub mod seed_learnings_reducer;
-pub mod seed_memberships_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
@@ -150,19 +140,15 @@ pub mod seed_usage_events_reducer;
 pub mod seed_user_profiles_reducer;
 pub mod seed_work_package_links_reducer;
 pub mod seed_work_packages_reducer;
-pub mod seed_workspaces_reducer;
 pub mod session_request_timeout_type;
 pub mod session_request_type;
 pub mod set_bookmark_reducer;
 pub mod set_display_name_reducer;
 pub mod set_epic_group_by_repo_reducer;
-pub mod set_epic_visibility_reducer;
 pub mod set_managed_feed_settings_reducer;
-pub mod set_member_role_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
-pub mod set_work_package_visibility_reducer;
 pub mod setting_type;
 pub mod setting_write_type;
 pub mod store_owner_type;
@@ -173,7 +159,6 @@ pub mod subagent_start_reducer;
 pub mod subagent_stop_reducer;
 pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
-pub mod super_admin_delete_unseen_item_reducer;
 pub mod task_patch_type;
 pub mod task_shell_type;
 pub mod task_subagent_type;
@@ -182,8 +167,6 @@ pub mod task_watcher_type;
 pub mod todo_type;
 pub mod try_record_stop_reducer;
 pub mod unlink_work_package_item_reducer;
-pub mod unseen_item_type;
-pub mod unseen_items_table;
 pub mod unseen_task_type;
 pub mod unsubscribe_from_epic_reducer;
 pub mod update_epic_reducer;
@@ -195,27 +178,21 @@ pub mod user_profile_type;
 pub mod user_profiles_table;
 pub mod visible_agents_table;
 pub mod visible_dispatch_requests_table;
-pub mod visible_epics_table;
 pub mod visible_feed_requests_table;
 pub mod visible_learning_retrievals_table;
 pub mod visible_learning_verdicts_table;
 pub mod visible_learnings_table;
-pub mod visible_memberships_table;
-pub mod visible_packages_table;
 pub mod visible_poll_owners_table;
 pub mod visible_session_requests_table;
 pub mod visible_task_subagents_table;
 pub mod visible_task_watchers_table;
-pub mod visible_tasks_table;
 pub mod visible_work_package_links_table;
-pub mod visible_workspaces_table;
 pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
 pub mod work_package_patch_type;
 pub mod work_package_type;
 pub mod workspace_type;
 
-pub use add_member_reducer::add_member;
 pub use adopt_repo_path_reducer::adopt_repo_path;
 pub use agent_type::Agent;
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
@@ -233,7 +210,6 @@ pub use claim_feed_request_reducer::claim_feed_request;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use claim_session_request_reducer::claim_session_request;
 pub use claim_store_owner_reducer::claim_store_owner;
-pub use claim_super_admin_reducer::claim_super_admin;
 pub use clear_setting_reducer::clear_setting;
 pub use close_task_reducer::close_task;
 pub use covered_epics_table::*;
@@ -244,7 +220,6 @@ pub use create_task_reducer::create_task;
 pub use create_task_signalled_reducer::create_task_signalled;
 pub use create_work_package_reducer::create_work_package;
 pub use create_work_package_with_links_reducer::create_work_package_with_links;
-pub use create_workspace_reducer::create_workspace;
 pub use delete_blocker_type::DeleteBlocker;
 pub use delete_check_type::DeleteCheck;
 pub use delete_epic_reducer::delete_epic;
@@ -252,7 +227,6 @@ pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
-pub use delete_workspace_reducer::delete_workspace;
 pub use dispatch_request_timeout_type::DispatchRequestTimeout;
 pub use dispatch_request_type::DispatchRequest;
 pub use ensure_managed_epics_reducer::ensure_managed_epics;
@@ -266,7 +240,6 @@ pub use feed_request_type::FeedRequest;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use filter_preset_type::FilterPreset;
 pub use flatten_epic_reducer::flatten_epic;
-pub use grant_super_admin_reducer::grant_super_admin;
 pub use handed_out_agent_name_type::HandedOutAgentName;
 pub use handed_out_agent_names_table::*;
 pub use host_type::Host;
@@ -282,7 +255,6 @@ pub use list_archived_tasks_procedure::list_archived_tasks;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use mark_task_seen_reducer::mark_task_seen;
 pub use membership_type::Membership;
-pub use move_epic_to_workspace_reducer::move_epic_to_workspace;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use own_bookmarks_table::*;
 pub use own_epics_table::*;
@@ -307,8 +279,6 @@ pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
 pub use regroup_epic_reducer::regroup_epic;
-pub use remove_member_reducer::remove_member;
-pub use rename_workspace_reducer::rename_workspace;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
@@ -327,7 +297,6 @@ pub use request_feed_refresh_reducer::request_feed_refresh;
 pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use retired_feed_item_type::RetiredFeedItem;
-pub use revoke_super_admin_reducer::revoke_super_admin;
 pub use rules_version_table::*;
 pub use rules_version_type::RulesVersion;
 pub use save_repo_path_reducer::save_repo_path;
@@ -343,7 +312,6 @@ pub use seed_hosts_reducer::seed_hosts;
 pub use seed_learning_retrievals_reducer::seed_learning_retrievals;
 pub use seed_learning_verdicts_reducer::seed_learning_verdicts;
 pub use seed_learnings_reducer::seed_learnings;
-pub use seed_memberships_reducer::seed_memberships;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
@@ -359,19 +327,15 @@ pub use seed_usage_events_reducer::seed_usage_events;
 pub use seed_user_profiles_reducer::seed_user_profiles;
 pub use seed_work_package_links_reducer::seed_work_package_links;
 pub use seed_work_packages_reducer::seed_work_packages;
-pub use seed_workspaces_reducer::seed_workspaces;
 pub use session_request_timeout_type::SessionRequestTimeout;
 pub use session_request_type::SessionRequest;
 pub use set_bookmark_reducer::set_bookmark;
 pub use set_display_name_reducer::set_display_name;
 pub use set_epic_group_by_repo_reducer::set_epic_group_by_repo;
-pub use set_epic_visibility_reducer::set_epic_visibility;
 pub use set_managed_feed_settings_reducer::set_managed_feed_settings;
-pub use set_member_role_reducer::set_member_role;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
-pub use set_work_package_visibility_reducer::set_work_package_visibility;
 pub use setting_type::Setting;
 pub use setting_write_type::SettingWrite;
 pub use store_owner_type::StoreOwner;
@@ -382,7 +346,6 @@ pub use subagent_start_reducer::subagent_start;
 pub use subagent_stop_reducer::subagent_stop;
 pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
-pub use super_admin_delete_unseen_item_reducer::super_admin_delete_unseen_item;
 pub use task_patch_type::TaskPatch;
 pub use task_shell_type::TaskShell;
 pub use task_subagent_type::TaskSubagent;
@@ -391,8 +354,6 @@ pub use task_watcher_type::TaskWatcher;
 pub use todo_type::Todo;
 pub use try_record_stop_reducer::try_record_stop;
 pub use unlink_work_package_item_reducer::unlink_work_package_item;
-pub use unseen_item_type::UnseenItem;
-pub use unseen_items_table::*;
 pub use unseen_task_type::UnseenTask;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use update_epic_reducer::update_epic;
@@ -404,20 +365,15 @@ pub use user_profile_type::UserProfile;
 pub use user_profiles_table::*;
 pub use visible_agents_table::*;
 pub use visible_dispatch_requests_table::*;
-pub use visible_epics_table::*;
 pub use visible_feed_requests_table::*;
 pub use visible_learning_retrievals_table::*;
 pub use visible_learning_verdicts_table::*;
 pub use visible_learnings_table::*;
-pub use visible_memberships_table::*;
-pub use visible_packages_table::*;
 pub use visible_poll_owners_table::*;
 pub use visible_session_requests_table::*;
 pub use visible_task_subagents_table::*;
 pub use visible_task_watchers_table::*;
-pub use visible_tasks_table::*;
 pub use visible_work_package_links_table::*;
-pub use visible_workspaces_table::*;
 pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
 pub use work_package_patch_type::WorkPackagePatch;
@@ -432,11 +388,6 @@ pub use workspace_type::Workspace;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
-    AddMember {
-        workspace_id: i64,
-        user: String,
-        role: String,
-    },
     AdoptRepoPath {
         path: String,
         host: String,
@@ -478,7 +429,6 @@ pub enum Reducer {
         host: String,
     },
     ClaimStoreOwner,
-    ClaimSuperAdmin,
     ClearSetting {
         host: String,
         key: String,
@@ -506,9 +456,6 @@ pub enum Reducer {
         row: WorkPackage,
         links: Vec<WorkPackageItemRef>,
     },
-    CreateWorkspace {
-        name: String,
-    },
     DeleteEpic {
         id: i64,
     },
@@ -524,9 +471,6 @@ pub enum Reducer {
     },
     DeleteWorkPackage {
         id: i64,
-    },
-    DeleteWorkspace {
-        workspace_id: i64,
     },
     EnsureManagedEpics {
         reviews_command: String,
@@ -547,9 +491,6 @@ pub enum Reducer {
     FlattenEpic {
         root_id: i64,
     },
-    GrantSuperAdmin {
-        user: String,
-    },
     IngestFeed {
         epic_id: i64,
         items: Vec<FeedIngestItem>,
@@ -569,10 +510,6 @@ pub enum Reducer {
     MarkTaskSeen {
         subscriber: String,
         task_id: i64,
-    },
-    MoveEpicToWorkspace {
-        epic_id: i64,
-        workspace_id: i64,
     },
     OverridePollOwner {
         scope: String,
@@ -632,13 +569,6 @@ pub enum Reducer {
     },
     RegroupEpic {
         root_id: i64,
-    },
-    RemoveMember {
-        membership_id: i64,
-    },
-    RenameWorkspace {
-        workspace_id: i64,
-        name: String,
     },
     ReportDispatchFailed {
         request_id: i64,
@@ -707,9 +637,6 @@ pub enum Reducer {
         from: i64,
         to: i64,
     },
-    RevokeSuperAdmin {
-        user: String,
-    },
     SaveRepoPath {
         path: String,
         last_used: String,
@@ -747,9 +674,6 @@ pub enum Reducer {
     },
     SeedLearnings {
         rows: Vec<Learning>,
-    },
-    SeedMemberships {
-        rows: Vec<Membership>,
     },
     SeedPollOwners {
         rows: Vec<PollOwner>,
@@ -796,9 +720,6 @@ pub enum Reducer {
     SeedWorkPackages {
         rows: Vec<WorkPackage>,
     },
-    SeedWorkspaces {
-        rows: Vec<Workspace>,
-    },
     SetBookmark {
         subscriber: String,
         task_id: i64,
@@ -811,17 +732,9 @@ pub enum Reducer {
         id: i64,
         group_by_repo: bool,
     },
-    SetEpicVisibility {
-        epic_id: i64,
-        visibility: String,
-    },
     SetManagedFeedSettings {
         host: String,
         writes: Vec<SettingWrite>,
-    },
-    SetMemberRole {
-        membership_id: i64,
-        role: String,
     },
     SetSchemaVersion {
         version: i64,
@@ -835,10 +748,6 @@ pub enum Reducer {
         path: String,
         host: String,
         command: String,
-    },
-    SetWorkPackageVisibility {
-        work_package_id: i64,
-        visibility: String,
     },
     SubagentClear {
         task_id: i64,
@@ -861,10 +770,6 @@ pub enum Reducer {
         subscriber: String,
         epic_id: i64,
     },
-    SuperAdminDeleteUnseenItem {
-        kind: String,
-        item_id: i64,
-    },
     TryRecordStop {
         id: i64,
         stop_pending_at: String,
@@ -882,8 +787,6 @@ pub enum Reducer {
     UpdateEpic {
         id: i64,
         patch: EpicPatch,
-        workspace_id: Option<i64>,
-        visibility: Option<String>,
     },
     UpdateTask {
         id: i64,
@@ -897,7 +800,6 @@ pub enum Reducer {
     UpdateWorkPackageWithLinks {
         id: i64,
         patch: WorkPackagePatch,
-        visibility: Option<String>,
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
     },
@@ -910,7 +812,6 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
-            Reducer::AddMember { .. } => "add_member",
             Reducer::AdoptRepoPath { .. } => "adopt_repo_path",
             Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
             Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
@@ -923,7 +824,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClaimSessionRequest { .. } => "claim_session_request",
             Reducer::ClaimStoreOwner => "claim_store_owner",
-            Reducer::ClaimSuperAdmin => "claim_super_admin",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CloseTask { .. } => "close_task",
             Reducer::CreateEpic { .. } => "create_epic",
@@ -932,24 +832,20 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateTaskSignalled { .. } => "create_task_signalled",
             Reducer::CreateWorkPackage { .. } => "create_work_package",
             Reducer::CreateWorkPackageWithLinks { .. } => "create_work_package_with_links",
-            Reducer::CreateWorkspace { .. } => "create_workspace",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
-            Reducer::DeleteWorkspace { .. } => "delete_workspace",
             Reducer::EnsureManagedEpics { .. } => "ensure_managed_epics",
             Reducer::ExpireBackgroundWait { .. } => "expire_background_wait",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
             Reducer::FlattenEpic { .. } => "flatten_epic",
-            Reducer::GrantSuperAdmin { .. } => "grant_super_admin",
             Reducer::IngestFeed { .. } => "ingest_feed",
             Reducer::LinkWorkPackageItem { .. } => "link_work_package_item",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::MarkTaskSeen { .. } => "mark_task_seen",
-            Reducer::MoveEpicToWorkspace { .. } => "move_epic_to_workspace",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchLearning { .. } => "patch_learning",
@@ -964,8 +860,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::RegroupEpic { .. } => "regroup_epic",
-            Reducer::RemoveMember { .. } => "remove_member",
-            Reducer::RenameWorkspace { .. } => "rename_workspace",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
             Reducer::ReportFeedRequestDone { .. } => "report_feed_request_done",
@@ -979,7 +873,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::RequestFeedRefresh { .. } => "request_feed_refresh",
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
-            Reducer::RevokeSuperAdmin { .. } => "revoke_super_admin",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedAgents { .. } => "seed_agents",
@@ -991,7 +884,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedLearningRetrievals { .. } => "seed_learning_retrievals",
             Reducer::SeedLearningVerdicts { .. } => "seed_learning_verdicts",
             Reducer::SeedLearnings { .. } => "seed_learnings",
-            Reducer::SeedMemberships { .. } => "seed_memberships",
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
@@ -1007,17 +899,13 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedUserProfiles { .. } => "seed_user_profiles",
             Reducer::SeedWorkPackageLinks { .. } => "seed_work_package_links",
             Reducer::SeedWorkPackages { .. } => "seed_work_packages",
-            Reducer::SeedWorkspaces { .. } => "seed_workspaces",
             Reducer::SetBookmark { .. } => "set_bookmark",
             Reducer::SetDisplayName { .. } => "set_display_name",
             Reducer::SetEpicGroupByRepo { .. } => "set_epic_group_by_repo",
-            Reducer::SetEpicVisibility { .. } => "set_epic_visibility",
             Reducer::SetManagedFeedSettings { .. } => "set_managed_feed_settings",
-            Reducer::SetMemberRole { .. } => "set_member_role",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
-            Reducer::SetWorkPackageVisibility { .. } => "set_work_package_visibility",
             Reducer::SubagentClear { .. } => "subagent_clear",
             Reducer::SubagentClearAndVoidPendingStop { .. } => {
                 "subagent_clear_and_void_pending_stop"
@@ -1025,7 +913,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::SubagentStart { .. } => "subagent_start",
             Reducer::SubagentStop { .. } => "subagent_stop",
             Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
-            Reducer::SuperAdminDeleteUnseenItem { .. } => "super_admin_delete_unseen_item",
             Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnlinkWorkPackageItem { .. } => "unlink_work_package_item",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
@@ -1038,16 +925,7 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-                        Reducer::AddMember{
-                workspace_id,
-                user,
-                role,
-}             => __sats::bsatn::to_vec(&add_member_reducer::AddMemberArgs {
-                workspace_id: workspace_id.clone(),
-                user: user.clone(),
-                role: role.clone(),
-}),
-            Reducer::AdoptRepoPath{
+                        Reducer::AdoptRepoPath{
                 path,
                 host,
 }             => __sats::bsatn::to_vec(&adopt_repo_path_reducer::AdoptRepoPathArgs {
@@ -1119,8 +997,6 @@ Reducer::BatchDelete{
 }),
             Reducer::ClaimStoreOwner => __sats::bsatn::to_vec(&claim_store_owner_reducer::ClaimStoreOwnerArgs {
                 }),
-Reducer::ClaimSuperAdmin => __sats::bsatn::to_vec(&claim_super_admin_reducer::ClaimSuperAdminArgs {
-                }),
 Reducer::ClearSetting{
                 host,
                 key,
@@ -1167,11 +1043,6 @@ Reducer::ClearSetting{
                 row: row.clone(),
                 links: links.clone(),
 }),
-            Reducer::CreateWorkspace{
-                name,
-}             => __sats::bsatn::to_vec(&create_workspace_reducer::CreateWorkspaceArgs {
-                name: name.clone(),
-}),
             Reducer::DeleteEpic{
                 id,
 }             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
@@ -1198,11 +1069,6 @@ Reducer::ClearSetting{
                 id,
 }             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
                 id: id.clone(),
-}),
-            Reducer::DeleteWorkspace{
-                workspace_id,
-}             => __sats::bsatn::to_vec(&delete_workspace_reducer::DeleteWorkspaceArgs {
-                workspace_id: workspace_id.clone(),
 }),
             Reducer::EnsureManagedEpics{
                 reviews_command,
@@ -1236,11 +1102,6 @@ Reducer::ClearSetting{
                 root_id,
 }             => __sats::bsatn::to_vec(&flatten_epic_reducer::FlattenEpicArgs {
                 root_id: root_id.clone(),
-}),
-            Reducer::GrantSuperAdmin{
-                user,
-}             => __sats::bsatn::to_vec(&grant_super_admin_reducer::GrantSuperAdminArgs {
-                user: user.clone(),
 }),
             Reducer::IngestFeed{
                 epic_id,
@@ -1277,13 +1138,6 @@ Reducer::ClearSetting{
 }             => __sats::bsatn::to_vec(&mark_task_seen_reducer::MarkTaskSeenArgs {
                 subscriber: subscriber.clone(),
                 task_id: task_id.clone(),
-}),
-            Reducer::MoveEpicToWorkspace{
-                epic_id,
-                workspace_id,
-}             => __sats::bsatn::to_vec(&move_epic_to_workspace_reducer::MoveEpicToWorkspaceArgs {
-                epic_id: epic_id.clone(),
-                workspace_id: workspace_id.clone(),
 }),
             Reducer::OverridePollOwner{
                 scope,
@@ -1389,18 +1243,6 @@ Reducer::RecordBaseBranch{
                 root_id,
 }             => __sats::bsatn::to_vec(&regroup_epic_reducer::RegroupEpicArgs {
                 root_id: root_id.clone(),
-}),
-            Reducer::RemoveMember{
-                membership_id,
-}             => __sats::bsatn::to_vec(&remove_member_reducer::RemoveMemberArgs {
-                membership_id: membership_id.clone(),
-}),
-            Reducer::RenameWorkspace{
-                workspace_id,
-                name,
-}             => __sats::bsatn::to_vec(&rename_workspace_reducer::RenameWorkspaceArgs {
-                workspace_id: workspace_id.clone(),
-                name: name.clone(),
 }),
             Reducer::ReportDispatchFailed{
                 request_id,
@@ -1523,11 +1365,6 @@ Reducer::RecordBaseBranch{
                 from: from.clone(),
                 to: to.clone(),
 }),
-            Reducer::RevokeSuperAdmin{
-                user,
-}             => __sats::bsatn::to_vec(&revoke_super_admin_reducer::RevokeSuperAdminArgs {
-                user: user.clone(),
-}),
             Reducer::SaveRepoPath{
                 path,
                 last_used,
@@ -1591,11 +1428,6 @@ Reducer::RecordBaseBranch{
             Reducer::SeedLearnings{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_learnings_reducer::SeedLearningsArgs {
-                rows: rows.clone(),
-}),
-            Reducer::SeedMemberships{
-                rows,
-}             => __sats::bsatn::to_vec(&seed_memberships_reducer::SeedMembershipsArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedPollOwners{
@@ -1673,11 +1505,6 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&seed_work_packages_reducer::SeedWorkPackagesArgs {
                 rows: rows.clone(),
 }),
-            Reducer::SeedWorkspaces{
-                rows,
-}             => __sats::bsatn::to_vec(&seed_workspaces_reducer::SeedWorkspacesArgs {
-                rows: rows.clone(),
-}),
             Reducer::SetBookmark{
                 subscriber,
                 task_id,
@@ -1699,26 +1526,12 @@ Reducer::RecordBaseBranch{
                 id: id.clone(),
                 group_by_repo: group_by_repo.clone(),
 }),
-            Reducer::SetEpicVisibility{
-                epic_id,
-                visibility,
-}             => __sats::bsatn::to_vec(&set_epic_visibility_reducer::SetEpicVisibilityArgs {
-                epic_id: epic_id.clone(),
-                visibility: visibility.clone(),
-}),
             Reducer::SetManagedFeedSettings{
                 host,
                 writes,
 }             => __sats::bsatn::to_vec(&set_managed_feed_settings_reducer::SetManagedFeedSettingsArgs {
                 host: host.clone(),
                 writes: writes.clone(),
-}),
-            Reducer::SetMemberRole{
-                membership_id,
-                role,
-}             => __sats::bsatn::to_vec(&set_member_role_reducer::SetMemberRoleArgs {
-                membership_id: membership_id.clone(),
-                role: role.clone(),
 }),
             Reducer::SetSchemaVersion{
                 version,
@@ -1742,13 +1555,6 @@ Reducer::RecordBaseBranch{
                 path: path.clone(),
                 host: host.clone(),
                 command: command.clone(),
-}),
-            Reducer::SetWorkPackageVisibility{
-                work_package_id,
-                visibility,
-}             => __sats::bsatn::to_vec(&set_work_package_visibility_reducer::SetWorkPackageVisibilityArgs {
-                work_package_id: work_package_id.clone(),
-                visibility: visibility.clone(),
 }),
             Reducer::SubagentClear{
                 task_id,
@@ -1787,13 +1593,6 @@ Reducer::RecordBaseBranch{
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
 }),
-            Reducer::SuperAdminDeleteUnseenItem{
-                kind,
-                item_id,
-}             => __sats::bsatn::to_vec(&super_admin_delete_unseen_item_reducer::SuperAdminDeleteUnseenItemArgs {
-                kind: kind.clone(),
-                item_id: item_id.clone(),
-}),
             Reducer::TryRecordStop{
                 id,
                 stop_pending_at,
@@ -1822,13 +1621,9 @@ Reducer::RecordBaseBranch{
             Reducer::UpdateEpic{
                 id,
                 patch,
-                workspace_id,
-                visibility,
 }             => __sats::bsatn::to_vec(&update_epic_reducer::UpdateEpicArgs {
                 id: id.clone(),
                 patch: patch.clone(),
-                workspace_id: workspace_id.clone(),
-                visibility: visibility.clone(),
 }),
             Reducer::UpdateTask{
                 id,
@@ -1850,13 +1645,11 @@ Reducer::RecordBaseBranch{
             Reducer::UpdateWorkPackageWithLinks{
                 id,
                 patch,
-                visibility,
                 unlink,
                 link,
 }             => __sats::bsatn::to_vec(&update_work_package_with_links_reducer::UpdateWorkPackageWithLinksArgs {
                 id: id.clone(),
                 patch: patch.clone(),
-                visibility: visibility.clone(),
                 unlink: unlink.clone(),
                 link: link.clone(),
 }),
@@ -1884,24 +1677,18 @@ pub struct DbUpdate {
     repo_paths: __sdk::TableUpdate<RepoPath>,
     rules_version: __sdk::TableUpdate<RulesVersion>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
-    unseen_items: __sdk::TableUpdate<UnseenItem>,
     user_profiles: __sdk::TableUpdate<UserProfile>,
     visible_agents: __sdk::TableUpdate<Agent>,
     visible_dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
-    visible_epics: __sdk::TableUpdate<Epic>,
     visible_feed_requests: __sdk::TableUpdate<FeedRequest>,
     visible_learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     visible_learnings: __sdk::TableUpdate<Learning>,
-    visible_memberships: __sdk::TableUpdate<Membership>,
-    visible_packages: __sdk::TableUpdate<WorkPackage>,
     visible_poll_owners: __sdk::TableUpdate<PollOwner>,
     visible_session_requests: __sdk::TableUpdate<SessionRequest>,
     visible_task_subagents: __sdk::TableUpdate<TaskSubagent>,
     visible_task_watchers: __sdk::TableUpdate<TaskWatcher>,
-    visible_tasks: __sdk::TableUpdate<Task>,
     visible_work_package_links: __sdk::TableUpdate<WorkPackageLink>,
-    visible_workspaces: __sdk::TableUpdate<Workspace>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -1955,9 +1742,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
-                "unseen_items" => db_update
-                    .unseen_items
-                    .append(unseen_items_table::parse_table_update(table_update)?),
                 "user_profiles" => db_update
                     .user_profiles
                     .append(user_profiles_table::parse_table_update(table_update)?),
@@ -1967,9 +1751,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_dispatch_requests" => db_update.visible_dispatch_requests.append(
                     visible_dispatch_requests_table::parse_table_update(table_update)?,
                 ),
-                "visible_epics" => db_update
-                    .visible_epics
-                    .append(visible_epics_table::parse_table_update(table_update)?),
                 "visible_feed_requests" => db_update.visible_feed_requests.append(
                     visible_feed_requests_table::parse_table_update(table_update)?,
                 ),
@@ -1982,12 +1763,6 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(visible_learnings_table::parse_table_update(table_update)?),
-                "visible_memberships" => db_update
-                    .visible_memberships
-                    .append(visible_memberships_table::parse_table_update(table_update)?),
-                "visible_packages" => db_update
-                    .visible_packages
-                    .append(visible_packages_table::parse_table_update(table_update)?),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
                     .append(visible_poll_owners_table::parse_table_update(table_update)?),
@@ -2000,15 +1775,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_task_watchers" => db_update.visible_task_watchers.append(
                     visible_task_watchers_table::parse_table_update(table_update)?,
                 ),
-                "visible_tasks" => db_update
-                    .visible_tasks
-                    .append(visible_tasks_table::parse_table_update(table_update)?),
                 "visible_work_package_links" => db_update.visible_work_package_links.append(
                     visible_work_package_links_table::parse_table_update(table_update)?,
                 ),
-                "visible_workspaces" => db_update
-                    .visible_workspaces
-                    .append(visible_workspaces_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -2075,16 +1844,12 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.own_tasks = cache.apply_diff_to_table::<Task>("own_tasks", &self.own_tasks);
         diff.own_unseen_tasks =
             cache.apply_diff_to_table::<UnseenTask>("own_unseen_tasks", &self.own_unseen_tasks);
-        diff.unseen_items =
-            cache.apply_diff_to_table::<UnseenItem>("unseen_items", &self.unseen_items);
         diff.visible_agents =
             cache.apply_diff_to_table::<Agent>("visible_agents", &self.visible_agents);
         diff.visible_dispatch_requests = cache.apply_diff_to_table::<DispatchRequest>(
             "visible_dispatch_requests",
             &self.visible_dispatch_requests,
         );
-        diff.visible_epics =
-            cache.apply_diff_to_table::<Epic>("visible_epics", &self.visible_epics);
         diff.visible_feed_requests = cache.apply_diff_to_table::<FeedRequest>(
             "visible_feed_requests",
             &self.visible_feed_requests,
@@ -2099,10 +1864,6 @@ impl __sdk::DbUpdate for DbUpdate {
         );
         diff.visible_learnings =
             cache.apply_diff_to_table::<Learning>("visible_learnings", &self.visible_learnings);
-        diff.visible_memberships = cache
-            .apply_diff_to_table::<Membership>("visible_memberships", &self.visible_memberships);
-        diff.visible_packages =
-            cache.apply_diff_to_table::<WorkPackage>("visible_packages", &self.visible_packages);
         diff.visible_poll_owners = cache
             .apply_diff_to_table::<PollOwner>("visible_poll_owners", &self.visible_poll_owners);
         diff.visible_session_requests = cache.apply_diff_to_table::<SessionRequest>(
@@ -2117,14 +1878,10 @@ impl __sdk::DbUpdate for DbUpdate {
             "visible_task_watchers",
             &self.visible_task_watchers,
         );
-        diff.visible_tasks =
-            cache.apply_diff_to_table::<Task>("visible_tasks", &self.visible_tasks);
         diff.visible_work_package_links = cache.apply_diff_to_table::<WorkPackageLink>(
             "visible_work_package_links",
             &self.visible_work_package_links,
         );
-        diff.visible_workspaces =
-            cache.apply_diff_to_table::<Workspace>("visible_workspaces", &self.visible_workspaces);
 
         diff
     }
@@ -2177,9 +1934,6 @@ impl __sdk::DbUpdate for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "unseen_items" => db_update
-                    .unseen_items
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "user_profiles" => db_update
                     .user_profiles
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2188,9 +1942,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_dispatch_requests" => db_update
                     .visible_dispatch_requests
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "visible_epics" => db_update
-                    .visible_epics
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_feed_requests" => db_update
                     .visible_feed_requests
@@ -2204,12 +1955,6 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "visible_memberships" => db_update
-                    .visible_memberships
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "visible_packages" => db_update
-                    .visible_packages
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2222,14 +1967,8 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_task_watchers" => db_update
                     .visible_task_watchers
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "visible_tasks" => db_update
-                    .visible_tasks
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_work_package_links" => db_update
                     .visible_work_package_links
-                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
-                "visible_workspaces" => db_update
-                    .visible_workspaces
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -2289,9 +2028,6 @@ impl __sdk::DbUpdate for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "unseen_items" => db_update
-                    .unseen_items
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "user_profiles" => db_update
                     .user_profiles
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2300,9 +2036,6 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_dispatch_requests" => db_update
                     .visible_dispatch_requests
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "visible_epics" => db_update
-                    .visible_epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_feed_requests" => db_update
                     .visible_feed_requests
@@ -2316,12 +2049,6 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "visible_memberships" => db_update
-                    .visible_memberships
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "visible_packages" => db_update
-                    .visible_packages
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2334,14 +2061,8 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_task_watchers" => db_update
                     .visible_task_watchers
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "visible_tasks" => db_update
-                    .visible_tasks
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_work_package_links" => db_update
                     .visible_work_package_links
-                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
-                "visible_workspaces" => db_update
-                    .visible_workspaces
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -2373,24 +2094,18 @@ pub struct AppliedDiff<'r> {
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     rules_version: __sdk::TableAppliedDiff<'r, RulesVersion>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
-    unseen_items: __sdk::TableAppliedDiff<'r, UnseenItem>,
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
     visible_dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
-    visible_epics: __sdk::TableAppliedDiff<'r, Epic>,
     visible_feed_requests: __sdk::TableAppliedDiff<'r, FeedRequest>,
     visible_learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     visible_learnings: __sdk::TableAppliedDiff<'r, Learning>,
-    visible_memberships: __sdk::TableAppliedDiff<'r, Membership>,
-    visible_packages: __sdk::TableAppliedDiff<'r, WorkPackage>,
     visible_poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     visible_session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
     visible_task_subagents: __sdk::TableAppliedDiff<'r, TaskSubagent>,
     visible_task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
-    visible_tasks: __sdk::TableAppliedDiff<'r, Task>,
     visible_work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
-    visible_workspaces: __sdk::TableAppliedDiff<'r, Workspace>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -2451,11 +2166,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.schema_version,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<UnseenItem>(
-            "unseen_items",
-            &self.unseen_items,
-            event,
-        );
         callbacks.invoke_table_row_callbacks::<UserProfile>(
             "user_profiles",
             &self.user_profiles,
@@ -2471,7 +2181,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.visible_dispatch_requests,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<Epic>("visible_epics", &self.visible_epics, event);
         callbacks.invoke_table_row_callbacks::<FeedRequest>(
             "visible_feed_requests",
             &self.visible_feed_requests,
@@ -2490,16 +2199,6 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<Learning>(
             "visible_learnings",
             &self.visible_learnings,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Membership>(
-            "visible_memberships",
-            &self.visible_memberships,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<WorkPackage>(
-            "visible_packages",
-            &self.visible_packages,
             event,
         );
         callbacks.invoke_table_row_callbacks::<PollOwner>(
@@ -2522,15 +2221,9 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.visible_task_watchers,
             event,
         );
-        callbacks.invoke_table_row_callbacks::<Task>("visible_tasks", &self.visible_tasks, event);
         callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
             "visible_work_package_links",
             &self.visible_work_package_links,
-            event,
-        );
-        callbacks.invoke_table_row_callbacks::<Workspace>(
-            "visible_workspaces",
-            &self.visible_workspaces,
             event,
         );
     }
@@ -3208,24 +2901,18 @@ impl __sdk::SpacetimeModule for RemoteModule {
         repo_paths_table::register_table(client_cache);
         rules_version_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
-        unseen_items_table::register_table(client_cache);
         user_profiles_table::register_table(client_cache);
         visible_agents_table::register_table(client_cache);
         visible_dispatch_requests_table::register_table(client_cache);
-        visible_epics_table::register_table(client_cache);
         visible_feed_requests_table::register_table(client_cache);
         visible_learning_retrievals_table::register_table(client_cache);
         visible_learning_verdicts_table::register_table(client_cache);
         visible_learnings_table::register_table(client_cache);
-        visible_memberships_table::register_table(client_cache);
-        visible_packages_table::register_table(client_cache);
         visible_poll_owners_table::register_table(client_cache);
         visible_session_requests_table::register_table(client_cache);
         visible_task_subagents_table::register_table(client_cache);
         visible_task_watchers_table::register_table(client_cache);
-        visible_tasks_table::register_table(client_cache);
         visible_work_package_links_table::register_table(client_cache);
-        visible_workspaces_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "covered_epics",
@@ -3243,23 +2930,17 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "repo_paths",
         "rules_version",
         "schema_version",
-        "unseen_items",
         "user_profiles",
         "visible_agents",
         "visible_dispatch_requests",
-        "visible_epics",
         "visible_feed_requests",
         "visible_learning_retrievals",
         "visible_learning_verdicts",
         "visible_learnings",
-        "visible_memberships",
-        "visible_packages",
         "visible_poll_owners",
         "visible_session_requests",
         "visible_task_subagents",
         "visible_task_watchers",
-        "visible_tasks",
         "visible_work_package_links",
-        "visible_workspaces",
     ];
 }

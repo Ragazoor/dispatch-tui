@@ -1,7 +1,6 @@
 pub mod scenarios;
 pub mod snapshots;
 
-mod admin;
 mod board_hides;
 mod board_lens;
 mod budget;
@@ -27,7 +26,6 @@ mod keybindings;
 mod layout_cache;
 mod move_task;
 mod navigation;
-mod new_item_placement;
 mod render_dirty;
 mod rendering;
 mod repo_filter;

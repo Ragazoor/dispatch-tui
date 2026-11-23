@@ -374,10 +374,6 @@ async fn generate_previous_store_fixture() {
         .await
         .expect("other's board starts");
 
-    // A fresh store has no workspace, and every root epic needs one. The
-    // user publishes, so they can claim super-admin and make one workspace
-    // for each person; *other* is added to theirs by display name.
-    let _ = ub.runtime.people_svc.claim_super_admin().await;
     ub.runtime
         .people_svc
         .set_display_name("smoke user")
@@ -388,35 +384,10 @@ async fn generate_previous_store_fixture() {
         .set_display_name("smoke other")
         .await
         .unwrap();
-    let people = &ub.runtime.people_svc;
-    people.create_workspace("smoke user").await.unwrap();
-    people.create_workspace("smoke other").await.unwrap();
-    let workspace_of = |name: &'static str| async move {
-        let snapshot = people.admin_snapshot().await;
-        snapshot
-            .workspaces
-            .iter()
-            .find(|w| w.name == name)
-            .map(|w| w.id)
-            .expect("the workspace exists")
-    };
-    let user_ws = workspace_of("smoke user").await;
-    let other_ws = workspace_of("smoke other").await;
-    people
-        .add_member(user_ws, "smoke user", crate::models::MemberRole::Admin)
-        .await
-        .unwrap();
-    people
-        .add_member(other_ws, "smoke other", crate::models::MemberRole::Admin)
-        .await
-        .unwrap();
     let epic = ub
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams {
-            workspace_id: user_ws,
-            ..crate::service::CreateEpicParams::fixture("smoke epic")
-        })
+        .create_epic(crate::service::CreateEpicParams::fixture("smoke epic"))
         .await
         .unwrap();
     let mut created = Vec::new();
@@ -443,10 +414,7 @@ async fn generate_previous_store_fixture() {
     let other_epic = ob
         .runtime
         .epic_svc
-        .create_epic(crate::service::CreateEpicParams {
-            workspace_id: other_ws,
-            ..crate::service::CreateEpicParams::fixture("other's epic")
-        })
+        .create_epic(crate::service::CreateEpicParams::fixture("other's epic"))
         .await
         .unwrap();
     let other_task = ob
@@ -556,36 +524,6 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
 
     let seen = visible_rows(&b).await;
     assert_eq!(seen, expected, "upgrade smoke: the user's rows changed");
-
-    // The first connection after the publish migrated the store
-    // (`workspaces.allium: MigrateStoreToWorkspaces`): one default workspace,
-    // every epic public in it.
-    let sql = |query: &str| {
-        let out = std::process::Command::new("spacetime")
-            .arg("--config-path")
-            .arg(&cli_config)
-            .args(["sql", "-s", &store.url(), "--format", "json"])
-            .arg(crate::spacetime::managed_store::MANAGED_DATABASE_NAME)
-            .arg(query)
-            .output()
-            .expect("run spacetime sql");
-        assert!(
-            out.status.success(),
-            "{}",
-            String::from_utf8_lossy(&out.stderr)
-        );
-        String::from_utf8_lossy(&out.stdout).into_owned()
-    };
-    let workspaces = sql("SELECT id, name FROM workspaces");
-    assert!(
-        workspaces.contains("Default"),
-        "upgrade smoke: no default workspace after the upgrade: {workspaces}"
-    );
-    let strays = sql("SELECT id FROM epics WHERE workspace_id = 0 OR visibility != 'public'");
-    assert!(
-        !strays.contains("\"rows\":[[") && !strays.contains("\"rows\": [["),
-        "upgrade smoke: an epic was left outside the default workspace: {strays}"
-    );
 }
 
 /// `AbortWhenTheCliDoesNotOwnTheManagedDatabase` against a real store: the

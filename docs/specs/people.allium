@@ -1,0 +1,214 @@
+-- allium: 3
+-- people.allium
+--
+-- Scope: The people who use the store, as the store presents them: one
+--        UserProfile per identity, its display name, and how a card or a
+--        tool result names a person.
+-- Includes: UserProfile, the display-name rules and their board and MCP
+--           twins, CreatorIsShownByName.
+-- Excludes: UserIdentity and Host (core.allium); who may act for a host
+--           (store-split.allium, D11); how a write stamps the caller's
+--           identity on owner and created_by (store-split.allium:
+--           IdentitiesAreTheCallers); how the board asks for profile rows
+--           (sync.allium: SubscribeToUserProfiles).
+-- Dependencies: UserIdentity, Operator, McpClient, SharedStore, StoreClient
+--               from core.allium.
+--
+-- Decisions:
+--   P1. One person uses the store, possibly from several machines (hosts).
+--       A profile names an identity; who may act for a host is
+--       store-split.allium's D11.
+--   P2. The directory of identities and display names is readable by every
+--       connected client. It carries nothing private.
+--   P3. An agent acts under its host board's identity: its MCP calls reach
+--       the store through that board.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- A person as the store presents them. One per UserIdentity, created the
+-- first time that identity connects (RegisterUserProfile).
+entity UserProfile {
+    identity: core/UserIdentity
+    display_name: String       -- "" until the person sets one; shown as the identity's short prefix meanwhile (config.identity_prefix_length)
+    created_at: Timestamp
+
+    -- How every card and tool result names the person (CreatorIsShownByName).
+    -- An identity with no UserProfile row is shown by its prefix too.
+    shown_name: if display_name != "": display_name
+                else: identity_prefix(identity, config.identity_prefix_length)
+
+    invariant OneProfilePerIdentity {
+        for a in UserProfiles:
+            for b in UserProfiles:
+                a != b implies a.identity != b.identity
+    }
+
+    @guidance
+        -- The store's user_profiles table also has an is_super_admin column.
+        -- It is dead schema (an automigration cannot drop a column): a new
+        -- row writes false and nothing reads it.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    display_name_max_length: Integer = 64
+    identity_prefix_length: Integer = 8
+}
+
+-- Black boxes the rules below read, on strings:
+--   trimmed(s): s without its leading and trailing whitespace.
+--   char_count(s): the number of characters (not bytes) in s.
+--   has_control_or_format_characters(s): s holds a character of Unicode
+--     category Cc or Cf, or a line or paragraph separator (SetDisplayName
+--     says which, in full).
+--   identity_prefix(identity, n): the first n characters of the identity's
+--     text form.
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule RegisterUserProfile {
+    when: ClientConnected(identity)
+
+    let existing = UserProfile{identity: identity}
+
+    ensures:
+        if not exists existing:
+            UserProfile.created(identity: identity, display_name: "",
+                                created_at: now)
+
+    @guidance
+        -- The module's client_connected lifecycle reducer, beside the
+        -- rules-version stamp. Idempotent: every reconnect runs it.
+}
+
+rule SetDisplayName {
+    when: SetDisplayName(name)
+
+    let profile = UserProfile{identity: caller()}
+    let trimmed = trimmed(name)
+
+    requires: exists profile
+    requires: trimmed != ""
+    requires: char_count(trimmed) <= config.display_name_max_length
+    requires: not has_control_or_format_characters(trimmed)
+
+    ensures: profile.display_name = trimmed
+
+    @guidance
+        -- A person sets only their own name. Names need not be unique: the
+        -- directory shows the identity prefix beside a duplicated name.
+        -- "Control or format characters" means Unicode categories Cc and Cf
+        -- in full (tag characters and Arabic number signs included), plus the
+        -- line and paragraph separators U+2028 and U+2029.
+}
+
+rule SetOwnNameFromBoard {
+    when: SetOwnNameKeyPressed()
+
+    -- observable output; no rule listens.
+    ensures: NameInputOpened()
+
+    @guidance
+        -- The TUI twin of SetDisplayName, bound to `u` ("user") in the
+        -- board's normal mode and listed in the keybinding table. The input
+        -- opens empty; SetOwnNameOnCommit makes the write. Esc sends
+        -- nothing, so the name stays as it was.
+}
+
+rule SetOwnNameOnCommit {
+    when: OwnNameCommitted(text)
+
+    let typed = trimmed(text)
+
+    requires: typed != ""
+
+    ensures: SetDisplayName(typed)
+
+    @guidance
+        -- Enter in the name input. An empty or all-blank entry sends
+        -- nothing. A refusal from the store (name too long) shows in the
+        -- error popup; success shows "Display name set to <name>" on the
+        -- status line.
+}
+
+rule SetDisplayNameViaMcp {
+    when: SetDisplayNameToolCalled(name)
+
+    ensures: SetDisplayName(name)
+
+    @guidance
+        -- Agents are first-class users: the MCP twin of SetOwnNameFromBoard.
+        -- It sets the name of the identity the agent's host board runs under
+        -- (P3). write, idempotent, not destructive. The result names the
+        -- saved (trimmed) name. An empty or too-long name is refused with
+        -- the store's reason.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- The directory of people every connected client receives (P2).
+surface PeopleDirectory {
+    facing _: core/StoreClient
+
+    exposes:
+        for profile in UserProfiles:
+            profile.identity
+            profile.display_name
+            profile.shown_name
+
+    provides:
+        SetDisplayName(name)
+
+    @guarantee CreatorIsShownByName
+        -- Wherever a card or a tool result names who created an item, it
+        -- shows UserProfile.shown_name: the creator's display name, or the
+        -- identity prefix when they have set none. work-package_search and
+        -- the package card name a creator. The shown name has two twins,
+        -- because the board cannot link the module crate in a release build:
+        -- `shown_name` in the module's user_profile.rs (used by the module and
+        -- MemoryReducerCaller) and `models::shown_name` (used by the board).
+        -- A conformance scenario asserts they agree; nothing else re-slices
+        -- an identity.
+}
+
+-- The store's own lifecycle, as the module runs it.
+surface PeopleLifecycle {
+    facing _: core/SharedStore
+
+    provides:
+        -- The module's client_connected lifecycle reducer, on every
+        -- connection and reconnection (RegisterUserProfile).
+        ClientConnected(identity)
+}
+
+-- What the operator does about their own name at the board. The key's
+-- binding is in keybindings.allium.
+surface PeopleBoard {
+    facing _: core/Operator
+
+    provides:
+        -- [u] in normal mode (SetOwnNameFromBoard).
+        SetOwnNameKeyPressed()
+        -- Enter in the name input (SetOwnNameOnCommit).
+        OwnNameCommitted(text)
+}
+
+-- The people tool of the dispatch MCP server.
+surface PeopleMcpTools {
+    facing _: core/McpClient
+
+    provides:
+        -- display-name_set (SetDisplayNameViaMcp). Write, idempotent.
+        SetDisplayNameToolCalled(name)
+}

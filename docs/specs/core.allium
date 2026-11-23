@@ -175,8 +175,8 @@ enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 -- `repo_group` is set by the system when a per-repo sub-epic is created
 -- automatically by repo grouping (see epics.allium: RegroupEpic /
 -- the store's grouping reducers). This field is system-assigned and is never exposed
--- to MCP callers. A repo_group epic is always public, and no patch changes
--- an origin to or from repo_group (workspaces.allium: RepoGroupsStayPublic).
+-- to MCP callers. No patch changes an origin to or from repo_group
+-- (epics.allium: RepoGroupOriginIsSetByRouting).
 enum EpicOrigin { manual | repo_group }
 
 -- A stored or typed "ready" reads as backlog.
@@ -385,14 +385,6 @@ enum WrapUpMode { rebase | pr | done }
 -- sets the model on insert by role (feeds.allium: ReviewTaskModelIsSetByRole).
 enum TaskModel { haiku | sonnet | opus | fable }
 
--- Visibility of an epic or a work package inside its workspace
--- (workspaces.allium). public: every member of the workspace sees it.
--- private: only its creator does — no admin role, workspace or super, reads
--- it (workspaces.allium: "Decisions", D3). A task has no visibility of its
--- own: an epic task follows its epic, an epic-less task is private to its
--- owner (Task.visible_to).
-enum Visibility { public | private }
-
 -- == Agents (agents.allium) ==
 
 -- Where an agent is in its life.
@@ -416,13 +408,6 @@ enum AgentEndReason { replaced | worktree_gone | launch_failed }
 
 -- What kind of launch started an agent. A resume never starts one.
 enum AgentStartMode { dispatch | research | quick }
-
--- == Workspaces (workspaces.allium) ==
-
--- A workspace role. A super-admin is not a workspace role: it is a flag on
--- the person (workspaces.allium: UserProfile.is_super_admin) and holds across
--- every workspace without being a member of any.
-enum WorkspaceRole { admin | member }
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -499,9 +484,9 @@ entity Subscription {
 -- UnseenTask records that one person has not yet looked at one task that was
 -- created with the signal on (mcp-task-tools.allium: CreateTaskViaMcp's
 -- `signal`, or feeds.allium: NewReviewRequestIsSignalled). It is the whole of
--- the "new task" signal's stored state. It is written for everyone who can
--- see the task's epic when it is created (Epic.visible_to); a Subscription
--- plays no part.
+-- the "new task" signal's stored state. It is written for every known person
+-- (one row per people.allium UserProfile) when the task is created; a
+-- Subscription plays no part.
 --
 -- An EPIC's mark is never stored. An epic is marked for a person exactly when
 -- some UnseenTask row for that person names a task in the epic's subtree (the
@@ -541,14 +526,9 @@ entity UnseenTask {
 -- bookmark set on one laptop shows on the person's other one.
 --
 -- Only a task can be bookmarked, never an epic, and never a task that is
--- Done. A row lives until it is toggled off, its task enters Done or is
--- deleted, or its person loses sight of the task (tasks.allium:
--- BookmarkEndsWithTheTaskFinishing; workspaces.allium: ClaimsFollowSight,
--- on every path that can take sight away: RemoveMember, MoveEpicToWorkspace,
--- SetEpicVisibility, a re-parent, a task move into a private epic or onto a
--- user board). Losing sight ENDS the row: it does not hide
--- and come back when sight returns. It survives the task moving to another
--- epic the person still sees.
+-- Done. A row lives until it is toggled off, or its task enters Done or is
+-- deleted (tasks.allium: BookmarkEndsWithTheTaskFinishing). It survives the
+-- task moving to another epic or onto a user board.
 entity Bookmark {
     subscriber: UserIdentity
     task: Task
@@ -655,11 +635,6 @@ entity Task {
     -- obey the graph.
 
     -- Derived
-    -- Whether `user` can see this task: an epic task exactly when its epic
-    -- is visible to them, an epic-less task only by its owner — the user
-    -- board is always private (workspaces.allium: "Decisions", D2).
-    visible_to(user): if epic != null: epic.visible_to(user) else: owner = user
-
     has_plan: plan_path != null
 
     -- The mode a dispatch claim uses when its caller names none
@@ -774,7 +749,7 @@ entity Task {
     --
     -- Every task belongs to exactly one board, and there are two kinds of
     -- board. A task WITH an epic sits on that epic's board, and the epic
-    -- already says who can see it. A task WITHOUT an epic sits on a person's
+    -- already says where it is. A task WITHOUT an epic sits on a person's
     -- own board, and nothing else in the row says whose. `owner` is that
     -- answer, and it is required precisely where the epic cannot give one.
     --
@@ -891,36 +866,12 @@ entity SubagentEntry {
     started_at: Timestamp
 }
 
--- == Workspaces (workspaces.allium) ==
-
--- A Workspace is a space where people collaborate: every epic and work
--- package lives in exactly one, and a person sees only the workspaces they
--- are a member of. One person may belong to many. Created, renamed and
--- deleted by a super-admin; its members are managed by a super-admin or by
--- one of its own admins. Rules: workspaces.allium.
-entity Workspace {
-    name: String               -- non-empty after trimming; unique across the store
-    created_by: UserIdentity
-    created_at: Timestamp
-    -- The store also carries an always-true indexed `listed` column on each
-    -- row, so a super-admin's view can read them all (docs/architecture.md,
-    -- "Read enforcement: per-caller views"). It is not a property of the workspace.
-
-    memberships: Membership with workspace = this
-    epics: Epic with workspace = this
-
-    has_member(user): memberships.any(m => m.user = user)
-    is_admin(user): memberships.any(m => m.user = user and m.role = admin)
-}
-
--- One person's membership of one workspace, with their role there.
-entity Membership {
-    workspace: Workspace
-    user: UserIdentity
-    role: WorkspaceRole
-    created_at: Timestamp
-}
-
+-- One person uses the store, so no epic, task, package or learning is
+-- withheld from anyone for access reasons; what a board receives narrows by
+-- follows and ownership only (sync.allium: SubscribeOnceIdentityIsSettled).
+-- The store's epics table still has workspace_id and visibility columns; they are dead
+-- schema (an automigration cannot drop a column): a new row writes the
+-- column default and nothing reads them.
 entity Epic {
     title: String
     description: String
@@ -938,35 +889,11 @@ entity Epic {
     origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
     created_by: UserIdentity?  -- who created this epic; stamped once and never rewritten. The epic twin of Task.created_by — an epic has no `owner` field to begin with (nobody's user board holds an epic), so this is the only way sync.allium can subscribe a creator to an epic they just made, before anyone (including them) follows it. Null when no creator is recorded: every write but the operator path stamps the caller, a feed host included, and nothing fills it in later.
     feed_command_set_by: UserIdentity?  -- who last set feed_command. A host runs the command only when its own owner is the one who set it (feeds.allium: FeedCommandRunsOnSettersHost). Stamped by the store with the caller whenever feed_command is created or changed; null when no setter is recorded, and the command then counts as set by created_by. Never client-named.
-    workspace: Workspace     -- the workspace this epic lives in; chosen at creation for a root epic, inherited from the parent for a sub-epic, and moved only with its whole tree (workspaces.allium: EpicStaysInItsWorkspace, MoveEpicToWorkspace). Every epic has one (workspaces.allium: MigrateStoreToWorkspaces)
-    visibility: Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetEpicVisibility)
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
     is_feed: feed_command != null
-
-    -- The one person who may see this epic when it is private, or null when
-    -- it is public all the way up. The NEAREST private epic at or above this
-    -- one decides (workspaces.allium: "Decisions", D5): a public
-    -- sub-epic of a private epic is hidden by that ancestor and private to
-    -- the ancestor's creator, and a private sub-epic is its own creator's whatever sits
-    -- above it, a public epic included. A move that changes this value needs
-    -- the authority a visibility change does (workspaces.allium:
-    -- ReParentingKeepsTheHolder). A private epic with no creator
-    -- (created_by null) has nobody to be private to and is seen by no
-    -- member; workspaces.allium: EpicIsPrivateOnlyWithACreator refuses to
-    -- make one.
-    private_holder: if visibility = private: created_by
-                    else if parent != null: parent.private_holder
-                    else: null
-    is_effectively_private: visibility = private or (parent != null and parent.is_effectively_private)
-
-    -- Whether `user` can see this epic. The single read predicate every
-    -- surface and every write check uses (workspaces.allium:
-    -- AClientReceivesOnlyWhatItCanSee, WritesRequireSight).
-    visible_to(user): workspace.has_member(user)
-                      and (not is_effectively_private or private_holder = user)
 
     subtasks: Task with epic = this
 
@@ -1041,12 +968,9 @@ entity SavedRepoPath {
                              -- command acts through the CALLING host's row of the path (its own, else an
                              -- unowned one), never another host's row of the same path; it then reaches that
                              -- row's repository (same github_path). Whoever owns a row of a repository may
-                             -- set the command every row of it shares WITH PEOPLE WHO SHARE A WORKSPACE
-                             -- (VerifyCommandIsPerRepository): the module cannot check a client-supplied
-                             -- github_path, so workspace membership is the trust line. A set, a save's sibling
-                             -- fill and a save's join reach only rows whose host owner is the caller or shares a
-                             -- workspace with the caller; a stranger's rows of the "same" repository are
-                             -- neither written nor read.
+                             -- set the command every row of it shares, whatever host owns those rows
+                             -- (VerifyCommandIsPerRepository). A set, a save's sibling fill and a save's join
+                             -- reach every row with the same github_path.
                              -- At startup the board re-saves this host's rows that have no github_path, so such
                              -- a row learns its repository from the clone's origin
                              -- (src/store/queries/settings.rs::stamp_github_paths_of_this_host); a clone with no
@@ -1115,8 +1039,7 @@ entity Learning {
                           -- verdict. May be negative. Feeds retrieval ranking and
                           -- the stale-cleanup eligibility check (upvote_count <= 0).
     last_upvoted_at: Timestamp?
-    workspace: Workspace?    -- the workspace a learning belongs to; null means private to its author (every user-scoped learning, and any other whose item or recorder has no workspace; workspaces.allium: LearningVisibility)
-    author: UserIdentity?    -- who recorded it, stamped by the store; null only on a learning with no recorded author
+    author: UserIdentity?    -- who recorded it, stamped by the store with the caller (store-split.allium: IdentitiesAreTheCallers); null only on a learning with no recorded author. The store's learnings table also has a workspace_id column: dead schema, written as its default and never read
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -1153,11 +1076,11 @@ entity Learning {
     -- stored. Dispatch injection leaves such a learning out for that repo
     -- only; learning_search ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
-    -- The verdicts counted are those the dispatching board can see: the ones
-    -- on tasks its user holds (sync.allium: SubscribeOnceIdentityIsSettled, "rows about a held task"). On a
-    -- one-operator store that is every task in the repo; in a shared
-    -- workspace two operators can mute different sets. Accepted: verdicts
-    -- arrive through the same per-user view as retrievals.
+    -- The verdicts counted are those the dispatching board holds: the ones
+    -- on tasks its user holds (sync.allium: SubscribeOnceIdentityIsSettled,
+    -- "rows about a held task"), so two identities' boards can mute
+    -- different sets. Accepted: verdicts arrive through the same per-user
+    -- view as retrievals.
     off_topic_in_repo(repo_path):
         (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = not_applicable).count >= config.off_topic_verdicts_to_mute
         and (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = helped).count = 0
@@ -1294,8 +1217,7 @@ entity RetiredFeedItem {
 --
 -- Which removals write one: the deletes a person makes — DeleteTask and
 -- BatchDelete (tasks.allium) and every task in a DeleteEpic subtree
--- (epics.allium, which a super-admin's delete of an unseen epic also runs,
--- workspaces.allium: SuperAdminDeletesUnseenItem). NOT the feed stale delete
+-- (epics.allium). NOT the feed stale delete
 -- (feeds.allium): it removes only items nobody worked on, and archiving them
 -- would bury the real history under upstream churn.
 --
@@ -1313,47 +1235,19 @@ entity ArchivedTask {
     plan_path: String?
     external_id: String?      -- the feed item id, for a feed task; kept, not shown: stored-only history
     created_by: UserIdentity? -- kept, not shown: stored-only history
-    owner: UserIdentity?              -- set for an epic-less task, as on Task
+    owner: UserIdentity?              -- set for an epic-less task, as on Task; kept, not shown: stored-only history
     created_at: Timestamp
     completed_at: Timestamp?
     epic_id: Integer?         -- the epic it sat in; that epic may since be gone
     epic_title: String?       -- that epic's title at archive time
     agent_name: String?       -- the task's display agent at archive time
-    workspace_id: Integer?    -- the epic's workspace at archive time
-    private: Boolean          -- the epic chain was private at archive time
-    private_holder: UserIdentity?     -- the epic chain's private holder at archive time
     archived_at: Timestamp
     archived_by: UserIdentity         -- the person whose delete wrote it; kept, not shown: stored-only history
 
-    -- Task.visible_to as frozen at archive time, for every reader but the
-    -- operator (the store's own identity, workspaces.allium), which sees every
-    -- record. owner, workspace_id, private and private_holder are read only
-    -- here: no reply shows them. has_workspace_member(id, user) is a
-    -- black box: user is a member of the workspace with that id.
-    visible_to(user):
-        if epic_id = null: owner = user
-        else: has_workspace_member(workspace_id, user) and (not private or private_holder = user)
-
     @guidance
-        -- WHO MAY READ IT is frozen at archive time: the same answer
-        -- Task.visible_to gave the moment before the delete, from what was
-        -- copied then. An epic-less record is its owner's alone; one that sat
-        -- in an epic is seen by members of workspace_id; when private is
-        -- set, only by private_holder, and by nobody when that is null. The
-        -- operator (the store's own identity) sees every record. Its
-        -- epic may be deleted or re-parented later; the record does not
-        -- follow, because a record that changed audience with a live epic it
-        -- no longer belongs to would leak or lose history arbitrarily.
-        -- Operator decision: frozen stays. ClaimsFollowSight governs live
-        -- rows; a record is history, and its audience is the one the delete
-        -- found.
-        --
-        -- Two edges of that copy, both as the store behaves today. A private
-        -- chain longer than spacetime/module/src/visibility.rs::PRIVATE_WALK_LIMIT
-        -- (64 epics) is not followed past that point, so the record is stored
-        -- with private false. A task whose epic row is already gone keeps its
-        -- epic_id but is stored with workspace_id 0 and private false, so only
-        -- the operator can read it (spacetime/module/src/archive.rs::archive_record).
+        -- Every reader sees every record. The store's archived_tasks table
+        -- also has workspace_id, private and private_holder columns: dead
+        -- schema, written as their defaults and never read.
         --
         -- NEVER REISSUED. No live Task ever carries an ArchivedTask's id. Task
         -- ids are never reused, and a restore's id ceiling counts archived ids
@@ -1598,7 +1492,7 @@ config {
 --
 -- This applies to every enum column, for example TaskStatus, SubStatus,
 -- TaskTag, WrapUpMode, TaskModel, LearningKind, LearningScope,
--- LearningStatus, Visibility and AgentState, on tasks, epics, learnings,
+-- LearningStatus and AgentState, on tasks, epics, learnings,
 -- agents, work packages and the request rows alike.
 -- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
 -- JSON drops the row rather than reading as an empty list.
@@ -1651,7 +1545,7 @@ config {
 -- The store's copy is never CREATED ownerless: a registration that
 -- would add a new row with no owner is refused. Host ids are public,
 -- so an ownerless row would go to whichever caller next registered
--- that id as its own, and a teammate could take a new machine's host
+-- that id as its own, and another identity could take a new machine's host
 -- before its own board did. That is also why the board registers only
 -- after AdoptUserIdentity has settled the owner (sync.allium:
 -- RegisterHostOnConnect), never before. A row already stored without
@@ -1724,25 +1618,17 @@ invariant BookmarkIsUniquePerSubscriberAndTask {
             a != b implies (a.subscriber != b.subscriber or a.task != b.task)
 }
 
-invariant OneMembershipPerUserAndWorkspace {
-    for a in Memberships:
-        for b in Memberships:
-            a != b implies (a.workspace != b.workspace or a.user != b.user)
-}
-
 -- At most one epic per (parent, feed_role) when feed_role != none; ordinary
 -- epics (feed_role = none) are exempt. A managed ROOT (parent = null) is one
--- per creator and workspace: each person's board provisions its own private
--- "PR Reviews" and "CVE" roots (epics.allium: ProvisionManagedEpics), so two
--- roots may share a feed_role when their creators or workspaces differ. A
--- sub-epic shares its parent's workspace, so its siblings always do.
+-- per creator: each creator provisions its own "PR Reviews" and "CVE" roots
+-- (epics.allium: ProvisionManagedEpics), so two roots may share a feed_role
+-- when their creators differ.
 --
 -- The store's module holds it. The reducers that provision role epics find
 -- one by (feed_role, parent), and a root also by creator, before inserting
 -- (spacetime/module/src/feed.rs::ensure_role_epic,
 -- spacetime/module/src/feed_ingest.rs::ensure_role_sub_epic), and create_epic,
--- patch_epic and a root's move to another workspace refuse a row that would
--- duplicate one
+-- and patch_epic refuse a row that would duplicate one
 -- (spacetime/module/src/rules.rs::check_epic_unique_among). A patch that
 -- leaves the parent, role, origin and title alone is not judged, so a row
 -- already holding a duplicate stays writable for its other fields.
@@ -1750,7 +1636,6 @@ invariant UniqueFeedRolePerParent {
     for a in Epics:
         for b in Epics:
             a != b and a.feed_role != none and a.parent = b.parent
-                and a.workspace = b.workspace
                 and (a.parent != null or a.created_by = b.created_by)
                 implies (a.feed_role != b.feed_role or b.feed_role = none)
 }
@@ -1766,16 +1651,13 @@ invariant UniqueRepoGroupPerParent {
     for a in Epics:
         for b in Epics:
             a != b and a.origin = repo_group and a.parent = b.parent
-                and a.workspace = b.workspace and a.title = b.title
+                and a.title = b.title
                 implies b.origin != repo_group
 }
 
--- Rows of one repository share its verify command AMONG PEOPLE WHO SHARE A
--- WORKSPACE: rows with the same non-null github_path whose host owners are the
--- same person or share a workspace are one repository on several machines.
--- Rows of strangers are not bridged by a shared github_path, so a stranger
--- cannot choose what another person's agents run
--- (spacetime/module/src/config.rs::hosts_sharing_a_workspace). The store
+-- Rows of one repository share its verify command: rows with the same
+-- non-null github_path are one repository on several machines, whatever host
+-- owns them. The store
 -- holds it: setting a command through a path sets it on every row of that
 -- path and every sibling of them
 -- (spacetime/module/src/config.rs::rows_of_the_repository_at), and a row
@@ -1785,8 +1667,7 @@ invariant UniqueRepoGroupPerParent {
 invariant VerifyCommandIsPerRepository {
     for a in SavedRepoPaths:
         for b in SavedRepoPaths:
-            (a.github_path != null and a.github_path = b.github_path
-                and shares_a_workspace(a.host.owner, b.host.owner))  -- black box: same person, or a common Membership
+            (a.github_path != null and a.github_path = b.github_path)
                 implies a.verify_command = b.verify_command
 }
 

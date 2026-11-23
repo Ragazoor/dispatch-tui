@@ -192,13 +192,9 @@ contract IdSequenceCounter {
 -- are the only exceptions to "every table it holds" below; the module's
 -- views are not tables and hold nothing of their own.
 --
--- `user_profiles`, `workspaces` and `memberships` (workspaces.allium) ARE
--- here, because epics, work packages and learnings point at a workspace
--- by id: a restore without them would leave every one of those ids dangling,
--- and the migration (MigrateStoreToWorkspaces) cannot repair that, since it
--- runs once, on the first connection after the publish. The identities they
--- name are the store's own, as `hosts`, `subscriptions` and `Task.owner`
--- already are. A restore keeps display names and super-admin flags too.
+-- `user_profiles` (people.allium) IS here: a restore keeps display names.
+-- The identities it names are the store's own, as `hosts`, `subscriptions`
+-- and `Task.owner` already are.
 --
 -- What is NOT here is as load-bearing as what is. The knowledge base
 -- (`learnings`, `learning_retrievals`, `learning_verdicts`) and host-scoped
@@ -221,6 +217,14 @@ contract IdSequenceCounter {
 -- A fourth, `task_watchers`, is dead too (there is no watch tool). It stays
 -- for the same reason, but it may still hold old rows: nothing reads or
 -- writes them, and a dump or import carries them across like any other row.
+--
+-- `workspaces` and `memberships` are dead as well, and may hold old rows.
+-- A dump carries them (so a snapshot stays complete), and a restore or an
+-- import ignores them: it writes none of their rows (RestoreSnapshot,
+-- ImportOldStore). Live tables carry dead columns too (epics and
+-- work_packages: workspace_id and visibility; learnings: workspace_id;
+-- archived_tasks: workspace_id, private and private_holder; user_profiles:
+-- is_super_admin): whatever a snapshot holds in them, nothing reads it.
 enum SharedTable {
     tasks
     epics
@@ -452,7 +456,9 @@ rule RestoreSnapshot {
 
     ensures:
         BurnIdSequences(snapshot: snapshot)
-        for extract in snapshot.extracts:
+        -- The dead workspaces and memberships tables are ignored (SharedTable).
+        for extract in snapshot.extracts
+                where extract.table != workspaces and extract.table != memberships:
             TableRowsWriteRequested(table: extract.table, rows: extract.rows)
         SnapshotRestored(snapshot: snapshot)
 
@@ -731,9 +737,8 @@ rule StoreRefusesUnknownStatus {
         -- bypass both because none takes a status from the caller: the
         -- feed's update of an existing task and its epic upserts (a new
         -- feed epic's status is the module's own), the owner backfill, the
-        -- agent-state write, the phoenix predecessor's flag clear, the epic
-        -- status recalculation (a derived status) and the visibility and
-        -- workspace moves of an epic. The known statuses are exactly
+        -- agent-state write, the phoenix predecessor's flag clear and the epic
+        -- status recalculation (a derived status). The known statuses are exactly
         -- core/TaskStatus's four (backlog, running, review, done), which is
         -- the type both core/Task.status and core/Epic.status declare; the
         -- retired `archived` is unknown like any other string.
@@ -789,8 +794,8 @@ rule SeedsNormaliseLikeMigrations {
         -- Scope Model; spacetime/module/src/learning.rs::retire_task_scoped_learning).
         -- Neither refuses: a refusal half-way through a restore is the failure
         -- NothingIsWrittenBeforeTheChecksPass exists to prevent. Tasks and
-        -- epics are seeded before learnings, so the retire sees the private
-        -- epic chain of the task the learning named.
+        -- epics are seeded before learnings, so the retire sees the task the
+        -- learning named.
         --
         -- ANY FUTURE ONE-TIME MIGRATION THAT NORMALISES STORED ROWS gets the
         -- same treatment: one function, called by the migration and by the
@@ -897,7 +902,9 @@ rule ImportOldStore {
         -- (see "ALREADY PRESENT" below). The four report arguments are the
         -- per-table counts of rows written, of rows kept as the target has
         -- them and of rows dropped, and the ids of the orphaned tasks.
-        for extract in snapshot.extracts:
+        -- The dead workspaces and memberships tables are ignored (SharedTable).
+        for extract in snapshot.extracts
+                where extract.table != workspaces and extract.table != memberships:
             TableRowsWriteRequested(
                 table: extract.table,
                 rows: rows_missing_from(target, extract)
@@ -951,9 +958,9 @@ rule ImportOldStore {
         -- hosts, settings, task_watchers, task_subagents, poll_owners,
         -- subscriptions, learnings (with their embeddings and upvotes),
         -- learning_retrievals, learning_verdicts, usage_events, retired_feed_items,
-        -- archived_tasks, work_packages, work_package_links, agents, handed_out_agent_names,
-        -- user_profiles, workspaces and memberships cross as well as tasks
-        -- and epics. A table that cannot be imported is a
+        -- archived_tasks, work_packages, work_package_links, agents, handed_out_agent_names
+        -- and user_profiles cross as well as tasks and epics (workspaces and
+        -- memberships are ignored, as SharedTable says). A table that cannot be imported is a
         -- refusal (incomplete), not a quiet omission.
         --
         -- OWNERSHIP IS NOT RE-STAMPED. The old store's rows already carry

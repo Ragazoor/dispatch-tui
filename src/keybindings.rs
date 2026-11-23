@@ -98,8 +98,6 @@ pub enum KeyNamespace {
     BoardPickerMoveToEpic,
     BoardPickerReparentEpic,
     BoardPickerWorkPackage,
-    BoardPickerPlacement,
-    BoardAdmin,
     BoardConfirmQuit,
     BoardConfirmDeleteTask,
     BoardConfirmBatchDelete,
@@ -114,7 +112,6 @@ pub enum KeyNamespace {
     BoardConfirmTrustRepo,
     BoardConfirmTrustRepoQuickDispatch,
     BoardConfirmDeleteWorkPackage,
-    BoardConfirmAdmin,
     AgentTreeTree,
     AgentTreeCommits,
     AgentTreeAgents,
@@ -125,7 +122,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `keybinding_search` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 40] = [
+    pub const ALL: [KeyNamespace; 37] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -144,8 +141,6 @@ impl KeyNamespace {
         Self::BoardPickerMoveToEpic,
         Self::BoardPickerReparentEpic,
         Self::BoardPickerWorkPackage,
-        Self::BoardPickerPlacement,
-        Self::BoardAdmin,
         Self::BoardConfirmQuit,
         Self::BoardConfirmDeleteTask,
         Self::BoardConfirmBatchDelete,
@@ -160,7 +155,6 @@ impl KeyNamespace {
         Self::BoardConfirmTrustRepo,
         Self::BoardConfirmTrustRepoQuickDispatch,
         Self::BoardConfirmDeleteWorkPackage,
-        Self::BoardConfirmAdmin,
         Self::AgentTreeTree,
         Self::AgentTreeCommits,
         Self::AgentTreeAgents,
@@ -189,8 +183,6 @@ impl KeyNamespace {
             Self::BoardPickerMoveToEpic => "board.picker.move_to_epic",
             Self::BoardPickerReparentEpic => "board.picker.reparent_epic",
             Self::BoardPickerWorkPackage => "board.picker.work_package",
-            Self::BoardPickerPlacement => "board.picker.placement",
-            Self::BoardAdmin => "board.admin",
             Self::BoardConfirmQuit => "board.confirm.quit",
             Self::BoardConfirmDeleteTask => "board.confirm.delete_task",
             Self::BoardConfirmBatchDelete => "board.confirm.batch_delete",
@@ -205,7 +197,6 @@ impl KeyNamespace {
             Self::BoardConfirmTrustRepo => "board.confirm.trust_repo",
             Self::BoardConfirmTrustRepoQuickDispatch => "board.confirm.trust_repo_quick_dispatch",
             Self::BoardConfirmDeleteWorkPackage => "board.confirm.delete_work_package",
-            Self::BoardConfirmAdmin => "board.confirm.admin",
             Self::AgentTreeTree => "agent_tree.tree",
             Self::AgentTreeCommits => "agent_tree.commits",
             Self::AgentTreeAgents => "agent_tree.agents",

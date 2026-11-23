@@ -228,12 +228,14 @@ async fn an_epic_edit_writes_only_the_fields_the_user_changed() {
 async fn a_refused_epic_edit_does_not_report_its_parse_errors_as_accepted() {
     let (db, rt, mut app) = runtime_and_app().await;
     let epic = db.create_epic("Original", "", None).await.unwrap();
+    // The epic is gone by the time the editor saves: the store refuses the
+    // whole save.
+    db.delete_epic(epic.id).await.unwrap();
 
-    // VISIBILITY is unparseable (a parse error), the interval is sub-floor
-    // (a refusal of the whole save).
+    // FEED_INTERVAL_SECS is unparseable (a parse error).
     let outcome = EditorOutcome::Saved(
-        "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\ntrue\n\
-         --- FEED_INTERVAL_SECS ---\n10\n--- VISIBILITY ---\nsideways\n"
+        "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\n\n\
+         --- FEED_INTERVAL_SECS ---\nsideways\n"
             .to_string(),
     );
     rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
@@ -255,7 +257,7 @@ async fn an_accepted_epic_edit_reports_its_parse_errors() {
 
     let outcome = EditorOutcome::Saved(
         "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\n\n\
-         --- FEED_INTERVAL_SECS ---\n\n--- VISIBILITY ---\nsideways\n"
+         --- FEED_INTERVAL_SECS ---\nsideways\n"
             .to_string(),
     );
     rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;

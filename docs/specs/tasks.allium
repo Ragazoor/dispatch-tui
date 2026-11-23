@@ -268,6 +268,12 @@ entity BoardSelection {
 rule CreateTask {
     when: CreateTask(title, description, repo_path, plan?, epic?, tag?, sort_order?, base_branch?, wrap_up_mode?, model?, auto_run_plan?, phoenix?)
 
+    -- The store refuses an epic that does not exist ("task: epic N does not
+    -- exist"; module: check_epic_exists, in create_task and
+    -- create_task_signalled).
+    requires:
+        if epic != null: exists epic
+
     ensures: core/Task.created(
         title: title,
         description: description,
@@ -1421,7 +1427,7 @@ rule BatchMoveToEpic {
 
     -- One target for the whole selection, chosen and confirmed once. Each
     -- task then moves exactly as MoveTaskToEpic moves it, so a refusal for
-    -- one task (the store's workspace checks) leaves the others moved and is
+    -- one task (a store refusal) leaves the others moved and is
     -- reported on its own. The board refreshes ONCE, after the last move.
     -- A task the store refused stays selected, so the person can pick
     -- another target or narrow the selection; the moved ones leave it.
@@ -1444,9 +1450,11 @@ rule MoveTaskToEpic {
 
     -- When a target epic is chosen it must exist. A null new_epic
     -- detaches the task into a standalone (board-level) task on the
-    -- caller's board, which the store allows only to the task's creator, an
-    -- admin of its workspace or a super-admin (workspaces.allium:
-    -- TaskMovesStayInTheWorkspace); anyone else is refused.
+    -- caller's board (store-split.allium: IdentitiesAreTheCallers). Anyone
+    -- may detach a task, even while a host runs it: one person runs every
+    -- host under one UserIdentity (core.allium: UserIdentity), so the task
+    -- lands on the board of the identity whose hosts run it, and
+    -- own_creations keeps delivering it.
     requires:
         if new_epic != null: exists new_epic
 
@@ -1466,10 +1474,7 @@ rule MoveTaskToEpic {
         -- the task under the cursor; with tasks selected, `m` moves the whole
         -- selection (BatchMoveToEpic). The epic-existence precondition is
         -- enforced by the handler, so the MCP relink path (task_update with
-        -- an epic_id, mcp-task-tools.allium) is held to it too. So are the
-        -- store's checks on who may move what (workspaces.allium:
-        -- TaskEntersAnEpicTheCallerCanSee, ReParentingKeepsTheHolder,
-        -- TaskMovesStayInTheWorkspace).
+        -- an epic_id, mcp-task-tools.allium) is held to it too.
         --
         -- A collapsible tree overlay lists only epics that are relevant
         -- targets: it excludes epics in Done status and epics hidden by
@@ -1529,8 +1534,8 @@ rule MoveTaskToEpic {
 --
 -- A task created with the signal on (mcp-task-tools.allium:
 -- CreateTaskViaMcp's `signal`, or a new My Reviews or Team Reviews PR —
--- feeds.allium: NewReviewRequestIsSignalled) is marked unseen for everyone
--- who can see its epic (core/UnseenTask). The mark drives the board's "new" glyph and stripe
+-- feeds.allium: NewReviewRequestIsSignalled) is marked unseen for every known
+-- person: one core/UnseenTask per people.allium UserProfile. The mark drives the board's "new" glyph and stripe
 -- (board-visuals.allium, "New-task signal"). These rules end it.
 
 rule SeeTaskByLandingOnIt {
@@ -1551,7 +1556,7 @@ rule SeeTaskByLandingOnIt {
         -- card under their cursor is in front of them. The board checks after
         -- every key, so one check covers all of them. Only a key handled on the
         -- plain board counts: a key in an overlay, a prompt, the detail view
-        -- or another screen (help, admin, a picker) sees nothing, because the
+        -- or another screen (help, a picker) sees nothing, because the
         -- board's cards may not be on screen then.
         --
         -- A REFRESH SEES NOTHING. A card that a pull, a fold or a filter
@@ -1665,9 +1670,7 @@ rule SetBookmark {
     -- person's bookmark: a bookmark is personal, and nothing it could repair
     -- is worth reading another person's trail.
     requires: subscriber = caller()
-    -- A task the caller cannot see is refused as a missing one
-    -- (workspaces.allium: UnseenIsAsMissing).
-    requires: task.visible_to(caller())
+    requires: exists task
     -- A Done task cannot be bookmarked (core/Bookmark:
     -- BookmarkedTaskIsNotDone). Removing a bookmark is never refused on
     -- status: there is nothing to remove from a Done task, so it is a no-op.
@@ -1712,9 +1715,7 @@ rule BookmarkEndsWithTheTaskFinishing {
         -- back to this task, wherever it now sits; the trail simply follows
         -- it to its new epic. So no relink path (MoveTaskToEpic, task_update's
         -- epic_id, a feed routing move, RegroupEpic, FlattenEpic, a
-        -- repo_path reroute) touches a Bookmark for a person who still sees
-        -- the task. A move that takes the task out of a person's sight ends
-        -- their bookmark (workspaces.allium: ClaimsFollowSight).
+        -- repo_path reroute) touches a Bookmark.
 }
 
 -- == Delete ==
@@ -1722,8 +1723,7 @@ rule BookmarkEndsWithTheTaskFinishing {
 -- TaskRowDeleted(task): the task row is gone, whichever route removed it.
 -- Raised by every rule that deletes a task row, in the same transaction:
 -- DeleteTask and BatchDelete below, an epic delete's subtree (epics.allium:
--- DeleteEpic, which a super-admin's delete of an unseen epic also runs,
--- workspaces.allium: SuperAdminDeletesUnseenItem) and the feed stale delete
+-- DeleteEpic) and the feed stale delete
 -- (feeds.allium: UpsertFeedTasks, RoleRoutedFeedSync). What the store owes a
 -- removed row beyond the row itself listens for it (store-split.allium:
 -- DeletingATaskFailsItsOpenRequest, DeletingATaskFailsItsOpenSessionRequest,
@@ -1863,8 +1863,6 @@ rule BatchDelete {
     -- subtree nested deeper than the recursive delete reaches is refused,
     -- by the batch_delete reducer and by the pre-check (the store's
     -- check_deletable), before any teardown.
-    -- Both also refuse an epic whose subtree holds an epic the caller
-    -- cannot see (workspaces.allium: UnseenIsAsMissing's named exception).
     let all_pass =
         tasks.all(t => t.status = done)
         and epics.all(e => e.subtree_tasks.all(t => t.status = done))
@@ -1969,9 +1967,6 @@ rule ArchiveDeletedTask {
             epic_id:        if epic != null: epic.id else: null,
             epic_title:     if epic != null: epic.title else: null,
             agent_name:     task.display_name,
-            workspace_id:   if epic != null: epic.workspace.id else: null,
-            private:        if epic != null: epic.is_effectively_private else: false,
-            private_holder: if epic != null: epic.private_holder else: null,
             archived_at:    now,
             archived_by:    caller
         )
@@ -2155,7 +2150,7 @@ rule EditTask {
     -- board as the board's current task with only the sent fields changed,
     -- not as the opened snapshot; a save that sends nothing changes nothing
     -- on the board. The epic editor follows the same rule for title,
-    -- description, feed command, interval and visibility.
+    -- description, feed command and interval.
 
     let prior = task.status
     -- The task as the editor opened it. The change guards below compare with
@@ -2394,7 +2389,7 @@ rule PatchTaskNeverAimsAnotherHostsTeardown {
     -- A feed teardown asks the host named in the task row to remove the
     -- worktree named in it, in the repo named in it
     -- (store-split.allium: StaleDeleteRequestsTeardownOnTheHoldingHost). A patch that could set
-    -- those three would let anyone who sees the task aim another person's host
+    -- those three would let any caller aim another identity's host
     -- at a live worktree: patch a feed task in somebody's epic to
     -- host = their-laptop, worktree = a worktree they are working in, and wait
     -- for the item to leave the feed.
@@ -2413,7 +2408,7 @@ rule PatchTaskNeverAimsAnotherHostsTeardown {
     @guidance
         -- patch_task refuses, naming why, and writes nothing. Only a CHANGE is
         -- judged: a patch that repeats the stored value is no change. A task
-        -- no host holds keeps its repo editable by anyone who sees it, and may
+        -- no host holds keeps its repo editable by anyone, and may
         -- be handed to a host the caller owns or to one nobody registered.
         -- Writes the module makes itself (the dispatch reports, the close, the
         -- stale delete) do not go through this check, so provisioning and
@@ -2660,3 +2655,4 @@ surface TaskWriteReducers {
         TaskInsertRequested(written)
         TaskUpdateRequested(task, epic?, patch, host)
 }
+

@@ -328,8 +328,15 @@ use super::*;
 /// (`agent.rs: check_window_release`; `split-pane.allium: DetachTmux`). A board
 /// that let a foreign viewer null the window would disagree with the store.
 ///
+/// Bumped: workspaces, memberships, super-admins and every sight check are
+/// gone (`docs/plans/2026-11-23-remove-workspaces.md`): their reducers and the
+/// `visible_workspaces`, `visible_memberships` and `unseen_items` views no
+/// longer exist, nor do the unread `visible_epics`, `visible_tasks` and
+/// `visible_packages` views, and the views narrow by follows and ownership
+/// only.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 63;
+pub const RULES_VERSION: i64 = 64;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its
@@ -339,8 +346,8 @@ pub const TASK_SCOPE_REMOVED_RULES_VERSION: i64 = 48;
 
 /// The rules version that added the setter-claims sweep: a store stamped with
 /// anything older has its pre-rule feed claims released once, on its first
-/// connection (`config.rs: release_claims_of_non_setter_hosts`). Like
-/// [`WORKSPACES_RULES_VERSION`] it never moves: a RULES_VERSION bump leaves it.
+/// connection (`config.rs: release_claims_of_non_setter_hosts`). It never
+/// moves: a RULES_VERSION bump leaves it.
 pub const FEED_SETTER_CLAIMS_RULES_VERSION: i64 = 37;
 
 /// The rules version that made every stored task's sub_status fit its status:
@@ -352,13 +359,8 @@ pub const SUB_STATUS_FIT_RULES_VERSION: i64 = 51;
 /// The rules version that made one verify command per repository hold for rows
 /// saved before it: a store stamped with anything older has its linked rows
 /// unified once, on its first connection (`config.rs:
-/// unify_repo_verify_commands`). Never moves, like the two below.
+/// unify_repo_verify_commands`). Never moves, like the others here.
 pub const REPO_PATH_VERIFY_RULES_VERSION: i64 = 43;
-
-/// The rules version that added workspaces: a store stamped with anything
-/// older is migrated once on its first connection (`workspace.rs:
-/// migrate_store_to_workspaces`).
-pub const WORKSPACES_RULES_VERSION: i64 = 17;
 
 /// Whether `sub_status` is legal for `status`, in the store's spelling.
 ///
@@ -490,18 +492,14 @@ pub const REPO_GROUP_ORIGIN: &str = "repo-group";
 /// (the epics under the same parent; `candidate` itself may be among them)
 /// already holds its feed role, or is a repo group with its title.
 ///
-/// Siblings are the candidate's own workspace's: a ROOT's role is unique per
-/// creator and workspace, since each person's board provisions its own
-/// managed roots. Called on a create and on a patch that changes the
+/// A ROOT's role is unique per creator, since each identity's board
+/// provisions its own managed roots. Called on a create and on a patch that changes the
 /// parent, role, origin or title, so a row that already holds a duplicate
 /// stays writable for its other fields.
 pub fn check_epic_unique_among(candidate: &Epic, siblings: &[Epic]) -> Result<(), String> {
-    // Roots of every workspace share parent 0; only the candidate's own
-    // workspace counts (a sub-epic's siblings share it already).
     let others = siblings
         .iter()
-        .filter(|e| e.id != candidate.id || candidate.id == 0)
-        .filter(|e| e.workspace_id == candidate.workspace_id);
+        .filter(|e| e.id != candidate.id || candidate.id == 0);
     for other in others {
         if candidate.feed_role != "none"
             && !candidate.feed_role.is_empty()
@@ -529,7 +527,6 @@ pub fn check_epic_unique_among(candidate: &Epic, siblings: &[Epic]) -> Result<()
 /// Whether a patch moved one of the inputs of [`check_epic_unique_among`].
 pub fn epic_uniqueness_inputs_changed(before: &Epic, after: &Epic) -> bool {
     before.parent_epic_id != after.parent_epic_id
-        || before.workspace_id != after.workspace_id
         || before.feed_role != after.feed_role
         || before.origin != after.origin
         || before.title != after.title

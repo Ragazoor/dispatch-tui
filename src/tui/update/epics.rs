@@ -237,9 +237,6 @@ impl App {
             if let Some(interval) = edit.feed_interval_secs {
                 e.feed_interval_secs = interval;
             }
-            if let Some(visibility) = edit.visibility {
-                e.visibility = visibility;
-            }
         }
         // An edit can reparent the epic, which reshapes the compact tree.
         self.move_skipped_epic_folds()

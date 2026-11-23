@@ -3,7 +3,7 @@
 //!
 //! The record is BUILT by a pure function over [`StoreReads`], so
 //! `MemoryReducerCaller` writes exactly the record the module writes, and READ
-//! through two procedures that apply [`archived_task_visible_to`].
+//! through two procedures that serve every record.
 
 use super::*;
 
@@ -17,7 +17,6 @@ pub fn archive_record(
     archived_by: String,
 ) -> ArchivedTask {
     let epic = (task.epic_id != 0).then(|| r.epic(task.epic_id)).flatten();
-    let holder = epic.as_ref().and_then(|e| private_holder(r, e));
     ArchivedTask {
         id: task.id,
         title: task.title.clone(),
@@ -39,9 +38,11 @@ pub fn archive_record(
         agent_name: display_agent(&r.agents_of(task.id))
             .map(|a| a.name.clone())
             .unwrap_or_default(),
-        workspace_id: epic.as_ref().map_or(0, |e| e.workspace_id),
-        private: holder.is_some(),
-        private_holder: holder.unwrap_or_default(),
+        // Dead columns (`docs/plans/2026-11-23-remove-workspaces.md`, R8):
+        // written as their defaults, never read.
+        workspace_id: 0,
+        private: false,
+        private_holder: String::new(),
         archived_at,
         archived_by,
     }
@@ -59,67 +60,16 @@ pub(crate) fn archive_task_row(ctx: &ReducerContext, task: &Task) {
     ctx.db.archived_tasks().insert(record);
 }
 
-/// `ArchivedTask`'s frozen visibility: an epic-less record is its owner's;
-/// an epic record is seen by members of its workspace, and only by its holder
-/// when the epic chain was private.
-pub fn archived_task_visible_to(r: &impl StoreReads, a: &ArchivedTask, who: &str) -> bool {
-    if a.epic_id == 0 {
-        return !a.owner.is_empty() && a.owner == who;
-    }
-    if !workspace_has_member(r, a.workspace_id, who) {
-        return false;
-    }
-    !a.private || (!a.private_holder.is_empty() && a.private_holder == who)
-}
-
-/// The archived task `id` when the caller may see it (`operator` sees every
-/// record). `None` is both "missing" and "unseen".
-pub fn archived_task_for(
-    r: &impl StoreReads,
-    operator: bool,
-    who: &str,
-    id: i64,
-) -> Option<ArchivedTask> {
-    r.archived_task(id)
-        .filter(|a| operator || archived_task_visible_to(r, a, who))
-}
-
-/// Every archived task the caller may see, narrowed by `epic_id` (`0` for
-/// any) and `repo_paths` (empty for any), newest archived first, ties by id
-/// descending (`mcp-task-tools.allium: ListArchivedTasksViaMcp`). The host
-/// applies the remaining `list_tasks` filters.
-///
-/// Read through the indexes a caller can reach, which settle most of the
-/// visibility rule on their own: the owner index holds only the caller's
-/// epic-less records, and the workspace index is read only for workspaces
-/// the caller belongs to, so a workspace record needs just the privacy check.
-/// The operator reads the whole table instead.
+/// Every archived task, narrowed by `epic_id` (`0` for any) and
+/// `repo_paths` (empty for any), newest archived first, ties by id descending
+/// (`mcp-task-tools.allium: ListArchivedTasksViaMcp`). The host applies the
+/// remaining `list_tasks` filters.
 pub fn archived_tasks_for(
     r: &impl StoreReads,
-    operator: bool,
-    who: &str,
     epic_id: i64,
     repo_paths: &[String],
 ) -> Vec<ArchivedTask> {
-    let mut rows: Vec<ArchivedTask> = if operator {
-        // The operator sees every record (`core.allium: ArchivedTask`), so the
-        // table is read whole, not through the caller's indexes.
-        r.all_archived_tasks()
-    } else {
-        let mut workspaces: Vec<i64> =
-            r.memberships_of(who).iter().map(|m| m.workspace_id).collect();
-        workspaces.sort_unstable();
-        workspaces.dedup();
-        let held_in_workspace = workspaces
-            .into_iter()
-            .flat_map(|ws| r.archived_tasks_in_workspace(ws))
-            .filter(|a| !a.private || (!a.private_holder.is_empty() && a.private_holder == who));
-        r.archived_tasks_owned_by(who)
-            .into_iter()
-            .filter(|a| a.epic_id == 0)
-            .chain(held_in_workspace)
-            .collect()
-    };
+    let mut rows = r.all_archived_tasks();
     rows.retain(|a| {
         (epic_id == 0 || a.epic_id == epic_id)
             && (repo_paths.is_empty() || repo_paths.contains(&a.repo_path))

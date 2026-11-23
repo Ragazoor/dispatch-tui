@@ -5,11 +5,7 @@ use crate::models::{TaskId, WorkPackageId, WorkPackageItem};
 // Work package tool tests (work-packages.allium, "MCP tools")
 // =======================================================================
 
-async fn tool(state: &Arc<McpState>, name: &str, mut arguments: Value) -> JsonRpcResponse {
-    // The test store's default workspace, which a package is always created in.
-    if name == "work-package_create" && arguments.get("workspace_id").is_none() {
-        arguments["workspace_id"] = json!(1);
-    }
+async fn tool(state: &Arc<McpState>, name: &str, arguments: Value) -> JsonRpcResponse {
     call(
         state,
         "tools/call",
@@ -371,7 +367,7 @@ fn tool_def_from(defs: &Value, name: &str) -> Value {
 }
 
 // -----------------------------------------------------------------------
-// People and display names (workspaces.allium: SetDisplayNameViaMcp,
+// People and display names (people.allium: SetDisplayNameViaMcp,
 // CreatorIsShownByName)
 // -----------------------------------------------------------------------
 
@@ -430,7 +426,7 @@ async fn list_work_packages_names_the_creator_by_display_name_or_prefix() {
 }
 
 // =======================================================================
-// Workspace and visibility (work-packages.allium: CreateWorkPackageViaMcp, UpdateWorkPackageViaMcp)
+// Creating a package (work-packages.allium: CreateWorkPackageViaMcp)
 // =======================================================================
 
 fn is_error(resp: &JsonRpcResponse) -> bool {
@@ -442,7 +438,7 @@ fn is_error(resp: &JsonRpcResponse) -> bool {
 }
 
 #[tokio::test]
-async fn create_work_package_without_a_workspace_is_refused_and_lists_yours() {
+async fn create_work_package_needs_only_a_title() {
     let state = test_state().await;
     let resp = call(
         &state,
@@ -450,62 +446,24 @@ async fn create_work_package_without_a_workspace_is_refused_and_lists_yours() {
         Some(json!({"name": "work-package_create", "arguments": {"title": "W"}})),
     )
     .await;
-    assert!(is_error(&resp));
-    let text = extract_response_text(&resp);
-    assert!(text.contains("needs a workspace_id"), "{text}");
-    assert!(text.contains("1 (Default)"), "{text}");
-    assert!(state.db.list_work_packages().await.is_empty());
-}
-
-#[tokio::test]
-async fn create_work_package_takes_a_visibility_and_list_shows_it() {
-    let state = test_state().await;
-    let resp = tool(
-        &state,
-        "work-package_create",
-        json!({"title": "Mine", "visibility": "private"}),
-    )
-    .await;
     assert!(!is_error(&resp), "{}", extract_response_text(&resp));
-    let list = tool(&state, "work-package_search", json!({})).await;
-    let text = extract_response_text(&list);
-    assert!(text.contains("Workspace: 1"), "{text}");
-    assert!(text.contains("Visibility: private"), "{text}");
-}
-
-#[tokio::test]
-async fn update_work_package_sets_visibility_alone() {
-    let state = test_state().await;
-    tool(&state, "work-package_create", json!({"title": "P"})).await;
     let id = only_package(&state).await;
-    let resp = tool(
-        &state,
-        "work-package_update",
-        json!({"work_package_id": id.0, "visibility": "private"}),
-    )
-    .await;
-    assert!(!is_error(&resp), "{}", extract_response_text(&resp));
     assert_eq!(
-        state.db.list_work_packages().await[0].visibility,
-        crate::models::Visibility::Private
+        extract_response_text(&resp),
+        format!("Work package {id} (\"W\") created with 0 linked item(s)")
     );
 }
 
 #[tokio::test]
-async fn an_unknown_visibility_is_refused_and_names_the_choices() {
+async fn a_retired_visibility_argument_is_refused() {
     let state = test_state().await;
     let resp = tool(
         &state,
         "work-package_create",
-        json!({"title": "P", "visibility": "secret"}),
+        json!({"title": "P", "visibility": "private"}),
     )
     .await;
     assert!(is_error(&resp));
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains("public") && text.contains("private"),
-        "{text}"
-    );
     assert!(state.db.list_work_packages().await.is_empty());
 }
 

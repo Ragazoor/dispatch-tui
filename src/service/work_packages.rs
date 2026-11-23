@@ -21,10 +21,6 @@ pub struct CreateWorkPackageParams {
     pub description: String,
     /// Items to link once the package exists (`LinkItem`, idempotent).
     pub link: Vec<WorkPackageItem>,
-    /// The workspace the package lives in; required (`0` is none, which the
-    /// store refuses). `work-packages.allium: CreateWorkPackage`.
-    pub workspace_id: i64,
-    pub visibility: crate::models::Visibility,
 }
 
 /// Input to [`WorkPackageService::update_work_package`]. `None` leaves a field
@@ -37,8 +33,6 @@ pub struct UpdateWorkPackageParams {
     pub sort_order: Option<i64>,
     pub link: Vec<WorkPackageItem>,
     pub unlink: Vec<WorkPackageItem>,
-    /// `workspaces.allium: SetWorkPackageVisibility`.
-    pub visibility: Option<crate::models::Visibility>,
 }
 
 impl UpdateWorkPackageParams {
@@ -51,13 +45,11 @@ impl UpdateWorkPackageParams {
             sort_order: None,
             link: Vec::new(),
             unlink: Vec::new(),
-            visibility: None,
         }
     }
 
     fn changes_anything(&self) -> bool {
-        self.visibility.is_some()
-            || self.title.is_some()
+        self.title.is_some()
             || self.description.is_some()
             || self.sort_order.is_some()
             || !self.link.is_empty()
@@ -99,13 +91,7 @@ impl WorkPackageService {
     ) -> Result<WorkPackageId, ServiceError> {
         let id = self
             .db
-            .create_work_package(
-                &params.title,
-                &params.description,
-                &params.link,
-                params.workspace_id,
-                params.visibility,
-            )
+            .create_work_package(&params.title, &params.description, &params.link)
             .await?;
         Ok(id)
     }
@@ -151,7 +137,7 @@ impl WorkPackageService {
     ) -> Result<Vec<WorkPackageItem>, ServiceError> {
         if !params.changes_anything() {
             return Err(ServiceError::Validation(
-                "update_work_package needs at least one of title, description, sort_order, visibility, \
+                "update_work_package needs at least one of title, description, sort_order, \
                  or a link or unlink list"
                     .into(),
             ));
@@ -175,7 +161,7 @@ impl WorkPackageService {
                 .filter(|i| !linked.contains(i))
                 .collect()
         };
-        // One store call for the patch, the visibility change and the links,
+        // One store call for the patch and the links,
         // so a refused part leaves nothing applied
         // (work-packages.allium: UpdateWorkPackageIsOneTransaction).
         self.db
@@ -185,7 +171,6 @@ impl WorkPackageService {
                     title: params.title.as_deref(),
                     description: params.description.as_deref(),
                     sort_order: params.sort_order,
-                    visibility: params.visibility,
                 },
                 &params.unlink,
                 &params.link,

@@ -95,57 +95,17 @@ fn blank_epic() -> bindings::Epic {
         feed_append_only: false,
         completed_at: String::new(),
         created_by: String::new(),
-        workspace_id: DEFAULT_WORKSPACE,
+        workspace_id: 0,
         visibility: "public".into(),
         feed_command_set_by: String::new(),
     }
 }
 
-/// The workspace `join_default_workspace` puts the test identity in, which the
-/// store's first connection created (`MigrateStoreToWorkspaces`).
-const DEFAULT_WORKSPACE: i64 = 1;
-
-/// Make the test identity a super-admin and a member of the default workspace
-/// on BOTH arms, so the epics and packages a scenario creates pass
-/// `CreateEpicInWorkspace` and `WritesRequireSight`. The twin enforces the
-/// workspace rules too. The real store registers a profile when the connection
-/// opens, so the claim is retried until it exists.
-async fn join_default_workspace(
-    real: &SdkReducerCaller,
-    mem: &MemoryReducerCaller,
-    identity: &str,
-) {
+/// Register the test identity's profile on the twin, as the real store does
+/// when the connection opens (`people.allium: RegisterUserProfile`), so a
+/// signalled task marks the same people on both sides.
+async fn register_profiles(_real: &SdkReducerCaller, mem: &MemoryReducerCaller, _identity: &str) {
     mem.register_user_profile();
-    mem.migrate_store_to_workspaces();
-    let claimed = tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            let outcome = real.claim_super_admin().await.unwrap();
-            match outcome {
-                ReducerOutcome::Applied(_) => break,
-                ReducerOutcome::Refused(why) if why.contains("no profile") => {
-                    // Each retry is a round trip to the store, so no timer
-                    // is needed between them; the outer timeout bounds it.
-                    tokio::task::yield_now().await;
-                }
-                ReducerOutcome::Refused(why) => panic!("claim_super_admin refused: {why}"),
-            }
-        }
-    })
-    .await;
-    claimed.expect("the real store registers a profile");
-    mem.claim_super_admin().await.unwrap().applied().unwrap();
-    for caller in [real as &dyn ReducerCaller, mem as &dyn ReducerCaller] {
-        caller
-            .add_member(
-                DEFAULT_WORKSPACE,
-                identity.to_string(),
-                "member".to_string(),
-            )
-            .await
-            .unwrap()
-            .applied()
-            .unwrap();
-    }
 }
 
 fn blank_task_in_epic(epic_id: i64) -> bindings::Task {
@@ -297,7 +257,6 @@ struct LearningShape {
     upvote_count: i64,
     has_last_upvoted_at: bool,
     created_at: chrono::DateTime<chrono::Utc>,
-    workspace_id: i64,
     author: String,
 }
 
@@ -314,7 +273,6 @@ fn learning_shape(l: &dispatch_tui::models::Learning) -> LearningShape {
         upvote_count: l.upvote_count,
         has_last_upvoted_at: l.last_upvoted_at.is_some(),
         created_at: l.created_at,
-        workspace_id: l.workspace_id,
         author: l.author.clone(),
     }
 }
@@ -522,22 +480,14 @@ mod dispatch_requests;
 mod feeds;
 #[path = "memory_caller_conformance/identity_stamping.rs"]
 mod identity_stamping;
-#[path = "memory_caller_conformance/learning_placement.rs"]
-mod learning_placement;
-#[path = "memory_caller_conformance/learning_rating_visibility.rs"]
-mod learning_rating_visibility;
 #[path = "memory_caller_conformance/learning_scope_refs.rs"]
 mod learning_scope_refs;
-#[path = "memory_caller_conformance/loss_of_sight.rs"]
-mod loss_of_sight;
-#[path = "memory_caller_conformance/move_epic.rs"]
-mod move_epic;
 #[path = "memory_caller_conformance/move_paths.rs"]
 mod move_paths;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
-#[path = "memory_caller_conformance/private_moves.rs"]
-mod private_moves;
+#[path = "memory_caller_conformance/repo_group_origin.rs"]
+mod repo_group_origin;
 #[path = "memory_caller_conformance/scenario.rs"]
 mod scenario;
 #[path = "memory_caller_conformance/schedules.rs"]

@@ -153,23 +153,16 @@ struct Rows {
     /// `core.allium: Bookmark`. Arrive scoped to this person by the
     /// `own_bookmarks` view, so nothing here filters by subscriber.
     bookmarks: BTreeMap<String, bindings::Bookmark>,
-    /// `workspaces.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
+    /// `people.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
-    /// `core.allium: Workspace` and `Membership`. Served through the
-    /// `visible_workspaces` and `visible_memberships` views.
-    workspaces: BTreeMap<i64, bindings::Workspace>,
-    memberships: BTreeMap<i64, bindings::Membership>,
-    /// `admin-surfaces.allium: UnseenItemListing`, from the `unseen_items` view: empty
-    /// unless this person is a super-admin. A view row has no primary key, so
-    /// it is keyed by (kind, id), which names one item.
-    unseen_items: BTreeMap<(String, i64), bindings::UnseenItem>,
     settings: BTreeMap<String, bindings::Setting>,
     /// `work-packages.allium`. Packages arrive scoped to their creator by the
     /// subscription's `WHERE created_by = …`; links arrive unfiltered.
     work_packages: BTreeMap<i64, WorkPackage>,
-    /// The raw rows behind `work_packages`, for `retire_work_package`: an
-    /// unknown visibility decodes to Public, so rows differing there decode equal.
+    /// The raw rows behind `work_packages`, for `retire_work_package`: the
+    /// decoded package drops the dead `workspace_id` and `visibility`
+    /// columns, so rows differing there decode equal.
     raw_work_packages: BTreeMap<i64, bindings::WorkPackage>,
     /// Keyed by the store's derived link id.
     work_package_links: BTreeMap<String, WorkPackageLink>,
@@ -279,9 +272,6 @@ impl Rows {
             && self.unseen_tasks.is_empty()
             && self.bookmarks.is_empty()
             && self.user_profiles.is_empty()
-            && self.workspaces.is_empty()
-            && self.memberships.is_empty()
-            && self.unseen_items.is_empty()
             && self.settings.is_empty()
             && self.work_packages.is_empty()
             && self.raw_work_packages.is_empty()
@@ -687,95 +677,9 @@ impl SharedRows {
         self.write(|rows| rows.user_profiles.remove(&identity).is_some());
     }
 
-    pub fn upsert_workspace(&self, row: &bindings::Workspace) {
-        self.write(|rows| {
-            rows.workspaces.insert(row.id, row.clone());
-            true
-        });
-    }
-
-    pub fn remove_workspace(&self, id: i64) {
-        self.write(|rows| rows.workspaces.remove(&id).is_some());
-    }
-
-    pub fn upsert_membership(&self, row: &bindings::Membership) {
-        self.write(|rows| {
-            rows.memberships.insert(row.id, row.clone());
-            true
-        });
-    }
-
-    pub fn remove_membership(&self, id: i64) {
-        self.write(|rows| rows.memberships.remove(&id).is_some());
-    }
-
-    /// A row entered the `unseen_items` view. An update is INSERT(new) then
-    /// DELETE(old) on the same key, so this replaces what is held.
-    pub fn upsert_unseen_item(&self, row: &bindings::UnseenItem) {
-        self.write(|rows| {
-            rows.unseen_items
-                .insert((row.kind.clone(), row.item_id), row.clone());
-            true
-        });
-    }
-
-    /// A row left the `unseen_items` view: removed only while the held row is
-    /// the one that left, so the DELETE of an update never erases the INSERT
-    /// that replaced it (`sync.allium: AViewUpdateNeverErasesTheRow`).
-    pub fn retire_unseen_item(&self, old: &bindings::UnseenItem) {
-        self.write(|rows| {
-            remove_if_held(
-                &mut rows.unseen_items,
-                &(old.kind.clone(), old.item_id),
-                old,
-            )
-        });
-    }
-
-    /// Replace the whole listing. A test double that has no view to push rows
-    /// recomputes the listing after a write and hands it over here.
-    pub fn replace_unseen_items(&self, items: Vec<bindings::UnseenItem>) {
-        self.write(|rows| {
-            let next: BTreeMap<(String, i64), bindings::UnseenItem> = items
-                .into_iter()
-                .map(|i| ((i.kind.clone(), i.item_id), i))
-                .collect();
-            if rows.unseen_items == next {
-                return false;
-            }
-            rows.unseen_items = next;
-            true
-        });
-    }
-
-    /// Every unseen item, ordered by (kind, id). Empty for anyone but a
-    /// super-admin.
-    pub fn unseen_items(&self) -> Vec<bindings::UnseenItem> {
-        self.read(|rows| rows.unseen_items.values().cloned().collect())
-    }
-
-    /// Every workspace, by id.
-    pub fn workspaces(&self) -> Vec<bindings::Workspace> {
-        self.read(|rows| rows.workspaces.values().cloned().collect())
-    }
-
-    /// Every membership, by id.
-    pub fn memberships(&self) -> Vec<bindings::Membership> {
-        self.read(|rows| rows.memberships.values().cloned().collect())
-    }
-
     /// Every profile, by identity: the directory of people.
     pub fn user_profiles(&self) -> Vec<bindings::UserProfile> {
         self.read(|rows| rows.user_profiles.values().cloned().collect())
-    }
-
-    /// Whether `identity` holds the super-admin flag.
-    pub fn is_super_admin(&self, identity: &str) -> bool {
-        self.read(|rows| {
-            rows.user_profiles
-                .get(identity)
-                .is_some_and(|p| p.is_super_admin)
-        })
     }
 
     /// The display name `identity` has set, or `""` when none is set or no
@@ -790,7 +694,7 @@ impl SharedRows {
     }
 
     /// `identity` as a card or tool result names them
-    /// (`workspaces.allium: UserProfile.shown_name`).
+    /// (`people.allium: UserProfile.shown_name`).
     pub fn shown_name_of(&self, identity: &str) -> String {
         self.read(|rows| {
             let name = rows
@@ -1088,14 +992,6 @@ impl SharedRows {
         self.write(|rows| remove_if_held(&mut rows.bookmarks, &old.id, old));
     }
 
-    pub fn retire_workspace(&self, old: &bindings::Workspace) {
-        self.write(|rows| remove_if_held(&mut rows.workspaces, &old.id, old));
-    }
-
-    pub fn retire_membership(&self, old: &bindings::Membership) {
-        self.write(|rows| remove_if_held(&mut rows.memberships, &old.id, old));
-    }
-
     pub fn retire_setting(&self, old: &bindings::Setting) {
         self.write(|rows| remove_if_held(&mut rows.settings, &old.id, old));
     }
@@ -1284,7 +1180,7 @@ impl SharedRows {
     }
 
     /// Every work package, oldest first (by id). `created_by` is the creator
-    /// AS SHOWN (`workspaces.allium: CreatorIsShownByName`): their display
+    /// AS SHOWN (`people.allium: CreatorIsShownByName`): their display
     /// name, or the identity's prefix when they have set none.
     pub fn work_packages(&self) -> Vec<WorkPackage> {
         self.read(|rows| {

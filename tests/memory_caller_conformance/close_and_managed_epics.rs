@@ -37,7 +37,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             .unwrap_or_else(|e| panic!("connect: {e}"));
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -46,7 +46,7 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         let identity = accepted.identity.clone();
 
         let mut woken = rows_real.changed();
@@ -532,15 +532,5 @@ fn memory_caller_closes_tasks_and_provisions_managed_epics_like_the_real_module(
             assert_eq!(managed(&rows_real), managed(&rows_mem));
         }
         assert_eq!(managed(&rows_real).len(), 5);
-        // A managed root is private to its creator (task #98746, V9), on both
-        // sides; its sub-epics inherit that.
-        for rows in [&rows_real, &rows_mem] {
-            assert!(rows
-                .epics()
-                .iter()
-                .filter(|e| e.parent_epic_id.is_none()
-                    && e.feed_role != dispatch_tui::models::FeedRole::None)
-                .all(|e| e.visibility == dispatch_tui::models::Visibility::Private));
-        }
     });
 }

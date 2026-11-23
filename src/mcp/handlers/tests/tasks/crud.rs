@@ -758,7 +758,7 @@ fn create_task_schema_advertises_a_boolean_signal() {
 }
 
 /// A state over a concrete in-memory store the test can also subscribe and read
-/// unseen marks through, with one epic its user sees but does not follow.
+/// unseen marks through, with one epic its user does not follow.
 async fn signal_fixture() -> (Arc<McpState>, Arc<Store>, crate::models::EpicId) {
     let store = Arc::new(Store::open_in_memory().unwrap());
     let (state, _) = state_over(

@@ -1,15 +1,15 @@
-//! People and display names (`workspaces.allium`, "People and display names").
+//! People and display names (`people.allium`).
 
 use super::*;
 
-/// `workspaces.allium: config.display_name_max_length`, in characters.
+/// `people.allium: config.display_name_max_length`, in characters.
 pub const DISPLAY_NAME_MAX_LENGTH: usize = 64;
 
-/// `workspaces.allium: config.identity_prefix_length`.
+/// `people.allium: config.identity_prefix_length`.
 pub const IDENTITY_PREFIX_LENGTH: usize = 8;
 
 /// How a person is named wherever a card or a tool result names them
-/// (`workspaces.allium: UserProfile.shown_name`, `CreatorIsShownByName`): their display
+/// (`people.allium: UserProfile.shown_name`, `CreatorIsShownByName`): their display
 /// name, or the identity's short prefix when they have set none. `pub` so the
 /// board and `MemoryReducerCaller` call it instead of re-slicing an identity.
 pub fn shown_name(display_name: &str, identity: &str) -> String {
@@ -53,8 +53,7 @@ fn is_format_char(c: char) -> bool {
         .any(|&(first, last)| (first..=last).contains(&c))
 }
 
-/// Whether `text` holds a control or invisible formatting character. `pub` so
-/// the workspace-name check refuses the same set.
+/// Whether `text` holds a control or invisible formatting character.
 pub fn has_control_or_format_characters(text: &str) -> bool {
     text.chars().any(|c| c.is_control() || is_format_char(c))
 }
@@ -83,7 +82,7 @@ pub fn validate_display_name(name: &str) -> Result<String, String> {
     Ok(trimmed.to_string())
 }
 
-/// `workspaces.allium: RegisterUserProfile`. Idempotent: every reconnect runs it.
+/// `people.allium: RegisterUserProfile`. Idempotent: every reconnect runs it.
 pub(crate) fn register_user_profile(ctx: &ReducerContext) {
     let identity = caller_identity(ctx);
     if ctx.db.user_profiles().identity().find(&identity).is_none() {
@@ -96,7 +95,7 @@ pub(crate) fn register_user_profile(ctx: &ReducerContext) {
     }
 }
 
-/// `workspaces.allium: SetDisplayName`: the caller sets their own name.
+/// `people.allium: SetDisplayName`: the caller sets their own name.
 #[spacetimedb::reducer]
 pub fn set_display_name(ctx: &ReducerContext, name: String) -> Result<(), String> {
     let name = validate_display_name(&name)?;

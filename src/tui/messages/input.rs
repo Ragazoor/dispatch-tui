@@ -19,7 +19,7 @@ pub enum InputMessage {
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
-    /// `u` on the board (`workspaces.allium: SetOwnNameFromBoard`).
+    /// `u` on the board (`people.allium: SetOwnNameFromBoard`).
     StartSetDisplayName,
     /// Enter in the display-name input.
     SubmitDisplayName(String),
@@ -35,14 +35,6 @@ pub enum InputMessage {
     /// The model step's answer; `None` is Enter, which keeps the draft's
     /// model (CreateTask: ModelPicker, in `docs/specs/tasks.allium`).
     SubmitModel(Option<TaskModel>),
-    /// The person's workspaces, read when a create form opened.
-    WorkspacesLoaded(Vec<crate::models::WorkspaceRef>),
-    /// Space, `h` or `l` at the placement step.
-    PlacementToggleVisibility,
-    /// `j` (+1) or `k` (-1) at the placement step.
-    PlacementMoveWorkspace(isize),
-    /// Enter at the placement step.
-    SubmitPlacement,
     /// `p` at the tag picker: arm the phoenix flag and re-open the same step
     /// for the real tag. Carries no payload — there is no message that DISARMS
     /// the flag, because declining it is simply not pressing `p`
@@ -76,12 +68,6 @@ impl InputMessage {
                 }
                 None => vec![],
             },
-            InputMessage::CancelInput
-                if app.input.mode == crate::tui::types::InputMode::InputAdminText =>
-            {
-                app.cancel_admin_prompt();
-                vec![]
-            }
             InputMessage::CancelInput => forms::cancel_input(
                 &mut app.input,
                 &mut app.interaction,
@@ -113,12 +99,6 @@ impl InputMessage {
                 forms::apply_model(&mut app.input, model);
                 app.finish_task_creation()
             }
-            InputMessage::WorkspacesLoaded(workspaces) => app.handle_workspaces_loaded(workspaces),
-            InputMessage::PlacementToggleVisibility => app.handle_placement_toggle_visibility(),
-            InputMessage::PlacementMoveWorkspace(delta) => {
-                app.handle_placement_move_workspace(delta)
-            }
-            InputMessage::SubmitPlacement => app.handle_submit_placement(),
             InputMessage::ArmPhoenix => {
                 forms::arm_phoenix(&mut app.input, &mut app.status, app.key_table)
             }

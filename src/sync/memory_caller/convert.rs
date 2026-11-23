@@ -56,17 +56,6 @@ impl From<crate::models::BackgroundWork> for module::BackgroundWork {
 }
 
 mirror!(
-    module::UnseenItem,
-    bindings::UnseenItem {
-        kind,
-        item_id,
-        workspace_id,
-        creator,
-        created_at,
-    }
-);
-
-mirror!(
     module::Task,
     bindings::Task {
         id,
@@ -254,28 +243,6 @@ mirror!(
         identity,
         display_name,
         is_super_admin,
-        created_at
-    }
-);
-
-mirror!(
-    module::Workspace,
-    bindings::Workspace {
-        id,
-        name,
-        created_by,
-        created_at,
-        listed
-    }
-);
-
-mirror!(
-    module::Membership,
-    bindings::Membership {
-        id,
-        workspace_id,
-        user,
-        role,
         created_at
     }
 );

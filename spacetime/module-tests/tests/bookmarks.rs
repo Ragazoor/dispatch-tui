@@ -78,22 +78,16 @@ fn a_done_task_cannot_be_bookmarked() {
     assert!(bookmarks_for(&store, "alice").is_empty());
 }
 
-/// A task the caller cannot see is refused as a missing one.
+/// A missing task is refused; another person's task is not (R2).
 #[test]
-fn an_unseen_or_missing_task_is_refused() {
+fn a_missing_task_is_refused_and_anyone_may_bookmark_a_task() {
     let store = Store::new();
     let epic = store.create_epic("alice", "mine", false);
-    store
-        .call("alice", |ctx| {
-            set_epic_visibility(ctx, epic, VISIBILITY_PRIVATE.into())
-        })
-        .expect("set_epic_visibility");
-    store.enrol("bob");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
-    assert!(set(&store, "bob", task, true).is_err());
     assert!(set(&store, "bob", 9_999, true).is_err());
-    assert!(bookmarks_for(&store, "bob").is_empty());
+    set(&store, "bob", task, true).expect("bob bookmarks alice's task");
+    assert_eq!(bookmarks_for(&store, "bob"), vec![task]);
 }
 
 /// Reaching Done ends every person's bookmark on the task.
@@ -173,38 +167,6 @@ fn closing_a_task_ends_its_bookmarks_and_unseen_marks() {
     assert_eq!(store.task(task).status, "done");
     assert!(store.db().bookmarks().iter().next().is_none());
     assert!(store.db().unseen_tasks().iter().next().is_none());
-}
-
-/// A person removed from the workspace loses their bookmarks in it
-/// (`workspaces.allium: RemoveMember`); nobody else's.
-#[test]
-fn removing_a_member_drops_their_bookmarks_in_the_workspace() {
-    let store = Store::new();
-    store
-        .call("root", |ctx| {
-            stamp_rules_version_on_connect(ctx);
-            claim_super_admin(ctx)
-        })
-        .expect("claim");
-    let epic = store.create_epic("alice", "E", false);
-    store.enrol("bob");
-    let task = store.create("alice", epic_task("t", epic, "backlog"));
-    set(&store, "alice", task, true).expect("set");
-    set(&store, "bob", task, true).expect("set");
-    let bob = store
-        .db()
-        .memberships()
-        .iter()
-        .find(|m| m.user == identity_of("bob"))
-        .expect("membership")
-        .id;
-
-    store
-        .call("root", |ctx| remove_member(ctx, bob))
-        .expect("remove_member");
-
-    assert!(bookmarks_for(&store, "bob").is_empty());
-    assert_eq!(bookmarks_for(&store, "alice"), vec![task]);
 }
 
 /// B5: the store's own identity (the operator) is no exception. A bookmark is

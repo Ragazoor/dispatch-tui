@@ -310,11 +310,14 @@ pub fn create_epic_row(
         None,
         None,
         None,
-        (0, crate::models::Visibility::Public),
         created_by,
         now,
     )
 }
+
+/// What a new epic or work package writes into the dead `visibility` column:
+/// the column's default (`spacetime-seed.allium: SharedTable`).
+const DEAD_VISIBILITY: &str = "public";
 
 /// [`create_epic_row`] carrying the optional birth configuration, so an epic
 /// is created fully formed in one write. `feed_command: None` and
@@ -327,11 +330,9 @@ pub fn create_epic_row_with(
     sort_order: Option<i64>,
     feed_command: Option<&str>,
     feed_interval_secs: Option<i64>,
-    placement: (i64, crate::models::Visibility),
     created_by: &str,
     now: &str,
 ) -> bindings::Epic {
-    let (workspace_id, visibility) = placement;
     bindings::Epic {
         id: 0,
         title: title.to_string(),
@@ -354,10 +355,9 @@ pub fn create_epic_row_with(
         // the `own_epics` view can find it before
         // anyone follows it. `core.allium: Epic.created_by`.
         created_by: created_by.to_string(),
-        // `workspaces.allium: CreateEpicInWorkspace`. A sub-epic names its
-        // parent's workspace, which the store would use whatever this said.
-        workspace_id,
-        visibility: visibility.as_str().to_string(),
+        // Dead columns (`spacetime-seed.allium: SharedTable`): their defaults.
+        workspace_id: 0,
+        visibility: DEAD_VISIBILITY.to_string(),
         // Stamped by the module with the caller; never client-named.
         feed_command_set_by: String::new(),
     }
@@ -391,11 +391,9 @@ pub fn epic_patch(patch: &crate::models::EpicPatch<'_>) -> bindings::EpicPatch {
 pub fn create_work_package_row(
     title: &str,
     description: &str,
-    placement: (i64, crate::models::Visibility),
     created_by: &str,
     now: &str,
 ) -> bindings::WorkPackage {
-    let (workspace_id, visibility) = placement;
     bindings::WorkPackage {
         id: 0,
         title: title.trim().to_string(),
@@ -404,8 +402,9 @@ pub fn create_work_package_row(
         created_by: created_by.to_string(),
         created_at: now.to_string(),
         updated_at: now.to_string(),
-        workspace_id,
-        visibility: visibility.as_str().to_string(),
+        // Dead columns (`spacetime-seed.allium: SharedTable`): their defaults.
+        workspace_id: 0,
+        visibility: DEAD_VISIBILITY.to_string(),
     }
 }
 
@@ -474,8 +473,8 @@ pub fn feed_ingest_item(
 
 /// Build the row `create_learning`'s reducer inserts.
 ///
-/// No `owner`/`created_by` to stamp: a learning's visibility is governed
-/// entirely by its own `scope`/`scope_ref`, not by who created it — see
+/// No `owner`/`created_by` to stamp: which dispatches receive a learning is
+/// decided by its own `scope`/`scope_ref`, not by who created it — see
 /// `docs/specs/learnings.allium`'s Storage Backend section.
 pub fn create_learning_row(
     row: &crate::models::CreateLearningRow<'_>,
@@ -496,8 +495,8 @@ pub fn create_learning_row(
         created_at: now.to_string(),
         updated_at: now.to_string(),
         embedding: row.embedding.map(<[u8]>::to_vec),
-        // Placed by the store (`workspaces.allium: LearningVisibility`), which
-        // overwrites both whatever is sent.
+        // `workspace_id` is a dead column; the store stamps `author` with the
+        // caller (`store-split.allium: IdentitiesAreTheCallers`).
         workspace_id: 0,
         author: String::new(),
     }

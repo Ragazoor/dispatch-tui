@@ -212,8 +212,7 @@ impl MemoryReducerCaller {
         let mut tables = self.lock();
         self.acting_for(&tables, requester)?;
         module::validate_dispatch_origin(origin)?;
-        let scope = self.scope();
-        let Some(row) = tables.visible_task(&scope, task_id) else {
+        let Some(row) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} no longer exists"));
         };
         let has_open = tables

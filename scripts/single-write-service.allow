@@ -2,7 +2,6 @@
 # N is the exact write count (see scripts/check-single-write-service.sh).
 # Each call site must be an exclusive branch or an idempotent retry, never two
 # writes that both land for one logical change.
-src/service/people.rs::set_member  3  exclusive match arms: remove OR set role
 src/service/tasks/crud.rs::create_task_inner  2  if/else: signalled OR plain create
 src/service/tasks/crud.rs::record_hook_event  4  exclusive match arms per hook kind
 src/service/tasks/crud.rs::record_subagent_event  3  exclusive match arms per event

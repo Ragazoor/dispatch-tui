@@ -146,6 +146,14 @@ impl SharedTable {
         }
     }
 
+    /// Whether a restore or an import writes none of this table's rows: the
+    /// dead `workspaces` and `memberships` tables (`spacetime-seed.allium:
+    /// SharedTable`, `RestoreSnapshot`, `ImportOldStore`). A dump still
+    /// carries them, so a snapshot stays complete.
+    pub fn restore_ignores(self) -> bool {
+        matches!(self, SharedTable::Workspaces | SharedTable::Memberships)
+    }
+
     /// The column holding a generated id, for the tables that have one.
     ///
     /// Part of the shared domain is identified by something the store never
@@ -345,8 +353,8 @@ impl SharedTable {
                 ("completed_at", S),
                 // The epic twin of `Task.created_by` above.
                 ("created_by", S),
-                // The workspace it lives in (`core.allium: Epic.workspace`);
-                // 0 is "none yet", as the store spells every absent id.
+                // A dead column (`spacetime-snapshot.allium: SentinelColumn`);
+                // 0 is absent, as the store spells every absent id.
                 ("workspace_id", Z),
             ],
             SharedTable::Todos => &[
@@ -388,10 +396,10 @@ impl SharedTable {
             SharedTable::Agents => &[("ended_at", S), ("end_reason", S), ("tmux_window", S)],
             // The package twin of `Epic.created_by` above: the board
             // subscribes by it, so it cannot be optional.
-            // `workspace_id`: the package's workspace, absent as 0.
+            // `workspace_id`: a dead column, absent as 0.
             SharedTable::WorkPackages => &[("created_by", S), ("workspace_id", Z)],
-            // A user-scoped learning has no workspace
-            // (`core.allium: Learning.workspace`), which the store spells 0.
+            // A dead column (`spacetime-snapshot.allium: SentinelColumn`),
+            // absent as 0.
             SharedTable::Learnings => &[("workspace_id", Z)],
         }
     }

@@ -548,9 +548,7 @@ surface NamesForPeople {
         -- name, or by its title when it has none yet, and an epic by its
         -- title. None shows a bare `#<id>` or `task <id>`: "Bookmarked
         -- nevena2", not "Bookmarked #99056"; "Auto-dispatch of nevena2
-        -- failed — epic Dispatch stalled", not "#99056 … epic #314". The
-        -- unseen-items admin view is the one exception: it shows ids and no
-        -- titles on purpose (admin-surfaces.allium). Exact wording is each
+        -- failed — epic Dispatch stalled", not "#99056 … epic #314". Exact wording is each
         -- message's own spec.
 
     @guarantee McpRepliesNameWhatTheyTouch

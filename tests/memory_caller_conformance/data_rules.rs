@@ -39,7 +39,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         // (`created_by = identity`), so the twin writes as the same identity.
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
-            .with_workspace_rules();
+            .with_identity_rules();
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -48,7 +48,7 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
         let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
-        join_default_workspace(&real, &mem, &accepted.identity).await;
+        register_profiles(&real, &mem, &accepted.identity).await;
         // Repo-path writes act for a host the caller owns.
         for host in ["host-a", "host-b"] {
             for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
@@ -515,36 +515,17 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         let missing_epic = EpicId(9_999_999);
         // -- update_epic: a refused part leaves the title unchanged -------------
         let before = rows_real.epic(EpicId(other)).unwrap().title;
-        let rename_and_hide = || bindings::EpicPatch {
+        // A rename under a missing parent: the parent half is refused.
+        let rename_and_move = || bindings::EpicPatch {
             title: Some("never written".into()),
+            parent_epic_id: Some(9_999_999),
             ..blank_epic_patch()
         };
         let why = refused(
-            real.update_epic(
-                EpicId(other),
-                rename_and_hide(),
-                None,
-                Some("secret".into()),
-            )
-            .await
-            .unwrap(),
-            mem.update_epic(
-                EpicId(other),
-                rename_and_hide(),
-                None,
-                Some("secret".into()),
-            )
-            .await
-            .unwrap(),
-        );
-        assert!(why.contains("visibility"), "{why}");
-        same_epic(other);
-        assert_eq!(rows_real.epic(EpicId(other)).unwrap().title, before);
-        let why = refused(
-            real.update_epic(EpicId(other), rename_and_hide(), Some(9_999_999), None)
+            real.update_epic(EpicId(other), rename_and_move())
                 .await
                 .unwrap(),
-            mem.update_epic(EpicId(other), rename_and_hide(), Some(9_999_999), None)
+            mem.update_epic(EpicId(other), rename_and_move())
                 .await
                 .unwrap(),
         );
@@ -552,10 +533,10 @@ fn memory_caller_enforces_the_same_data_rules_as_the_real_reducers() {
         same_epic(other);
         assert_eq!(rows_real.epic(EpicId(other)).unwrap().title, before);
         let why = refused(
-            real.update_epic(missing_epic, blank_epic_patch(), None, None)
+            real.update_epic(missing_epic, blank_epic_patch())
                 .await
                 .unwrap(),
-            mem.update_epic(missing_epic, blank_epic_patch(), None, None)
+            mem.update_epic(missing_epic, blank_epic_patch())
                 .await
                 .unwrap(),
         );

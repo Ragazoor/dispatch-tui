@@ -15,7 +15,8 @@
 --           Placement" — this spec reuses it); the epic view and its trail
 --           (epics.allium, "Epic Navigation"); the board filters
 --           (board-layout.allium); the store's subscription mechanics
---           (sync.allium); who may see and write a package (workspaces.allium).
+--           (sync.allium); the creator stamp (store-split.allium:
+--           IdentitiesAreTheCallers).
 -- Dependencies: Task, Epic, TaskStatus, UserIdentity from core.allium.
 --
 -- Decisions taken with the user:
@@ -43,7 +44,6 @@
 --     longer want it. There is no archive.
 
 use "./core.allium" as core
-use "./workspaces.allium" as workspaces
 use "./board-layout.allium" as board_layout
 
 ------------------------------------------------------------
@@ -60,18 +60,12 @@ entity WorkPackage {
     title: String               -- non-empty after trimming
     description: String         -- free text, may be empty; holds the plan for the window
     sort_order: Integer?        -- manual ordering of the package's card, and nothing else; lower sorts first via sort_order ?? id (null falls back to the package id). Written by ReorderPackage and by the work-package_update tool
-    created_by: core/UserIdentity    -- stamped once, never rewritten; required (a create with no settled identity is refused). The board receives every package visible_to it (workspaces.allium: SetWorkPackageVisibility)
-    workspace: core/Workspace         -- the workspace this package lives in; chosen at creation and never moved (CreateWorkPackage)
-    visibility: core/Visibility = public  -- chosen at creation, changeable afterwards (workspaces.allium: SetWorkPackageVisibility)
+    created_by: core/UserIdentity    -- stamped once with the caller, never rewritten; required (a create with no settled identity is refused). The board receives the packages its identity created (sync.allium: own_packages)
     created_at: Timestamp
     updated_at: Timestamp
 
-    -- Whether `user` can see this package (workspaces.allium:
-    -- WorkPackageVisibility). Seeing a package never reveals a linked item
-    -- the viewer cannot see on its own: the package view shows only linked
-    -- items that are themselves visible_to the viewer.
-    visible_to(user): workspace.has_member(user)
-                      and (visibility = public or created_by = user)
+    -- The store's work_packages table also has workspace_id and visibility
+    -- columns: dead schema, written as their defaults and never read.
 
     links: WorkPackageLink with work_package = this
     linked_tasks: links where kind = task -> task
@@ -124,23 +118,18 @@ entity WorkPackageLink {
 -- A title is stored trimmed, and a blank one is refused.
 
 -- Creates the package and links the given items, in one store transaction:
--- every item is checked before the first write, so a link to an unknown,
--- unseen or out-of-workspace item refuses the whole create and no package is
--- left behind (workspaces.allium: LinkOnlyInsideTheWorkspace).
+-- every item is checked before the first write, so a link to an unknown
+-- item refuses the whole create and no package is left behind.
 rule CreateWorkPackage {
-    when: CreateWorkPackage(title, description, creator, workspace, visibility, items)
+    when: CreateWorkPackage(title, description, creator, items)
 
     requires: trimmed(title) != ""
-    -- A package is created only in a workspace its creator belongs to.
-    requires: workspace.has_member(creator)
 
     ensures:
         let package = WorkPackage.created(
             title: trimmed(title),
             description: description,
             created_by: creator,
-            workspace: workspace,
-            visibility: visibility,
             created_at: now,
             updated_at: now
         )
@@ -172,33 +161,23 @@ rule UpdateWorkPackage {
 }
 
 rule UpdateWorkPackageIsOneTransaction {
-    when: WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+    when: WorkPackageUpdateRequested(package, patch, unlink, link)
 
-    -- update_work_package_with_links takes the visibility change too: the
-    -- patch, the visibility, every unlink and every link are one transaction.
-    -- The visibility's refusals (an unknown value, a caller who is neither the
-    -- creator nor an admin) are raised before the first write, so a refused
-    -- visibility leaves the title, the links and the package as they were.
+    -- update_work_package_with_links runs the patch, every unlink and every
+    -- link as one transaction.
     requires: exists package
 
     ensures:
         if patch.title != null or patch.description != null or patch.sort_order != null:
             UpdateWorkPackage(package, patch.title, patch.description, patch.sort_order)
     ensures:
-        if visibility != null:
-            workspaces/SetWorkPackageVisibility(package, visibility)
-            package.updated_at = now
-    ensures:
         for item in unlink: UnlinkItem(package, item)
     ensures:
         for item in link: LinkItem(package, item)
 
     @guidance
-        -- Unlinks run before links. Every link is checked
-        -- (workspaces.allium: LinkOnlyInsideTheWorkspace) against the package
-        -- as it was before the call, so an admin who makes a package private
-        -- in the same call still links. A link-only or unlink-only call leaves
-        -- updated_at alone: only the patch and the visibility touch it.
+        -- Unlinks run before links. A link-only or unlink-only call leaves
+        -- updated_at alone: only the patch touches it.
 }
 
 -- J/K on a package card moves it among the package cards of its column.
@@ -301,15 +280,11 @@ rule UnlinkItem {
     let existing = WorkPackageLink{work_package: package, item: item}
 
     ensures:
-        if exists existing and item.visible_to(caller()): not exists existing
+        if exists existing: not exists existing
 
     @guidance
         -- Idempotent: unlinking an item that is not linked is a silent
-        -- success. The task or epic itself is never touched.
-        -- An item the caller cannot see is treated as not linked, so the
-        -- unlink does nothing (workspaces.allium: WritesRequireSight,
-        -- UnseenIsAsMissing): a caller can neither remove a link they are
-        -- not shown nor learn from the answer that one exists. This holds
+        -- success. The task or epic itself is never touched. This holds
         -- for unlink_work_package_item and for the unlink lists of
         -- update_work_package_with_links alike.
 }
@@ -379,17 +354,15 @@ rule EnterEpicFromPackage {
 -- == Linking and managing packages from the board ==
 
 rule CreatePackageFromPicker {
-    when: UserCreatesPackageInPicker(title, item, workspace, visibility)
+    when: UserCreatesPackageInPicker(title, item)
 
     requires: trimmed(title) != ""
 
     ensures:
-        CreateWorkPackage(title, "", caller(), workspace, visibility, {item})
+        CreateWorkPackage(title, "", caller(), {item})
 
     @guidance
-        -- An empty title creates nothing and returns to the picker. The
-        -- workspace and visibility are the form's (workspaces.allium:
-        -- NameWorkspaceAndVisibilityFromBoard).
+        -- An empty title creates nothing and returns to the picker.
 }
 
 rule RenamePackageFromBoard {
@@ -424,7 +397,7 @@ rule DeletePackageFromBoard {
 --
 -- Replies name what they touch (mcp-task-tools.allium:
 -- RepliesNameWhatTheyTouch). Every reply that names a package says
--- `Work package <id> ("<title>")`: `<package> created in workspace ...`,
+-- `Work package <id> ("<title>")`: `<package> created`,
 -- `<package> updated (fields)`, `<package> deleted; ...`. An unlink that
 -- touched nothing is listed as `not linked: <task ref>` or
 -- `not linked: <epic ref>`; an item the store does not hold stays `task 4` or
@@ -432,7 +405,7 @@ rule DeletePackageFromBoard {
 --
 -- A missing package id is not-found on search and delete, and a refusal
 -- ("no work package N", invalid params) on a create or update, which the
--- store decides; so is the id of a package the caller cannot see. A link to
+-- store decides. A link to
 -- a task or epic id that does not exist is refused the same way, and nothing
 -- in that call is written: the store validates every id before the first
 -- write. A repeated id in one list is one write.
@@ -441,18 +414,14 @@ rule DeletePackageFromBoard {
 -- name.
 
 rule CreateWorkPackageViaMcp {
-    when: McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?,
-                                workspace_id, visibility?)
+    when: McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?)
 
     ensures:
         CreateWorkPackage(title, description ?? "", caller(),
-                          core/Workspace{id: workspace_id}, visibility ?? public,
                           items(link_task_ids, link_epic_ids))
 
     @guidance
-        -- Returns the new package id. workspace_id is required: there is no
-        -- default workspace (workspaces.allium, "Naming a workspace and a
-        -- visibility from the board").
+        -- Returns the new package id.
 }
 
 rule ListWorkPackagesViaMcp {
@@ -478,17 +447,16 @@ rule ListWorkPackagesViaMcp {
         -- == updated_after and updated_before narrow the list ==
         -- They bound WorkPackage.updated_at, with the input form, the
         -- inclusive after, the exclusive before and the errors of
-        -- mcp-task-tools.allium: TimeFilterInput. ANDed with visibility: a
-        -- package the caller cannot see is never listed. There is no
+        -- mcp-task-tools.allium: TimeFilterInput. There is no
         -- completed_* pair here: a package has no completed_at, and its
         -- card is Done only as a result of its linked tasks
         -- (PackageCardPlacement), so there is no completion time to bound.
         -- created_at and updated_at are already in every row; they are
         -- shown as ISO 8601 UTC with a Z suffix.
-        -- Every package the board holds (the ones visible to the caller), or
+        -- Every package the board holds, or
         -- the one named: id, title, description (omitted when empty),
         -- sort_order (omitted when unset), created_at, updated_at, its
-        -- creator (CreatorIsShownByName), workspace and visibility, and its
+        -- creator (people.allium: CreatorIsShownByName), and its
         -- linked items, each with kind, id, title and status. A link whose
         -- item this board does not hold is left out. A task item reads
         -- `- task <id> [<status>] <name>: <title>`, the display name left
@@ -500,14 +468,12 @@ rule ListWorkPackagesViaMcp {
 rule UpdateWorkPackageViaMcp {
     when: McpWorkPackageUpdate(package, title?, description?, sort_order?,
                                link_task_ids?, unlink_task_ids?,
-                               link_epic_ids?, unlink_epic_ids?,
-                               visibility?)
+                               link_epic_ids?, unlink_epic_ids?)
 
     -- A call that names no field is refused before anything is written.
     requires: title != null or description != null or sort_order != null
               or link_task_ids != null or unlink_task_ids != null
               or link_epic_ids != null or unlink_epic_ids != null
-              or visibility != null
     -- So is an id that appears in both a link and an unlink list.
     requires: link_task_ids = null or unlink_task_ids = null
               or not link_task_ids.any(t => t in unlink_task_ids)
@@ -518,7 +484,6 @@ rule UpdateWorkPackageViaMcp {
         WorkPackageUpdateRequested(
             package,
             patch: { title: title, description: description, sort_order: sort_order },
-            visibility: visibility,
             unlink: items(unlink_task_ids, unlink_epic_ids),
             link: items(link_task_ids, link_epic_ids)
         )
@@ -527,9 +492,7 @@ rule UpdateWorkPackageViaMcp {
         -- One store transaction (UpdateWorkPackageIsOneTransaction): the
         -- patch, then every unlink, then every link. UnlinkItem stays
         -- idempotent, but the reply names each requested unlink that was not
-        -- linked, so the caller can tell that nothing changed for it. The
-        -- store leaves a link to an item the caller cannot see in place, as
-        -- if it were not linked (UnlinkItem).
+        -- linked, so the caller can tell that nothing changed for it.
         -- An empty list is the same as leaving the list out: a call whose
         -- only field is `link_task_ids: []` names no field.
         -- The tool is declared idempotent: it no longer has a delete form
@@ -657,10 +620,7 @@ surface PackageCardPlacement {
         -- done; "no items" when it holds none.
         -- When the package has a creator, the line ends " · by <creator>",
         -- the creator shown by display name or identity prefix
-        -- (workspaces.allium: CreatorIsShownByName), then " · private" for a
-        -- private package. V on a package card toggles that visibility
-        -- (workspaces.allium: SetWorkPackageVisibility); the status bar
-        -- hints do not list it.
+        -- (people.allium: CreatorIsShownByName).
         -- A package card is a view onto work counted elsewhere, so the
         -- column header's card count does not include it, select-all and
         -- multi-select skip it, and H/L do nothing on it. J/K moves it among
@@ -717,8 +677,7 @@ surface PackageViewCards {
 }
 
 -- `w` on a task card or an epic card, in any view, opens the link picker for
--- that item. The picker lists every package the board holds (the ones
--- visible to it, workspaces.allium), oldest first, each marked linked or not
+-- that item. The picker lists every package the board holds, oldest first, each marked linked or not
 -- linked for this item, plus a final "new package" row.
 surface WorkPackageLinkPicker {
     facing _: core/Operator
@@ -734,9 +693,8 @@ surface WorkPackageLinkPicker {
         -- linked.
         LinkItem(package, item) when not package.links.any(l => l.item = item)
         UnlinkItem(package, item) when package.links.any(l => l.item = item)
-        -- Enter on the "new package" row, then type a title (and the form's
-        -- workspace and visibility).
-        UserCreatesPackageInPicker(title, item, workspace, visibility)
+        -- Enter on the "new package" row, then type a title.
+        UserCreatesPackageInPicker(title, item)
 
     @guidance
         -- Toggling a row links or unlinks at once and keeps the picker open,
@@ -764,7 +722,7 @@ surface WorkPackageWriteReducers {
     facing _: core/StoreClient
 
     provides:
-        WorkPackageUpdateRequested(package, patch, visibility?, unlink, link)
+        WorkPackageUpdateRequested(package, patch, unlink, link)
 }
 
 -- The work-package tools of the dispatch MCP server.
@@ -773,15 +731,13 @@ surface WorkPackageMcpTools {
 
     provides:
         -- work-package_create (CreateWorkPackageViaMcp). Write.
-        McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?,
-                             workspace_id, visibility?)
+        McpWorkPackageCreate(title, description?, link_task_ids?, link_epic_ids?)
         -- work-package_search (ListWorkPackagesViaMcp). Read-only.
         McpWorkPackageSearch(work_package_id?, updated_after?, updated_before?)
         -- work-package_update (UpdateWorkPackageViaMcp). Idempotent.
         McpWorkPackageUpdate(package, title?, description?, sort_order?,
                              link_task_ids?, unlink_task_ids?,
-                             link_epic_ids?, unlink_epic_ids?,
-                             visibility?)
+                             link_epic_ids?, unlink_epic_ids?)
         -- work-package_delete (DeleteWorkPackageViaMcp). Destructive.
         McpWorkPackageDelete(package)
 

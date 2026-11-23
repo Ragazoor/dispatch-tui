@@ -969,7 +969,7 @@ pub(super) fn render_package_item(
         1 => format!("1 item \u{b7} {done} done"),
         n => format!("{n} items \u{b7} {done} done"),
     };
-    // The creator as shown (`workspaces.allium: CreatorIsShownByName`): their
+    // The creator as shown (`people.allium: CreatorIsShownByName`): their
     // display name, or their identity's prefix. `WorkPackage::created_by`
     // already holds it that way.
     let creator = package
@@ -977,15 +977,11 @@ pub(super) fn render_package_item(
         .as_deref()
         .map(|c| format!(" \u{b7} by {c}"))
         .unwrap_or_default();
-    let private = match package.visibility {
-        crate::models::Visibility::Private => " \u{b7} private",
-        crate::models::Visibility::Public => "",
-    };
     let max_line2 = (col_width as usize).saturating_sub(4 + CARD_CHROME_WIDTH);
     let line2 = Line::from(vec![
         Span::raw("    "),
         Span::styled(
-            truncate(&format!("{summary}{creator}{private}"), max_line2),
+            truncate(&format!("{summary}{creator}"), max_line2),
             Style::default().fg(MUTED),
         ),
     ]);

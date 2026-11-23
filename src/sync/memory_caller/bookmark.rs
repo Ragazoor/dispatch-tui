@@ -7,7 +7,7 @@ use dispatch_spacetime_module as module;
 use crate::models::TaskId;
 
 use super::super::writes::ReducerOutcome;
-use super::visibility::Scope;
+use super::identity::Scope;
 use super::{MemoryReducerCaller, Tables, DONE};
 
 impl MemoryReducerCaller {
@@ -40,35 +40,6 @@ impl MemoryReducerCaller {
     ) {
         if module::stamps_completion(&prior.status, &next.status) {
             self.clear_task_marks(tables, next.id);
-        }
-    }
-
-    /// Mirrors the module's `drop_marks_where`; `lost_sight` reads the tables
-    /// as they were before any mark is dropped.
-    pub(super) fn drop_marks_where(
-        &self,
-        tables: &mut Tables,
-        lost_sight: impl Fn(&Tables, i64, &str) -> bool,
-    ) {
-        let unseen: Vec<String> = tables
-            .unseen_tasks
-            .values()
-            .filter(|u| lost_sight(tables, u.task_id, &u.subscriber))
-            .map(|u| u.id.clone())
-            .collect();
-        let bookmarks: Vec<String> = tables
-            .bookmarks
-            .values()
-            .filter(|b| lost_sight(tables, b.task_id, &b.subscriber))
-            .map(|b| b.id.clone())
-            .collect();
-        for id in unseen {
-            tables.unseen_tasks.remove(&id);
-            self.rows.remove_unseen_task(id);
-        }
-        for id in bookmarks {
-            tables.bookmarks.remove(&id);
-            self.rows.remove_bookmark(id);
         }
     }
 
@@ -108,7 +79,7 @@ impl MemoryReducerCaller {
         }
         // The operator is no exception: a bookmark is personal.
         Tables::require_bookmark_owner(scope, subscriber)?;
-        let Some(task) = tables.visible_task(scope, task_id) else {
+        let Some(task) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} does not exist"));
         };
         let status = status.unwrap_or(&task.status);

@@ -48,15 +48,7 @@ pub(in crate::tui) fn start_new_epic(
         ..Default::default()
     });
     status.set("Epic title: ".to_string());
-    // A sub-epic takes its parent's workspace, so only a root epic needs the
-    // person's workspaces for the placement step.
-    if parent_epic_id.is_none() {
-        vec![Command::People(
-            crate::tui::commands::PeopleCommand::LoadWorkspaces,
-        )]
-    } else {
-        vec![]
-    }
+    vec![]
 }
 
 pub(in crate::tui) fn submit_epic_title(
@@ -75,7 +67,6 @@ pub(in crate::tui) fn submit_epic_title(
             title: value,
             description: String::new(),
             parent_epic_id,
-            ..Default::default()
         });
         input.mode = InputMode::InputEpicDescription;
         status.set("Opening editor for description...".to_string());

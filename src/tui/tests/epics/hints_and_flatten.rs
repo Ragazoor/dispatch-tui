@@ -15,7 +15,6 @@ fn epic_edited_splices_all_fields_including_feed_settings() {
         description: Some("New description".to_string()),
         feed_command: Some(Some("gh api repos/x/pulls".to_string())),
         feed_interval_secs: Some(Some(300)),
-        visibility: None,
     };
 
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
@@ -339,11 +338,7 @@ fn description_editor_result_for_epic() {
     let cmds = app.update(Message::Editor(
         crate::tui::messages::EditorMessage::DescriptionResult("epic desc\nline 2".to_string()),
     ));
-    // The description leads to the workspace and visibility step; Enter there
-    // completes creation.
-    assert_eq!(app.input.mode, InputMode::InputPlacement);
-    assert!(cmds.is_empty());
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    // The description completes creation.
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(cmds.iter().any(|c| matches!(
         c,

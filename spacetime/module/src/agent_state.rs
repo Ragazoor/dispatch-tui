@@ -153,7 +153,7 @@ pub fn feed_setter(epic: &Epic) -> &str {
 
 /// `feeds.allium: FeedCommandRunsOnSettersHost`, as a refusal: a feed epic is
 /// claimed only by a host whose owner set its command. An epic with no
-/// command is nobody's to run, so any host that sees it may claim. The same
+/// command is nobody's to run, so any host may claim it. The same
 /// answer for the module and the in-memory store.
 pub fn check_feed_claim_by(epic: &Epic, host_owner: &str) -> Result<(), String> {
     if epic.feed_command.is_empty() || (!host_owner.is_empty() && host_owner == feed_setter(epic)) {
@@ -166,18 +166,19 @@ pub fn check_feed_claim_by(epic: &Epic, host_owner: &str) -> Result<(), String> 
     }
 }
 
-/// `feeds.allium: ClaimPollOwner`/`OverridePollOwner`: the caller must
-/// see the scope (an unseen one is "does not exist", never which), and a feed
-/// epic may only be claimed for its setter. Checked after the host check, so
+/// `feeds.allium: ClaimPollOwner`/`OverridePollOwner`: the scope must exist,
+/// and a feed epic may only be claimed for its setter. Checked after the host check, so
 /// the caller is the host's owner.
 fn require_claimable_scope(ctx: &ReducerContext, scope: &str, scope_id: i64) -> Result<(), String> {
     if scope == POLL_SCOPE_TASK {
-        visible_task(ctx, scope_id).ok_or_else(|| format!("task {scope_id} does not exist"))?;
+        ctx.db
+            .tasks()
+            .id()
+            .find(scope_id)
+            .ok_or_else(|| format!("task {scope_id} does not exist"))?;
         return Ok(());
     }
-    let epic =
-        visible_epic(ctx, scope_id).ok_or_else(|| format!("epic {scope_id} does not exist"))?;
-    check_feed_claim_by(&epic, &caller_identity(ctx))
+    check_feed_claim_by(&require_epic(ctx, scope_id)?, &caller_identity(ctx))
 }
 
 /// Claim an unowned scope. `core.allium: PollOwner`. Only the host's owner
@@ -358,10 +359,10 @@ pub fn subagent_start(
     session_id: String,
     started_at: String,
 ) -> Result<(), String> {
-    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_hook_task(ctx, task_id)? else {
+    // A missing task writes nothing.
+    if hook_task(ctx, task_id)?.is_none() {
         return Ok(());
-    };
+    }
     // A hook for a task with no current agent writes no agent fact (A15).
     let Some(owner) = current_agent(&AgentTables(ctx), task_id) else {
         return Ok(());
@@ -390,10 +391,10 @@ pub fn subagent_stop(
     agent_id: String,
     session_id: String,
 ) -> Result<(), String> {
-    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_hook_task(ctx, task_id)? else {
+    // A missing task writes nothing.
+    if hook_task(ctx, task_id)?.is_none() {
         return Ok(());
-    };
+    }
     fence_subagent_session(ctx, task_id, &session_id);
     delete_subagent_entry(ctx, task_id, &agent_id);
     sync_subagent_count(ctx, task_id)?;
@@ -415,8 +416,8 @@ pub fn subagent_stop(
 /// the task's host may make it, as for every hook write: it applies a Stop.
 #[spacetimedb::reducer]
 pub fn subagent_clear(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
-    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    if visible_hook_task(ctx, task_id)?.is_none() {
+    // A missing task writes nothing; any other needs the caller to act for its host.
+    if hook_task(ctx, task_id)?.is_none() {
         return Ok(());
     }
     delete_all_subagents(ctx, task_id);
@@ -436,10 +437,10 @@ pub fn subagent_clear_and_void_pending_stop(
     ctx: &ReducerContext,
     task_id: i64,
 ) -> Result<(), String> {
-    // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    let Some(row) = visible_hook_task(ctx, task_id)? else {
+    // A missing task writes nothing.
+    if hook_task(ctx, task_id)?.is_none() {
         return Ok(());
-    };
+    }
     delete_all_subagents(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
     update_current_agent(&mut AgentTables(ctx), task_id, |agent| Agent {
@@ -464,7 +465,7 @@ pub fn try_record_stop(
     stop_pending_at: String,
     background: BackgroundWork,
 ) -> Result<(), String> {
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} not found"));
     };
     if row.status != RUNNING {
@@ -517,10 +518,10 @@ pub fn validate_task_host_acting_for(
     validate_host_acting_for(host, task_host, caller)
 }
 
-/// A hook's task: the visible row, once the caller is shown to act for its
-/// host. `None` for a task this caller cannot see (`UnseenIsAsMissing`).
-fn visible_hook_task(ctx: &ReducerContext, id: i64) -> Result<Option<Task>, String> {
-    let Some(row) = visible_task(ctx, id) else {
+/// A hook's task: the row, once the caller is shown to act for its host.
+/// `None` for a missing task.
+fn hook_task(ctx: &ReducerContext, id: i64) -> Result<Option<Task>, String> {
+    let Some(row) = ctx.db.tasks().id().find(id) else {
         return Ok(None);
     };
     require_acting_for_task_host(ctx, &row)?;
@@ -560,7 +561,7 @@ pub fn expire_background_wait(
     // Not the argument: see above.
     let _ = now;
     let cutoff = background_wait_cutoff(&crate::support::now(ctx))?;
-    let Some(row) = visible_hook_task(ctx, id)? else {
+    let Some(row) = hook_task(ctx, id)? else {
         return Ok(());
     };
     let Some(agent) = current_agent(&AgentTables(ctx), id) else {
@@ -598,7 +599,7 @@ pub fn record_pre_tool_use(
     sub_status: String,
     at: String,
 ) -> Result<(), String> {
-    let Some(row) = visible_hook_task(ctx, id)? else {
+    let Some(row) = hook_task(ctx, id)? else {
         return Ok(());
     };
     if row.status != RUNNING {
@@ -630,7 +631,7 @@ pub fn record_notification(
     if mode == "ignore" {
         return Ok(());
     }
-    let Some(row) = visible_hook_task(ctx, id)? else {
+    let Some(row) = hook_task(ctx, id)? else {
         return Ok(());
     };
     if row.status != RUNNING {
@@ -705,7 +706,7 @@ pub fn record_user_prompt_submit(
     activity_at: String,
     prompt_at: String,
 ) -> Result<(), String> {
-    let Some(row) = visible_hook_task(ctx, id)? else {
+    let Some(row) = hook_task(ctx, id)? else {
         return Err(format!("task {id} not found"));
     };
     if row.status != RUNNING && row.status != REVIEW {
@@ -748,7 +749,7 @@ pub fn mark_pr_learnings_gate_shown(
     id: i64,
     at: String,
 ) -> Result<(), String> {
-    let Some(row) = visible_task(ctx, id) else {
+    let Some(row) = ctx.db.tasks().id().find(id) else {
         return Err(format!("task {id} not found"));
     };
     if !row.pr_learnings_gate_shown_at.is_empty() {

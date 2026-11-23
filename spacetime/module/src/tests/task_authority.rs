@@ -1,6 +1,6 @@
 //! No public reducer inserts a client-built task without the aim check and the
 //! identity stamp `create_task` runs (`tasks.allium: PhoenixRespawn`,
-//! `workspaces.allium`: "Identities are the caller's").
+//! `store-split.allium: IdentitiesAreTheCallers`).
 //!
 //! A source scan: a `ReducerContext` cannot be built inside this crate, and the
 //! rule is about every reducer that will ever exist, so the test reads the

@@ -10,17 +10,17 @@ use crate::spacetime::bindings;
 
 use super::super::encode;
 use super::super::writes::ReducerOutcome;
-use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC, POLL_SCOPE_TASK};
+use super::{MemoryReducerCaller, Tables, POLL_SCOPE_EPIC};
 
 impl MemoryReducerCaller {
     /// Mirrors the module's `release_poll_claims`: drop every epic-scoped
     /// claim on an epic in `epics` held by a host whose owner
-    /// `loses_sight(epic_id, owner)`.
+    /// `releases(owner)`.
     pub(super) fn release_poll_claims(
         &self,
         tables: &mut Tables,
         epics: &std::collections::HashSet<i64>,
-        loses_sight: impl Fn(i64, &str) -> bool,
+        releases: impl Fn(&str) -> bool,
     ) {
         let stale: Vec<i64> = tables
             .poll_owners
@@ -30,7 +30,7 @@ impl MemoryReducerCaller {
                 tables
                     .hosts
                     .get(&p.host)
-                    .is_some_and(|h| loses_sight(p.scope_id, &h.owner))
+                    .is_some_and(|h| releases(&h.owner))
             })
             .map(|p| p.id)
             .collect();
@@ -38,142 +38,6 @@ impl MemoryReducerCaller {
             tables.poll_owners.remove(&row_id);
             self.rows.remove_poll_owner(row_id);
         }
-    }
-
-    /// Mirrors the module's `release_task_poll_claims` (M10): drop every
-    /// task-scoped claim on a task of an epic in `epics` held by a host whose
-    /// owner `loses_sight(epic_id, owner)` of the task's epic.
-    pub(super) fn release_task_poll_claims(
-        &self,
-        tables: &mut Tables,
-        epics: &std::collections::HashSet<i64>,
-        loses_sight: impl Fn(i64, &str) -> bool,
-    ) {
-        let stale: Vec<i64> = tables
-            .poll_owners
-            .values()
-            .filter(|p| p.scope == POLL_SCOPE_TASK)
-            .filter_map(|p| {
-                let epic_id = tables.tasks.get(&p.scope_id)?.epic_id;
-                let owner = &tables.hosts.get(&p.host)?.owner;
-                (epics.contains(&epic_id) && loses_sight(epic_id, owner)).then_some(p.id)
-            })
-            .collect();
-        for row_id in stale {
-            tables.poll_owners.remove(&row_id);
-            self.rows.remove_poll_owner(row_id);
-        }
-    }
-
-    /// Mirrors the module's `release_claims_without_sight`
-    /// (`workspaces.allium: ClaimsFollowSight`): the one helper every
-    /// loss-of-sight path calls once its change is written. Epic-scoped and
-    /// task-scoped claims both.
-    pub(super) fn release_claims_without_sight(
-        &self,
-        tables: &mut Tables,
-        epics: &std::collections::HashSet<i64>,
-    ) {
-        let unseen: Vec<(i64, String)> = tables
-            .poll_owners
-            .values()
-            .filter(|p| p.scope == POLL_SCOPE_EPIC && epics.contains(&p.scope_id))
-            .filter_map(|p| {
-                let owner = tables.hosts.get(&p.host)?.owner.clone();
-                let sees = tables
-                    .epics
-                    .get(&p.scope_id)
-                    .is_some_and(|e| module::epic_visible_to(&*tables, e, &owner));
-                (!sees).then_some((p.scope_id, owner))
-            })
-            .collect();
-        let gone: std::collections::HashSet<(i64, String)> = unseen.into_iter().collect();
-        self.release_poll_claims(tables, epics, |epic_id, owner| {
-            gone.contains(&(epic_id, owner.to_string()))
-        });
-        // The tasks' epics are judged the same way, on the store as it is now.
-        let sight_lost = |tables: &Tables, epic_id: i64, owner: &str| {
-            !tables
-                .epics
-                .get(&epic_id)
-                .is_some_and(|e| module::epic_visible_to(tables, e, owner))
-        };
-        let task_gone: std::collections::HashSet<(i64, String)> = tables
-            .poll_owners
-            .values()
-            .filter(|p| p.scope == POLL_SCOPE_TASK)
-            .filter_map(|p| {
-                let epic_id = tables.tasks.get(&p.scope_id)?.epic_id;
-                let owner = tables.hosts.get(&p.host)?.owner.clone();
-                (epics.contains(&epic_id) && sight_lost(tables, epic_id, &owner))
-                    .then_some((epic_id, owner))
-            })
-            .collect();
-        self.release_task_poll_claims(tables, epics, |epic_id, owner| {
-            task_gone.contains(&(epic_id, owner.to_string()))
-        });
-    }
-
-    /// Mirrors the module's `on_sight_lost` (task #98992, B1): the one helper
-    /// an epic-level loss-of-sight path calls. Claims and marks together.
-    pub(super) fn on_sight_lost(
-        &self,
-        tables: &mut Tables,
-        epics: &std::collections::HashSet<i64>,
-    ) {
-        self.release_claims_without_sight(tables, epics);
-        let tasks: std::collections::HashSet<i64> = tables
-            .tasks
-            .values()
-            .filter(|t| epics.contains(&t.epic_id))
-            .map(|t| t.id)
-            .collect();
-        self.drop_marks_of_those_who_cannot_see(tables, &tasks);
-    }
-
-    /// Mirrors the module's `on_task_sight_lost`: a single task whose own
-    /// sight changed (a move into a private epic, a detach).
-    pub(super) fn on_task_sight_lost(&self, tables: &mut Tables, task_id: i64) {
-        let Some(task) = tables.tasks.get(&task_id).cloned() else {
-            return;
-        };
-        let stale: Vec<i64> = tables
-            .poll_owners
-            .values()
-            .filter(|p| p.scope == POLL_SCOPE_TASK && p.scope_id == task_id)
-            .filter(|p| {
-                tables
-                    .hosts
-                    .get(&p.host)
-                    .is_some_and(|h| !module::task_visible_to(&*tables, &task, &h.owner))
-            })
-            .map(|p| p.id)
-            .collect();
-        for row_id in stale {
-            tables.poll_owners.remove(&row_id);
-            self.rows.remove_poll_owner(row_id);
-        }
-        self.drop_marks_of_those_who_cannot_see(
-            tables,
-            &std::collections::HashSet::from([task_id]),
-        );
-    }
-
-    fn drop_marks_of_those_who_cannot_see(
-        &self,
-        tables: &mut Tables,
-        tasks: &std::collections::HashSet<i64>,
-    ) {
-        if tasks.is_empty() {
-            return;
-        }
-        self.drop_marks_where(tables, |tables, task_id, subscriber| {
-            tasks.contains(&task_id)
-                && tables
-                    .tasks
-                    .get(&task_id)
-                    .is_some_and(|t| !module::task_visible_to(tables, t, subscriber))
-        });
     }
 
     pub(super) fn write_repo_path(&self, tables: &mut Tables, mut row: module::RepoPath) -> i64 {
@@ -194,14 +58,6 @@ impl MemoryReducerCaller {
         tables.repo_base_branches.insert(id, row.clone());
         self.rows.upsert_repo_base_branch(&row.into());
         id
-    }
-
-    /// The hosts whose rows a verify-command write by the sender may reach
-    /// (`module::hosts_sharing_a_workspace`).
-    fn verify_reach(&self, tables: &Tables) -> std::collections::HashSet<String> {
-        let hosts: Vec<module::Host> = tables.hosts.values().cloned().collect();
-        let memberships: Vec<module::Membership> = tables.memberships.values().cloned().collect();
-        module::hosts_sharing_a_workspace(&hosts, &memberships, &self.sender)
     }
 
     pub(super) fn apply_save_repo_path(
@@ -226,9 +82,6 @@ impl MemoryReducerCaller {
             .find(|r| r.path == path && r.host == host)
             .or_else(|| all.iter().find(|r| r.path == path && r.host.is_empty()))
             .cloned();
-        // Only the rows of people who share a workspace with the sender.
-        let reach = self.verify_reach(&tables);
-        let rows = module::rows_within_reach(&all, &reach, own.as_ref().map(|r| r.id));
         let row = match own {
             Some(row) => {
                 let github_path = if github_path.is_empty() {
@@ -237,7 +90,7 @@ impl MemoryReducerCaller {
                     github_path
                 };
                 let repository =
-                    module::repository_verify_command(&rows, row.id, &path, &github_path);
+                    module::repository_verify_command(&all, row.id, &path, &github_path);
                 let verify_command =
                     module::resaved_verify_command(&row, &github_path, &repository);
                 module::RepoPath {
@@ -250,7 +103,7 @@ impl MemoryReducerCaller {
             }
             None => {
                 let verify_command =
-                    module::repository_verify_command(&rows, 0, &path, &github_path);
+                    module::repository_verify_command(&all, 0, &path, &github_path);
                 module::RepoPath {
                     id: 0,
                     path,
@@ -263,7 +116,7 @@ impl MemoryReducerCaller {
         };
         let id = self.write_repo_path(&mut tables, row.clone());
         let row = module::RepoPath { id, ..row };
-        for sibling in module::rows_without_the_repository_command(&rows, &row) {
+        for sibling in module::rows_without_the_repository_command(&all, &row) {
             self.write_repo_path(
                 &mut tables,
                 module::RepoPath {
@@ -370,9 +223,7 @@ impl MemoryReducerCaller {
                 "no repo path {path} for host {host}"
             )));
         };
-        let reach = self.verify_reach(&tables);
-        let rows = module::rows_within_reach(&all, &reach, Some(named.id));
-        let repository = module::rows_of_the_repository_of(&rows, named);
+        let repository = module::rows_of_the_repository_of(&all, named);
         for row in repository {
             self.write_repo_path(
                 &mut tables,
@@ -443,7 +294,7 @@ impl MemoryReducerCaller {
             return Ok(ReducerOutcome::Refused(why));
         }
         let mut tables = self.lock();
-        if tables.visible_epic(&scope, epic_id).is_none() {
+        if !tables.epics.contains_key(&epic_id) {
             return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));
         }
         let id = module::subscription_id(&subscriber, epic_id);
@@ -475,8 +326,8 @@ impl MemoryReducerCaller {
         let mut tables = self.lock();
         let id = module::subscription_id(&subscriber, epic_id);
         if !tables.subscriptions.contains_key(&id) {
-            // The module's sight check: no row and no sight reads as missing.
-            if tables.visible_epic(&scope, epic_id).is_none() {
+            // No row: a missing epic is named as missing.
+            if !tables.epics.contains_key(&epic_id) {
                 return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));
             }
             return Ok(ReducerOutcome::Refused(format!(
@@ -501,7 +352,7 @@ impl MemoryReducerCaller {
             module::epics_losing_coverage(epic_id, &remaining, &parents)
                 .into_iter()
                 .collect();
-        self.release_poll_claims(&mut tables, &released, |_, owner| owner == subscriber);
+        self.release_poll_claims(&mut tables, &released, |owner| owner == subscriber);
         Ok(ReducerOutcome::Applied(vec![]))
     }
 

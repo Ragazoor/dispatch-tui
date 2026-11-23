@@ -193,8 +193,8 @@ impl Store {
     /// The verify half of predict-then-verify: keep only candidates
     /// confirmed gone from this connection's view after the reducer call
     /// returned. A task is gone only if its epic is still in the view: a
-    /// task that left with its epic (made private, or moved out of sight,
-    /// during the round trip) may still exist, and reporting it would tear
+    /// task that left with its epic (unfollowed during the round trip) may
+    /// still exist, and reporting it would tear
     /// down a live worktree and window. The ingest deletes tasks, never
     /// epics, so a deleted task's epic stays in view.
     fn confirm_removed(
