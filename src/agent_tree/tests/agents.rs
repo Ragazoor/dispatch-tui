@@ -926,3 +926,58 @@ async fn the_agent_list_poller_sends_an_unchanged_list_again() {
 
     assert_eq!(received, vec![true, true]);
 }
+
+/// PaneTitlesNameTheirOwnKeys and ReadersFollowTheRemap through the real draw:
+/// the section titles the pane draws come from the table in its state, so with
+/// an override file they name the user's keys and not the default Tab.
+#[test]
+fn the_drawn_section_titles_name_the_users_keys_from_the_override_file() {
+    let table = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::CompanionPane,
+        r#"[
+            {"namespace": "agent_tree.agents", "action": "cycle_agent_filter", "keys": ["Ctrl+F"]},
+            {"namespace": "agent_tree.agents", "action": "toggle_focus", "keys": ["Ctrl+B"]},
+            {"namespace": "agent_tree.commits", "action": "switch_section", "keys": ["Ctrl+W"]}
+        ]"#,
+    )
+    .table;
+    let draw = |state: &mut RenderState| {
+        let tree = build_tree(&root(), &[modified("a.rs")]);
+        state.sync_expansion(&tree);
+        let mut terminal = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+        terminal
+            .draw(|frame| render_pane(frame, frame.area(), &tree, state, "wt"))
+            .expect("draw");
+        buffer_to_string(terminal.backend().buffer())
+    };
+    let mut state = RenderState::new(table);
+    let agents = draw(&mut state);
+    assert!(
+        agents.contains("Agents (Ctrl+F: running, Ctrl+B: browse)"),
+        "{agents}"
+    );
+    state.focus = Focus::Tree;
+    let browse = draw(&mut state);
+    assert!(browse.contains("Commits (Ctrl+W, s: agents)"), "{browse}");
+    assert!(
+        !agents.contains("Tab") && !browse.contains("Tab"),
+        "{agents}\n{browse}"
+    );
+
+    // Under the remapped table too, the drawn titles are the ones its rows give.
+    let remapped = crate::keybindings::remapped_table();
+    let mut state = RenderState::new(remapped);
+    let agents = draw(&mut state);
+    assert!(
+        agents.contains(agents_title_text(remapped).trim()),
+        "{agents}"
+    );
+    state.focus = Focus::Tree;
+    let browse = draw(&mut state);
+    let commits = crate::agent_tree::render::commits::commits_title(remapped);
+    assert!(browse.contains(commits.trim()), "{browse}");
+}
+
+fn agents_title_text(table: &'static [crate::keybindings::KeyBinding]) -> String {
+    crate::agent_tree::render::agents::agents_title(table, AgentFilter::All)
+}

@@ -358,6 +358,59 @@ fn the_overlay_shows_the_users_keys_from_the_override_file() {
     assert_eq!(key_lines, vec!["O"], "{}", body.join("\n"));
 }
 
+/// ReadersFollowTheRemap for the overlay: under the remapped table every row
+/// is shown with the keys it has there, and the border title names the
+/// remapped board.help keys (OverlayTitleNamesItsOwnKeys).
+#[test]
+fn the_overlay_and_its_title_follow_the_remapped_table() {
+    let table = crate::keybindings::remapped_table();
+    let mut app = App::new(vec![]);
+    app.set_key_table(table);
+    app.update(Message::System(
+        crate::tui::messages::SystemMessage::ToggleHelp,
+    ));
+    assert_eq!(app.input.mode, InputMode::Help);
+
+    let buf = render_to_buffer(&mut app, WIDTH, HEIGHT);
+    let screen: String = (buf.area().top()..buf.area().bottom())
+        .map(|y| {
+            (buf.area().left()..buf.area().right())
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let title = crate::keybindings::help_overlay_title(table);
+    assert_ne!(title, crate::keybindings::help_overlay_title(KEY_BINDINGS));
+    assert!(
+        screen.contains(title.trim()),
+        "{title:?} not on screen:\n{screen}"
+    );
+
+    let body = overlay_body_of(app);
+    let tokens = tokens_of(&body);
+    let spans = group_spans(&body);
+    let mut failures = Vec::new();
+    for binding in table {
+        let &(_, from, to) = spans
+            .iter()
+            .find(|(ns, _, _)| *ns == binding.namespace)
+            .unwrap();
+        if let Some(problem) = row_problem(&body, &tokens, binding, (from, to)) {
+            failures.push(format!(
+                "{} {}: {problem}",
+                binding.namespace.name(),
+                binding.action
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "rows of the remapped table the overlay does not show:\n{}",
+        failures.join("\n")
+    );
+}
+
 /// The `G` row's note is the warning that motivated the table; it must be on
 /// screen in the overlay, not only in keybinding_search.
 #[test]

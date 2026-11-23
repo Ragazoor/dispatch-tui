@@ -195,9 +195,10 @@ fn focus(pane: &PaneId, runner: &dyn ProcessRunner) {
 }
 
 /// The diff renderer's argv. `--data-dir` is named explicitly rather than left
-/// to the default so the pane below logs to the same `app.log` as this one;
-/// inheriting a default that happened to match would be a coincidence, not a
-/// guarantee. The open set and the task do not come from it: the open set is
+/// to the default so the pane below logs to the same `app.log` as this one
+/// and loads its keys from the same override file (keybindings.allium:
+/// PanesLoadTheirOwnTable); inheriting a default that happened to match would
+/// be a coincidence, not a guarantee. The open set and the task do not come from it: the open set is
 /// in the worktree's git directory and the task comes from the board.
 fn diff_command(data_dir: &Path, task_id: TaskId, runner: &dyn ProcessRunner) -> Vec<String> {
     vec![

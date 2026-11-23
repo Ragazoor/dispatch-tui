@@ -59,18 +59,18 @@ fn drawn(step: &StartupStep) -> String {
 }
 
 fn drawn_with(step: &StartupStep, table: &'static [crate::keybindings::KeyBinding]) -> String {
+    drawn_in(step, table, crate::keybindings::KeyNamespace::AgentTreeTree)
+}
+
+fn drawn_in(
+    step: &StartupStep,
+    table: &'static [crate::keybindings::KeyBinding],
+    ns: crate::keybindings::KeyNamespace,
+) -> String {
     let backend = ratatui::backend::TestBackend::new(40, 6);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|f| {
-            render_startup_notice(
-                f,
-                f.area(),
-                step,
-                table,
-                crate::keybindings::KeyNamespace::AgentTreeTree,
-            )
-        })
+        .draw(|f| render_startup_notice(f, f.area(), step, table, ns))
         .unwrap();
     buffer_to_string(terminal.backend().buffer())
 }
@@ -89,6 +89,23 @@ fn the_failure_screens_close_hint_names_the_users_exit_key() {
     assert!(out.contains("press Ctrl+X to close"), "{out}");
     let default = drawn(&StartupStep::Fail("gone".into()));
     assert!(default.contains("press q or Ctrl+C to close"), "{default}");
+}
+
+/// ReadersFollowTheRemap: under the remapped table each pane's close hint
+/// names the keys of its own exit_pane row in that table.
+#[test]
+fn the_close_hint_names_the_exit_keys_of_the_remapped_table() {
+    use crate::keybindings::{bindings_in, remapped_table, KeyNamespace};
+    let table = remapped_table();
+    for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentDiff] {
+        let keys: Vec<&str> = bindings_in(table, ns)
+            .filter(|b| b.action == "exit_pane")
+            .flat_map(|b| b.keys.iter().copied())
+            .collect();
+        let out = drawn_in(&StartupStep::Fail("gone".into()), table, ns);
+        let hint = format!("press {} to close", keys.join(" or "));
+        assert!(out.contains(&hint), "{ns:?}: {hint:?} not in\n{out}");
+    }
 }
 
 #[test]
