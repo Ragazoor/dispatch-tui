@@ -586,6 +586,14 @@ mod tests {
         assert!(plan(&epics, &[], &[], &[], Some(&names)).is_empty());
     }
 
+    #[test]
+    fn the_window_name_is_the_one_the_store_records() {
+        assert_eq!(
+            TmuxWindow::for_orchestrator(EpicId(42)).as_str(),
+            dispatch_spacetime_module::orchestrator_window_name(42)
+        );
+    }
+
     // -- One tick after another, over the in-memory store --------------------
 
     use crate::process::MockProcessRunner;

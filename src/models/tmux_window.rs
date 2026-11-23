@@ -156,9 +156,7 @@ impl TmuxWindow {
     /// The window name of epic `epic_id`'s orchestrator: the name the store
     /// records for it.
     pub fn for_orchestrator(epic_id: super::EpicId) -> Self {
-        Self(Cow::Owned(
-            dispatch_spacetime_module::orchestrator_window_name(epic_id.0),
-        ))
+        Self(Cow::Owned(format!("orch-{}", epic_id.0)))
     }
 
     /// The window name for a popped-out editor, disambiguated by `nanos`.
