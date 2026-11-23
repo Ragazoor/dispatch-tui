@@ -152,8 +152,9 @@ contract KeybindingDriftGate {
         -- binding (agent-tree.allium: config.agent_tree_toggle_key;
         -- split-pane.allium: JumpBackToTuiWindow), written as the table
         -- writes keys (`Prefix+Space`), so changing a default in one place
-        -- and not the other fails here. On quit the board unbinds the keys it
-        -- bound, whatever the file says by then.
+        -- and not the other fails here. On quit, and when signalled
+        -- (startup.allium: ASignalledBoardRunsItsExit), the board unbinds
+        -- the keys it bound, whatever the file says by then.
 
     @invariant NoFileIsTheDefaultTable
         -- With no override file in the data directory, every row's keys are
@@ -1594,11 +1595,13 @@ surface TmuxPrefixKeys {
         -- row's key is "Prefix+" and one key, and the part after "Prefix+"
         -- is translated to tmux's own spelling in one place: a character as
         -- itself, a named key by tmux's name for it, "Ctrl+X" as "C-x" and
-        -- "Alt+X" as "M-x".
+        -- "Alt+X" as "M-x". A key the loader accepts but tmux refuses to
+        -- bind is replaced by the row's default key, which the board binds
+        -- instead, and the board shows an error naming the refused key.
 
     @guarantee TheBoardUnbindsWhatItBound
-        -- On quit the board unbinds the keys it bound when it started, not
-        -- the keys the file names by then.
+        -- On quit, and when signalled, the board unbinds the keys it bound
+        -- when it started, not the keys the file names by then.
 
     @guarantee NoStalePrefixKeySurvivesAStart
         -- A board that was killed leaves its keys bound. Before it binds,

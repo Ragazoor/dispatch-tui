@@ -251,6 +251,65 @@ async fn setup_tmux_for_tui_moves_a_stale_binding_to_the_tables_key() {
 }
 
 #[tokio::test]
+async fn a_key_tmux_refuses_falls_back_to_its_default() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                   // list-keys
+        MockProcessRunner::fail("unknown key: j"), // bind j
+        MockProcessRunner::ok(),                   // bind Space
+        MockProcessRunner::ok(),                   // bind C-t
+    ])
+    .with_queued_window_lookup();
+    let (bound, error) = setup_tmux_for_tui("work", None, &moved_keys(), &mock);
+    assert_eq!(
+        bound,
+        PrefixKeys {
+            jump_back: JUMP_BACK_KEY.to_string(),
+            agent_tree_toggle: "C-t".to_string(),
+        }
+    );
+    let error = error.expect("the board is told");
+    assert!(error.contains("\"j\""), "{error}");
+    let calls = mock.recorded_calls();
+    assert_eq!(calls[2].1, vec!["bind-key", "Space", &jump_back_command()]);
+}
+
+// keybindings.allium: TmuxGlobalRowsTrackTheirBindings, from the file the
+// board loads to the tmux calls it makes on start and on quit.
+#[tokio::test]
+async fn the_keys_an_override_file_names_are_bound_and_then_unbound() {
+    let load = crate::keybindings::loaded_table(
+        crate::keybindings::KeyTableReader::Board,
+        r#"[{"namespace": "tmux.global", "action": "jump_to_dispatch", "keys": ["Prefix+j"]},
+            {"namespace": "tmux.global", "action": "toggle_agent_tree", "keys": ["Prefix+Ctrl+T"]}]"#,
+    );
+    let start = MockProcessRunner::new((0..3).map(|_| MockProcessRunner::ok()).collect())
+        .with_queued_window_lookup();
+    let (bound, error) =
+        setup_tmux_for_tui("work", None, &PrefixKeys::from_table(load.table), &start);
+    assert_eq!(error, None);
+    let binds: Vec<Vec<String>> = start
+        .recorded_calls()
+        .into_iter()
+        .skip(1)
+        .map(|c| c.1)
+        .collect();
+    assert_eq!(
+        binds,
+        vec![
+            vec!["bind-key", "j", &jump_back_command()],
+            vec!["bind-key", "C-t", AGENT_TREE_TOGGLE_COMMAND],
+        ]
+    );
+    let quit = MockProcessRunner::new((0..2).map(|_| MockProcessRunner::ok()).collect());
+    teardown_tmux_for_tui("work", None, None, &bound, &quit);
+    let unbinds: Vec<Vec<String>> = quit.recorded_calls().into_iter().map(|c| c.1).collect();
+    assert_eq!(
+        unbinds,
+        vec![vec!["unbind-key", "j"], vec!["unbind-key", "C-t"]]
+    );
+}
+
+#[tokio::test]
 async fn a_failed_listing_still_binds_the_keys() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("no server"), // list-keys

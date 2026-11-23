@@ -109,7 +109,7 @@ fn setup_tmux_for_tui(
     self_pane: Option<&PaneId>,
     keys: &PrefixKeys,
     runner: &dyn ProcessRunner,
-) {
+) -> (PrefixKeys, Option<String>) {
     // The rename must target this process's own pane, and only that. Every
     // fallback resolves to the session's *active* pane instead — `-t ""` and
     // `current_pane_id` alike (`tmux::self_pane_id`) — so without `$TMUX_PANE`
@@ -131,7 +131,7 @@ fn setup_tmux_for_tui(
     } else {
         tracing::warn!("no $TMUX_PANE: leaving this window's name alone");
     }
-    bind_prefix_keys(keys, runner);
+    bind_prefix_keys(keys, runner)
 }
 
 /// The signalled exit's share of the tmux teardown (`startup.allium`:
@@ -459,9 +459,20 @@ pub async fn run_tui(
 
     let mut terminal = enter_tui_terminal()?;
     let tmux_runner = runtime.runner.clone();
-    let prefix_keys = PrefixKeys::from_table(app.key_table());
-    let tmux_wiring = wire_tmux_for_tui(&server, port, &prefix_keys, &*tmux_runner);
-    let _ = keys_bound.set(prefix_keys.clone());
+    let tmux_wiring = wire_tmux_for_tui(
+        &server,
+        port,
+        &PrefixKeys::from_table(app.key_table()),
+        &*tmux_runner,
+    );
+    let _ = keys_bound.set(tmux_wiring.prefix_keys.clone());
+    if let Some(error) = tmux_wiring.prefix_key_error.clone() {
+        let _ = runtime
+            .msg_tx
+            .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                error,
+            )));
+    }
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -510,7 +521,7 @@ pub async fn run_tui(
         &tmux_wiring.session,
         tmux_wiring.self_pane.as_ref(),
         tmux_wiring.original_window_name.as_ref(),
-        &prefix_keys,
+        &tmux_wiring.prefix_keys,
         &*tmux_runner,
     );
 
@@ -550,6 +561,9 @@ struct TmuxWiring {
     session: String,
     self_pane: Option<PaneId>,
     original_window_name: Option<TmuxWindow>,
+    /// The keys bound, to unbind on exit.
+    prefix_keys: PrefixKeys,
+    prefix_key_error: Option<String>,
 }
 
 /// Set up the tmux keybinding (Prefix+Space → jump back to this window) and
@@ -573,13 +587,16 @@ fn wire_tmux_for_tui(
     let session = here
         .as_ref()
         .map_or(String::new(), |c| c.session_name.clone());
-    setup_tmux_for_tui(&session, self_pane.as_ref(), keys, tmux_runner);
+    let (prefix_keys, prefix_key_error) =
+        setup_tmux_for_tui(&session, self_pane.as_ref(), keys, tmux_runner);
     publish_store_server(&session, server, tmux_runner);
     publish_board_port(&session, port, tmux_runner);
     TmuxWiring {
         session,
         self_pane,
         original_window_name,
+        prefix_keys,
+        prefix_key_error,
     }
 }
 

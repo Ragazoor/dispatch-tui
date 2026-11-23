@@ -42,37 +42,52 @@ fn every_tmux_key_the_table_can_name_is_one_tmux_binds_and_unbinds() {
     }
     let server = server();
     let mut keys: Vec<String> = NAMED_KEYS.iter().map(|k| format!("Prefix+{k}")).collect();
-    for k in [
-        "e",
-        "E",
-        "#",
-        ";",
-        "\"",
-        "~",
-        "Ctrl+X",
-        "Alt+B",
-        "Ctrl+Alt+K",
-        "Ctrl+Up",
-    ] {
+    let characters = [
+        "e", "E", "1", "é", "#", ";", "\"", "'", "\\", "~", "$", "%", "&", "*", "{", "}", "|", "[",
+        "]", "<", ">", "?", "/", "!", "@", "^", "(", ")", "-", "_", "=", "+", ",", ".", ":", "`",
+    ];
+    for k in characters {
         keys.push(format!("Prefix+{k}"));
     }
+    for modifier in ["Ctrl+", "Alt+", "Ctrl+Alt+"] {
+        for k in characters.iter().chain(NAMED_KEYS.iter()) {
+            let key = format!("Prefix+{modifier}{}", k.to_uppercase());
+            if dispatch_tui::keybindings::is_key_name(&key) {
+                keys.push(key);
+            }
+        }
+    }
+    let mut refused = Vec::new();
     for key in keys {
         let tmux_key = tmux_key_name(&key).expect(&key);
         let marker = format!("display-message {}", key.len());
-        server.tmux_ok(&["bind-key", &tmux_key, &marker]);
-        assert!(
-            bindings(&server)
-                .iter()
-                .any(|b| b.key == tmux_key && b.command == marker),
-            "{key} as {tmux_key}: {:?}",
-            bindings(&server)
-        );
+        let bound = server.tmux(&["bind-key", &tmux_key, &marker]);
+        if !bound.status.success() {
+            refused.push(format!(
+                "{key} as {tmux_key}: {}",
+                String::from_utf8_lossy(&bound.stderr).trim()
+            ));
+            continue;
+        }
+        if !bindings(&server)
+            .iter()
+            .any(|b| b.key == tmux_key && b.command == marker)
+        {
+            let raw = server.tmux_stdout(&["list-keys", "-T", "prefix"]);
+            let line = raw
+                .lines()
+                .find(|l| l.ends_with(&marker))
+                .unwrap_or("")
+                .to_string();
+            refused.push(format!("{key} as {tmux_key} listed as: {line}"));
+        }
         server.tmux_ok(&["unbind-key", &tmux_key]);
         assert!(
             !bindings(&server).iter().any(|b| b.command == marker),
             "{key} as {tmux_key} is still bound"
         );
     }
+    assert!(refused.is_empty(), "{refused:#?}");
 }
 
 // `NoStalePrefixKeySurvivesAStart`, `TheBoardUnbindsWhatItBound`: a board
@@ -85,7 +100,10 @@ fn a_start_moves_the_bindings_a_killed_board_left_and_the_exit_removes_them() {
     let server = server();
     let runner = server.runner();
     server.tmux_ok(&["bind-key", "z", "select-window -t =other"]);
-    bind_prefix_keys(&PrefixKeys::default(), &runner);
+    assert_eq!(
+        bind_prefix_keys(&PrefixKeys::default(), &runner),
+        (PrefixKeys::default(), None)
+    );
     let jump = command_of(&server, "Space").expect("Space bound");
     let toggle = command_of(&server, "e").expect("e bound");
 
@@ -93,7 +111,7 @@ fn a_start_moves_the_bindings_a_killed_board_left_and_the_exit_removes_them() {
         jump_back: tmux_key_name("Prefix+;").unwrap(),
         agent_tree_toggle: tmux_key_name("Prefix+Ctrl+T").unwrap(),
     };
-    bind_prefix_keys(&moved, &runner);
+    assert_eq!(bind_prefix_keys(&moved, &runner), (moved.clone(), None));
     assert_eq!(command_of(&server, "Space"), None, "the old jump key");
     assert_eq!(command_of(&server, "e"), None, "the old toggle key");
     assert_eq!(command_of(&server, &moved.jump_back), Some(jump.clone()));

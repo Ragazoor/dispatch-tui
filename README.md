@@ -17,7 +17,7 @@ Agents let me take on more work than before. Dispatch is my way of organising th
 
 **How do I work on a project where the code is a black box?** In this project agents write the code, and I mostly do not read it. Instead, all work starts from the specs in [`docs/specs/`](docs/specs/), written in [Allium](https://github.com/juxt/allium). They are the source of truth the agents work from: spec first, then tests, then code. So far that has worked well.
 
-**How do I stay close to code I do care about?** At work the code is not a black box, and I do not want to drift away from it because an agent writes it. The agent-tree pane (`Prefix+e` in an agent's window) shows the files the agent changed. From there one key opens a file's diff and another opens the file in your editor.
+**How do I stay close to code I do care about?** At work the code is not a black box, and I do not want to drift away from it because an agent writes it. The agent-tree pane (`Prefix+e` in an agent's window, by default) shows the files the agent changed. From there one key opens a file's diff and another opens the file in your editor.
 
 **How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do all of what you can do there and a bit more. Agents can also send each other messages natively. Auto-dispatch helps too: it starts the next task in an epic when the one before it finishes. With only these tools, a lot of patterns are easy to try, for example:
 
@@ -95,7 +95,7 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 
 **Worktrees** — each agent works in `<repo>/.worktrees/<id>-<slug>`. Closing the tmux window keeps the worktree, so `Space` resumes where the agent left off.
 
-**Agent tree** — `Prefix+e` in an agent's tmux window shows or hides a pane with the files the agent changed. `Space` opens a file's diff and `v` opens the file in your editor.
+**Agent tree** — `Prefix+e` (by default) in an agent's tmux window shows or hides a pane with the files the agent changed. `Space` opens a file's diff and `v` opens the file in your editor.
 
 **Plans** — a markdown file describing what to build. Attach one and the agent implements it directly instead of designing first.
 

@@ -1846,7 +1846,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Prefix+Space"],
         None,
         "jump_to_dispatch",
-        "Jump back from an agent's window to the dispatch board. Press your tmux prefix, then Space",
+        "Jump back from an agent's window to the dispatch board. Press your tmux prefix, then this key",
         None,
     ),
     row(

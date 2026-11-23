@@ -1122,9 +1122,6 @@ pub fn prefix_bindings(runner: &dyn ProcessRunner) -> Result<Vec<PrefixBinding>>
 }
 
 /// Parse `list-keys -T prefix` lines (`bind-key [-r] -T prefix <key> <command>`).
-/// tmux prints a key with a backslash before a character its config syntax
-/// treats specially; as an argument only `\;` keeps it, since a bare `;` ends
-/// the command.
 pub(crate) fn parse_prefix_bindings(listing: &str) -> Vec<PrefixBinding> {
     listing
         .lines()
@@ -1144,17 +1141,42 @@ pub(crate) fn parse_prefix_bindings(listing: &str) -> Vec<PrefixBinding> {
                 return None;
             }
             let (printed, command) = split_token(rest)?;
-            let key = match printed.strip_prefix('\\') {
-                Some(";") => printed,
-                Some(unescaped) if !unescaped.is_empty() => unescaped,
-                _ => printed,
-            };
             Some(PrefixBinding {
-                key: key.to_string(),
+                key: key_argument(printed),
                 command: command.trim().to_string(),
             })
         })
         .collect()
+}
+
+/// A key as `list-keys` prints it, as `bind-key`/`unbind-key` take it as an
+/// argument. tmux prints a key in its config syntax: quoted (`"C-#"`,
+/// `'M-"'`) or with a backslash before a special character (`\#`, `C-\\`).
+/// As an argument a key ending in `;` needs the backslash before it, since an
+/// argument ending in `;` ends the command.
+fn key_argument(printed: &str) -> String {
+    let quoted = printed.len() >= 2
+        && ['"', '\'']
+            .iter()
+            .any(|q| printed.starts_with(*q) && printed.ends_with(*q));
+    let key = if quoted {
+        printed[1..printed.len() - 1].to_string()
+    } else {
+        let mut key = String::new();
+        let mut chars = printed.chars();
+        while let Some(c) = chars.next() {
+            key.push(if c == '\\' {
+                chars.next().unwrap_or(c)
+            } else {
+                c
+            });
+        }
+        key
+    };
+    match key.strip_suffix(';') {
+        Some(head) => format!("{head}\\;"),
+        None => key,
+    }
 }
 
 /// The first whitespace-separated token of `s` and what follows it.

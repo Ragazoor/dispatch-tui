@@ -91,9 +91,14 @@ fn is_board_command(command: &str) -> bool {
 
 /// Bind `keys`, first removing every prefix binding that runs one of the
 /// board's commands under another key, which a killed board left behind
-/// (`NoStalePrefixKeySurvivesAStart`). Best-effort: a failing tmux call is
-/// logged and the board starts anyway.
-pub fn bind_prefix_keys(keys: &PrefixKeys, runner: &dyn ProcessRunner) {
+/// (`NoStalePrefixKeySurvivesAStart`). A key tmux refuses falls back to its
+/// default. Returns the keys bound, which are the ones to unbind, and an
+/// error for the board to show when a key fell back. Best-effort: the board
+/// starts whatever tmux answers.
+pub fn bind_prefix_keys(
+    keys: &PrefixKeys,
+    runner: &dyn ProcessRunner,
+) -> (PrefixKeys, Option<String>) {
     match tmux::prefix_bindings(runner) {
         Ok(bindings) => {
             for stale in bindings.iter().filter(|b| is_board_command(&b.command)) {
@@ -102,8 +107,59 @@ pub fn bind_prefix_keys(keys: &PrefixKeys, runner: &dyn ProcessRunner) {
         }
         Err(e) => tracing::warn!("could not list tmux prefix bindings: {e:#}"),
     }
-    let _ = tmux::bind_key(&keys.jump_back, &jump_back_command(), runner);
-    let _ = tmux::bind_key(&keys.agent_tree_toggle, AGENT_TREE_TOGGLE_COMMAND, runner);
+    let mut refused = Vec::new();
+    let jump_back = bind_or_default(
+        &keys.jump_back,
+        JUMP_BACK_KEY,
+        &jump_back_command(),
+        runner,
+        &mut refused,
+    );
+    let agent_tree_toggle = bind_or_default(
+        &keys.agent_tree_toggle,
+        AGENT_TREE_TOGGLE_KEY,
+        AGENT_TREE_TOGGLE_COMMAND,
+        runner,
+        &mut refused,
+    );
+    let error = (!refused.is_empty()).then(|| {
+        format!(
+            "tmux refused the prefix key{} {}; the default is bound instead.",
+            if refused.len() > 1 { "s" } else { "" },
+            refused.join(", ")
+        )
+    });
+    (
+        PrefixKeys {
+            jump_back,
+            agent_tree_toggle,
+        },
+        error,
+    )
+}
+
+/// Bind `key` to `command`, or `default` when tmux refuses a `key` that is
+/// not the default. Returns the key it bound.
+fn bind_or_default(
+    key: &str,
+    default: &str,
+    command: &str,
+    runner: &dyn ProcessRunner,
+    refused: &mut Vec<String>,
+) -> String {
+    match tmux::bind_key(key, command, runner) {
+        Ok(()) => key.to_string(),
+        Err(e) if key != default => {
+            tracing::warn!("tmux refused prefix key {key}: {e:#}; binding {default}");
+            refused.push(format!("\"{key}\""));
+            let _ = tmux::bind_key(default, command, runner);
+            default.to_string()
+        }
+        Err(e) => {
+            tracing::warn!("could not bind prefix key {key}: {e:#}");
+            key.to_string()
+        }
+    }
 }
 
 /// Unbind the keys [`bind_prefix_keys`] bound (`TheBoardUnbindsWhatItBound`).

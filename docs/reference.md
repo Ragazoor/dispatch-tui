@@ -70,8 +70,8 @@ additions. Two things show a one-line stand-in instead of contents, and each is 
 about the file: git reports it binary, or its diff is over 1 MB.
 
 The cursor position, the manual expansions and the open diff all live in that
-process, so none of them survives closing and reopening the pane. Use `Prefix+e` to
-toggle it (the `tmux.global` rows of the table).
+process, so none of them survives closing and reopening the pane. Use `Prefix+e` (by default) to
+toggle it (the `tmux.global` rows of the table, which an override can move).
 
 When something fails — tmux refuses the split, or git cannot answer — the reason
 appears in the pane's bottom border until the next keypress, the whole border turns

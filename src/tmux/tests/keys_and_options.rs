@@ -406,6 +406,10 @@ bind-key -r -T prefix C-Up    resize-pane -U\n\
 bind-key    -T prefix \\#      select-window -t =TUI\n\
 bind-key    -T prefix \\;      last-pane\n\
 bind-key    -T root   e       send-keys x\n\
+bind-key    -T prefix \"C-#\"   last-pane\n\
+bind-key    -T prefix 'M-\"'   last-pane\n\
+bind-key    -T prefix \"C-M-;\" last-pane\n\
+bind-key    -T prefix C-\\\\    last-pane\n\
 bind-key    -T prefix e       run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"";
     let got: Vec<(String, String)> = parse_prefix_bindings(listing)
         .into_iter()
@@ -416,6 +420,10 @@ bind-key    -T prefix e       run-shell -b \"dispatch toggle-agent-tree-pane '#{
         ("C-Up", "resize-pane -U"),
         ("#", "select-window -t =TUI"),
         ("\\;", "last-pane"),
+        ("C-#", "last-pane"),
+        ("M-\"", "last-pane"),
+        ("C-M-\\;", "last-pane"),
+        ("C-\\", "last-pane"),
         (
             "e",
             "run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"",
