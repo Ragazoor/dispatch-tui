@@ -2189,6 +2189,21 @@ rule PublishTheBoardsStoreOnItsSession {
         -- PaneRenderersAskTheBoard). Unlike the address, the port is
         -- published whichever store the board runs on.
         --
+        -- THE DATA DIRECTORY GOES BESIDE THEM, under its own variable,
+        -- DISPATCH_BOARD_DATA_DIR, so the companion and diff panes and the
+        -- toggle command run in the agent windows load their key override
+        -- file and write their log in the board's data directory, not in
+        -- whatever DISPATCH_DATA_DIR or the default names (cli.allium:
+        -- PaneRenderersAskTheBoard; keybindings.allium:
+        -- PanesLoadTheirOwnTable). The same reasoning as WHY TWO holds: the
+        -- operator's input, --data-dir and DISPATCH_DATA_DIR, is never
+        -- written by the board, and `dispatch tui` never reads the board's
+        -- variable, so a board restarted in that session without --data-dir
+        -- cannot mistake its predecessor's directory for one the operator
+        -- named and quietly switch data directories. The pane commands
+        -- prefer an explicit --data-dir, then the board's variable, then
+        -- the operator's input, then the default.
+        --
         -- DISPATCH_PORT is also what `dispatch tui --port` falls back to, so
         -- a board started in that session without --port takes the port the
         -- board before it published. That is intended, unlike the store

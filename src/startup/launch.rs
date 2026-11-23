@@ -137,6 +137,13 @@ pub const STORE_SERVER_ENV: &str = "DISPATCH_SPACETIME_SERVER";
 /// (`startup.allium`: `PublishTheBoardsStoreOnItsSession`, task #28729).
 pub const BOARD_STORE_ENV: &str = "DISPATCH_BOARD_STORE";
 
+/// The data directory a board publishes on its own tmux session for the pane
+/// commands it starts (`dispatch agent-tree`, `agent-diff`,
+/// `toggle-agent-tree-pane`). Never read by `dispatch tui`, so a directory an
+/// earlier board left on the session cannot read as one the operator named
+/// (`startup.allium`: `PublishTheBoardsStoreOnItsSession`).
+pub const BOARD_DATA_DIR_ENV: &str = "DISPATCH_BOARD_DATA_DIR";
+
 /// The store a subcommand connects to: the one named, or -- when none is --
 /// the managed store's address. A short-lived subcommand (`repo`, `plan`, the
 /// agent-tree and diff panes) never starts, publishes to or stops anything;

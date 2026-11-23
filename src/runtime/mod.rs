@@ -98,6 +98,23 @@ fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
     }
 }
 
+/// Publish the data directory the board runs on, under a variable
+/// `dispatch tui` never reads (`BOARD_DATA_DIR_ENV`), so the companion panes
+/// and the toggle command load their keys and write their log there. Best-effort.
+fn publish_board_data_dir(session: &str, data_dir: &Path, runner: &dyn ProcessRunner) {
+    if session.is_empty() {
+        return;
+    }
+    if let Err(e) = tmux::set_session_environment(
+        session,
+        crate::startup::BOARD_DATA_DIR_ENV,
+        &data_dir.to_string_lossy(),
+        runner,
+    ) {
+        tracing::warn!("could not publish the data directory on the tmux session: {e:#}");
+    }
+}
+
 /// Set up tmux for the TUI: rename the current window and bind Prefix+Space
 /// to jump back to the TUI window.
 /// `session` and `self_pane` are read by the caller rather than here: the
@@ -462,6 +479,7 @@ pub async fn run_tui(
     let tmux_wiring = wire_tmux_for_tui(
         &server,
         port,
+        data_dir,
         &PrefixKeys::from_table(app.key_table()),
         &*tmux_runner,
     );
@@ -572,6 +590,7 @@ struct TmuxWiring {
 fn wire_tmux_for_tui(
     server: &str,
     port: u16,
+    data_dir: &Path,
     keys: &PrefixKeys,
     tmux_runner: &dyn ProcessRunner,
 ) -> TmuxWiring {
@@ -591,6 +610,7 @@ fn wire_tmux_for_tui(
         setup_tmux_for_tui(&session, self_pane.as_ref(), keys, tmux_runner);
     publish_store_server(&session, server, tmux_runner);
     publish_board_port(&session, port, tmux_runner);
+    publish_board_data_dir(&session, data_dir, tmux_runner);
     TmuxWiring {
         session,
         self_pane,

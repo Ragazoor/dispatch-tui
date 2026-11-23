@@ -341,6 +341,41 @@ fn needs_data_dir(command: &Commands) -> bool {
         )
 }
 
+/// The commands a board starts in its own agent windows.
+fn is_pane_command(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::AgentTree { .. }
+            | Commands::AgentDiff { .. }
+            | Commands::ToggleAgentTreePane { .. }
+    )
+}
+
+/// Whether `--data-dir` was typed, before or after the subcommand, as opposed
+/// to arriving from `DISPATCH_DATA_DIR`.
+fn data_dir_given_on_command_line(matches: &clap::ArgMatches) -> bool {
+    use clap::parser::ValueSource::CommandLine;
+    let on = |m: &clap::ArgMatches| m.value_source("data_dir") == Some(CommandLine);
+    on(matches) || matches.subcommand().is_some_and(|(_, sub)| on(sub))
+}
+
+/// The data directory a pane command uses: its own `--data-dir`, else the one
+/// the board published on its session, else the operator's input
+/// (`startup.allium`: `PublishTheBoardsStoreOnItsSession`).
+fn pane_data_dir(
+    resolved: Option<PathBuf>,
+    given_on_command_line: bool,
+    board_published: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    if given_on_command_line {
+        return resolved;
+    }
+    board_published
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or(resolved)
+}
+
 // ---------------------------------------------------------------------------
 // Per-subcommand handlers
 // ---------------------------------------------------------------------------
@@ -816,7 +851,16 @@ fn cmd_toggle_agent_tree_pane(data_dir: Option<&std::path::Path>, window: String
 /// A subcommand added later therefore lands on the general path by default —
 /// correct, merely unoptimised.
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    use clap::{CommandFactory, FromArgMatches};
+    let matches = Cli::command().get_matches();
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    if is_pane_command(&cli.command) {
+        cli.data_dir = pane_data_dir(
+            cli.data_dir.take(),
+            data_dir_given_on_command_line(&matches),
+            std::env::var_os(startup::BOARD_DATA_DIR_ENV),
+        );
+    }
 
     // The one place the data directory's default is resolved: a command that
     // needs it fails here, before it enters tmux or writes anything, and one
@@ -1155,6 +1199,32 @@ mod tests {
         let data = dir.path().join("data");
         init_app_log_subscriber(&data).unwrap();
         assert!(data.join("app.log").exists());
+    }
+
+    #[test]
+    fn a_pane_prefers_the_board_published_directory_to_the_operators_input() {
+        let from_env = Some(PathBuf::from("/operator"));
+        let board = Some("/board".into());
+        assert_eq!(
+            pane_data_dir(from_env.clone(), false, board.clone()),
+            Some(PathBuf::from("/board"))
+        );
+        assert_eq!(
+            pane_data_dir(from_env.clone(), true, board),
+            from_env.clone()
+        );
+        assert_eq!(pane_data_dir(from_env.clone(), false, None), from_env);
+        assert_eq!(pane_data_dir(None, false, Some("".into())), None);
+    }
+
+    #[test]
+    fn only_a_typed_data_dir_counts_as_given_on_the_command_line() {
+        use clap::CommandFactory;
+        let typed =
+            Cli::command().get_matches_from(["dispatch", "agent-tree", "3", "--data-dir", "/x"]);
+        assert!(data_dir_given_on_command_line(&typed));
+        let bare = Cli::command().get_matches_from(["dispatch", "agent-tree", "3"]);
+        assert!(!data_dir_given_on_command_line(&bare));
     }
 
     #[test]

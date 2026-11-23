@@ -1203,6 +1203,31 @@ mod startup_helpers {
     }
 
     #[test]
+    fn the_board_data_dir_is_published_under_a_variable_tui_never_reads() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        publish_board_data_dir("dispatch", std::path::Path::new("/data/x"), &mock);
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-environment",
+                "-t",
+                "=dispatch",
+                "DISPATCH_BOARD_DATA_DIR",
+                "/data/x"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_board_with_no_session_publishes_no_data_dir() {
+        let mock = MockProcessRunner::new(vec![]);
+        publish_board_data_dir("", std::path::Path::new("/data/x"), &mock);
+        assert!(mock.recorded_calls().is_empty());
+    }
+
+    #[test]
     fn a_board_with_no_session_publishes_no_port() {
         let mock = MockProcessRunner::new(vec![]);
         publish_board_port("", 8899, &mock);

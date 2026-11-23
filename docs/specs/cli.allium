@@ -681,7 +681,13 @@ rule PaneRendererGivesTheTerminalBack {
         -- describes. The data directory is for what is local to the
         -- machine, not the store: the log it writes to and the key override
         -- file it loads its keys from (keybindings.allium:
-        -- PanesLoadTheirOwnTable).
+        -- PanesLoadTheirOwnTable). It is the board's data directory: the
+        -- board publishes it on its tmux session beside its port
+        -- (startup.allium: PublishTheBoardsStoreOnItsSession), so a pane
+        -- split in one of its agent windows, and the toggle command that
+        -- re-splits it, find it there. A pane run by hand with --data-dir
+        -- uses that; with nothing published it falls back to
+        -- DISPATCH_DATA_DIR, then the default directory.
 }
 
 rule PaneRenderersAskTheBoard {

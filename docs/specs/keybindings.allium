@@ -1659,7 +1659,9 @@ surface KeyInput {
         -- The companion pane and the diff pane are handed the data directory
         -- and load the table themselves, from the same override file and by
         -- the same rule as the board (LoadKeyTable). They do not ask the
-        -- board for it. A pane's keys, section titles and startup-screen
+        -- board for it. The directory is the board's own, however the board
+        -- was given it (--data-dir, DISPATCH_DATA_DIR or the default): a
+        -- pane never reads the default while the board reads another. A pane's keys, section titles and startup-screen
         -- hint all come from the table it loaded.
 
     @guarantee DescriptionEditorTakesOnlyEsc
