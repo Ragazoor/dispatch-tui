@@ -148,6 +148,7 @@ fn opening_the_editor_empties_the_open_set_without_touching_tmux() {
         root: &worktree,
         data_dir: Path::new("/data"),
         task_id: TaskId(42),
+        key_table: crate::keybindings::KEY_BINDINGS,
     };
 
     record_editor_took_over(&context, &mut state);
@@ -166,6 +167,7 @@ fn leaving_the_tree_after_the_editor_took_over_does_not_touch_tmux() {
         root: Path::new("/work/wt"),
         data_dir: Path::new("/data"),
         task_id: TaskId(42),
+        key_table: crate::keybindings::KEY_BINDINGS,
     };
     let runner = crate::process::MockProcessRunner::new(vec![]);
 

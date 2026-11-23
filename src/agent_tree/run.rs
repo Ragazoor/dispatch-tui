@@ -59,6 +59,9 @@ pub(crate) struct DiffPaneContext<'a> {
     pub root: &'a Path,
     pub data_dir: &'a Path,
     pub task_id: TaskId,
+    /// The table the pane loaded from `data_dir` (keybindings.allium:
+    /// PanesLoadTheirOwnTable): its keys, section titles and hints.
+    pub key_table: &'static [crate::keybindings::KeyBinding],
 }
 
 /// Publish the open set and make the panes agree with it.
@@ -196,15 +199,13 @@ struct DiffPaneTeardown<'a> {
     runner: &'a dyn ProcessRunner,
     /// Set while the lower pane runs the editor; cleared when a diff opens.
     editor_took_over: &'a std::cell::Cell<bool>,
-    /// The pane's loaded table, for the fresh state.
-    key_table: &'static [crate::keybindings::KeyBinding],
 }
 
 impl Drop for DiffPaneTeardown<'_> {
     fn drop(&mut self) {
         tear_down_diff_pane(
             self.context,
-            &mut RenderState::new(self.key_table),
+            &mut RenderState::new(self.context.key_table),
             self.runner,
             self.editor_took_over.get(),
         );
@@ -381,7 +382,6 @@ fn run_loop<B: Backend>(
     commit_reads: &CommitReads,
     runner: &dyn ProcessRunner,
     usage: &mut crate::agent_tree::pane::PaneUsage,
-    key_table: &'static [crate::keybindings::KeyBinding],
 ) -> Result<()> {
     let root = context.root;
     // Retires the diff pane on every way out, an error from a draw or a poll
@@ -391,9 +391,8 @@ fn run_loop<B: Backend>(
         context,
         runner,
         editor_took_over: &editor_took_over,
-        key_table,
     };
-    let mut state = RenderState::new(key_table);
+    let mut state = RenderState::new(context.key_table);
     let mut tree = build_tree(root, &[]);
     // `build_tree` names the root node after the worktree directory, which is
     // exactly the pane title — so there is one basename computation, not two.
@@ -556,13 +555,13 @@ pub async fn run(data_dir: &Path, board_port: u16, task_id: TaskId) -> Result<()
                     root: &root,
                     data_dir,
                     task_id,
+                    key_table,
                 },
                 &agent_reads,
                 &resumes,
                 &commit_reads,
                 &RealProcessRunner::default(),
                 &mut usage,
-                key_table,
             )
         },
     );
