@@ -1058,7 +1058,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
 ;
 
     async read_only "keybinding_search" => keybindings::handle_keybinding_search,
-        "Search the keys the dispatch board, the agent-tree and diff panes, and tmux answer to, straight from the table the key handlers read. With no arguments it returns an index, not the table: one entry per input mode (namespace) with its row count, which is small. Pass namespace for one mode's keys, or query to find rows across every mode. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread. Read-only.",
+        "Search the keys the dispatch board, the agent-tree and diff panes, and tmux answer to, straight from the table the running board loaded, so the user's own keys show where they replaced a default. With no arguments it returns an index, not the table: one entry per input mode (namespace) with its row count and how many rows the user rebound, plus any entries of the user's key override file the board refused. Pass namespace for one mode's keys, or query to find rows across every mode. Each row has its keys, the context it applies under as words and as the literal keybinding_set takes (when it has one), the action id, a description and a note where a key is easy to misread; a rebound row also has its default keys, and a row whose keys change at the next board start has its pending keys. Read-only; change keys with keybinding_set.",
         {
             "type": "object",
             "properties": {
@@ -1071,6 +1071,44 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
                     "description": "Optional text. Keeps the rows whose keys, action id or description contain it, ignoring case, and drops a namespace left with none. Combines with namespace."
                 }
             }
+        }
+;
+
+    async idempotent "keybinding_set" => keybindings::handle_keybinding_set,
+        "Change the user's keys: set the keys of one or more rows of the keybinding table, or restore a row's default keys, in the key override file in the data directory. Name each row the way keybinding_search shows it: namespace, action id, and the context literal where the action has several rows in the namespace. The changes of one call are checked together with the checks the board runs when it loads the file, so swapping two rows' keys is one call; if any change would be refused (an unknown name, a key name that is not canonical, a key the mode does not allow, a clash with another row), nothing is written and the error says what to fix. The running board keeps the keys it loaded: a change applies when the board next starts, and keybinding_search shows it as pending until then.",
+        {
+            "type": "object",
+            "properties": {
+                "overrides": {
+                    "type": "array",
+                    "minItems": 1,
+                    "description": "The rows to change, applied together. Each names one row and gives its new keys.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "namespace": {
+                                "type": "string",
+                                "description": "The row's namespace, as keybinding_search names it (e.g. 'board.normal')."
+                            },
+                            "action": {
+                                "type": "string",
+                                "description": "The row's action id, as keybinding_search shows it."
+                            },
+                            "context": {
+                                "type": "string",
+                                "description": "The row's context literal (keybinding_search's context_literal). Needed only where the action has several rows in the namespace; without it the action's row with no context is meant."
+                            },
+                            "keys": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Every key the row should answer to, replacing its current keys, written as keybinding_search writes keys ('j', 'Enter', 'Ctrl+D', 'gg'). An empty list restores the row's default keys."
+                            }
+                        },
+                        "required": ["namespace", "action", "keys"]
+                    }
+                }
+            },
+            "required": ["overrides"]
         }
 }
 

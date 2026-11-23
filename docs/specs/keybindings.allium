@@ -1111,10 +1111,16 @@ rule SetKeyOverridesViaMcp {
         -- refuses is not this call's problem: it is left as it is and named
         -- in the answer.
         --
-        -- The write keeps every entry the call did not name and replaces the
-        -- file in one step, so no reader sees half of it. With no file, the
-        -- first accepted change creates it; removing the last entry leaves
-        -- an empty list.
+        -- The call's argument is overrides, a list of one or more changes.
+        -- Two changes naming one row are refused: the call would not say
+        -- which keys the row gets.
+        --
+        -- The write keeps every entry the call did not name, puts a changed
+        -- row's entry where the file had it, and replaces the file in one
+        -- step, so no reader sees half of it. With no file, the first
+        -- accepted change creates it; removing the last entry leaves an
+        -- empty list. A call that leaves the entries as they are (removing
+        -- an entry the file does not have, repeating a call) writes nothing.
         --
         -- Nothing changes in the running board: the answer lists each row's
         -- new keys and says they apply when the board next starts, and that
@@ -1154,7 +1160,10 @@ rule ListKeybindingsViaMcp {
         -- row whose entry in the override file no longer matches what the
         -- board loaded — set, changed or removed since — also carries its
         -- pending keys, and the reply says they apply when the board next
-        -- starts. A context is returned as its words and as its literal,
+        -- starts. Pending keys are what a load of the file as it is now
+        -- would give the row (LoadKeyTable), so a file that is now refused
+        -- whole makes every rebound row pending on its default keys. The
+        -- index also says how many rows are pending. A context is returned as its words and as its literal,
         -- since keybinding_set and the file name it by the literal.
         -- The index also lists the errors of the board's load, each with its
         -- message, and says so in one line when there are none to list.

@@ -363,16 +363,9 @@ const POPUP_ERRORS: usize = 3;
 /// The table is leaked: it is built once per process and lives as long as it.
 pub fn load_key_table(data_dir: &Path, reader: KeyTableReader) -> KeyTableLoad {
     let file = data_dir.join(KEY_OVERRIDE_FILE_NAME);
-    let (table, errors) = match std::fs::read_to_string(&file) {
-        Ok(text) => merge_overrides(&text),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (KEY_BINDINGS, Vec::new()),
-        Err(e) => (
-            KEY_BINDINGS,
-            vec![file_unreadable(format!(
-                "{} cannot be read ({e}); no override applies. Make it a readable file, or remove it to use the default keys",
-                file.display()
-            ))],
-        ),
+    let (table, errors) = match read_override_entries(&file) {
+        Ok(list) => merge_entries(&list),
+        Err(e) => (KEY_BINDINGS, vec![e]),
     };
     for e in &errors {
         tracing::warn!(
@@ -408,7 +401,7 @@ struct Entry {
     context: Option<String>,
     /// The row of `KEY_BINDINGS` the entry names, once resolved.
     row: Option<usize>,
-    keys: &'static [&'static str],
+    keys: Vec<String>,
     /// The problem, its message and the popup's shorter form of it, if any.
     problem: Option<(KeyOverrideProblem, String, Option<String>)>,
 }
@@ -419,60 +412,133 @@ impl Entry {
             self.problem = Some((problem, message, None));
         }
     }
+}
 
-    /// Refuse with a message that ends in a list of valid names.
-    fn refuse_listing(&mut self, problem: KeyOverrideProblem, head: &str, names: &[String]) {
-        if self.problem.is_none() {
-            let (whole, short) = listing(head, names);
-            self.problem = Some((problem, whole, short));
-        }
+/// The entries of the override file at `file`, as written: an empty list
+/// when there is no file, and the one `file_unreadable` error when it cannot
+/// be read or is not a JSON list. The loader, `keybinding_set` and
+/// `keybinding_search` all read the file through this.
+pub fn read_override_entries(file: &Path) -> Result<Vec<Value>, KeyLoadError> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => parse_override_list(&text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(file_unreadable(format!(
+            "{} cannot be read ({e}); no override applies. Make it a readable file, or remove it to use the default keys",
+            file.display()
+        ))),
+    }
+}
+
+/// The file's text as a list of entries, or the one `file_unreadable` error.
+fn parse_override_list(text: &str) -> Result<Vec<Value>, KeyLoadError> {
+    match serde_json::from_str::<Value>(text) {
+        Ok(Value::Array(list)) => Ok(list),
+        Ok(_) => Err(file_unreadable(format!(
+            "{KEY_OVERRIDE_FILE_NAME} is not a JSON list; no override applies. Write a list of entries: [{{\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"O\"]}}]"
+        ))),
+        Err(e) => Err(file_unreadable(format!(
+            "{KEY_OVERRIDE_FILE_NAME} is not valid JSON ({e}); no override applies. Fix the JSON at that place, or remove the file to use the default keys"
+        ))),
     }
 }
 
 /// The merge itself, over the file's text: the merged table (same rows, same
 /// order as `KEY_BINDINGS`) and one error per refused entry, in file order.
-/// Pure, so a writer of the file can run the same checks. It leaks the
-/// merged table (and each accepted entry's keys), which is right once per
-/// process at startup; a caller that checks a file per request should split
-/// the checks from the leak rather than call this each time.
+/// It leaks the merged table (and each accepted entry's keys), which is right
+/// once per process at startup. A caller that checks a file per request uses
+/// [`check_overrides`], which runs the same checks and leaks nothing.
+#[cfg(test)]
 pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
-    let list = match serde_json::from_str::<Value>(text) {
-        Ok(Value::Array(list)) => list,
-        Ok(_) => {
-            return (
-                KEY_BINDINGS,
-                vec![file_unreadable(format!(
-                    "{KEY_OVERRIDE_FILE_NAME} is not a JSON list; no override applies. Write a list of entries: [{{\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"O\"]}}]"
-                ))],
-            )
-        }
-        Err(e) => {
-            return (
-                KEY_BINDINGS,
-                vec![file_unreadable(format!(
-                    "{KEY_OVERRIDE_FILE_NAME} is not valid JSON ({e}); no override applies. Fix the JSON at that place, or remove the file to use the default keys"
-                ))],
-            )
-        }
-    };
-    let mut entries: Vec<Entry> = list.iter().map(judge_entry).collect();
-    refuse_duplicates(&mut entries);
-    let table = refuse_clashes(&mut entries);
-    let errors = entries
-        .into_iter()
-        .filter_map(|e| {
-            let (problem, message, popup_message) = e.problem?;
-            Some(KeyLoadError {
-                problem,
-                namespace: e.namespace,
-                action: e.action,
-                context: e.context,
-                message,
-                popup_message,
-            })
+    match parse_override_list(text) {
+        Ok(list) => merge_entries(&list),
+        Err(e) => (KEY_BINDINGS, vec![e]),
+    }
+}
+
+/// [`merge_overrides`] over entries already parsed.
+fn merge_entries(list: &[Value]) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
+    let check = check_overrides(list);
+    let errors = check.errors();
+    if check
+        .entries
+        .iter()
+        .all(|e| e.error.is_some() || e.row.is_none())
+    {
+        return (KEY_BINDINGS, errors);
+    }
+    let rows: Vec<KeyBinding> = KEY_BINDINGS
+        .iter()
+        .zip(check.keys)
+        .map(|(b, keys)| {
+            let mut b = *b;
+            if b.keys.iter().copied().ne(keys.iter().map(String::as_str)) {
+                b.keys = leak_keys(keys);
+            }
+            b
         })
         .collect();
-    (table, errors)
+    (Box::leak(rows.into_boxed_slice()), errors)
+}
+
+/// One entry of the file as the checks judged it.
+#[derive(Debug, Clone)]
+pub struct CheckedEntry {
+    /// The row of `KEY_BINDINGS` the entry names: set once it is well
+    /// formed and its namespace, action and context resolve, whatever its
+    /// keys say.
+    pub row: Option<usize>,
+    /// Why the entry is refused; `None` when it is accepted.
+    pub error: Option<KeyLoadError>,
+}
+
+/// What the loader's checks make of a list of entries, before anything is
+/// leaked (`LoadKeyTable`; `WritersShareTheLoadersChecks`).
+#[derive(Debug, Clone)]
+pub struct OverrideCheck {
+    /// One per entry, in file order.
+    pub entries: Vec<CheckedEntry>,
+    /// Every row's keys with the accepted entries applied, in
+    /// `KEY_BINDINGS` order.
+    pub keys: Vec<Vec<String>>,
+}
+
+impl OverrideCheck {
+    /// The refused entries' errors, in file order.
+    pub fn errors(&self) -> Vec<KeyLoadError> {
+        self.entries
+            .iter()
+            .filter_map(|e| e.error.clone())
+            .collect()
+    }
+}
+
+/// Run every check `LoadKeyTable` runs over `list`: each entry on its own,
+/// then duplicates, then clashes over the whole table.
+pub fn check_overrides(list: &[Value]) -> OverrideCheck {
+    let mut entries: Vec<Entry> = list.iter().map(judge_entry).collect();
+    refuse_duplicates(&mut entries);
+    refuse_clashes(&mut entries);
+    let keys = row_keys(&entries)
+        .into_iter()
+        .map(|ks| ks.into_iter().map(str::to_string).collect())
+        .collect();
+    let entries = entries
+        .into_iter()
+        .map(|e| CheckedEntry {
+            row: e.row,
+            error: e
+                .problem
+                .map(|(problem, message, popup_message)| KeyLoadError {
+                    problem,
+                    namespace: e.namespace,
+                    action: e.action,
+                    context: e.context,
+                    message,
+                    popup_message,
+                }),
+        })
+        .collect();
+    OverrideCheck { entries, keys }
 }
 
 const ENTRY_SHAPE: &str = "an entry is {\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"O\"]}, with an optional \"context\"";
@@ -516,7 +582,7 @@ fn judge_entry(value: &Value) -> Entry {
         action: field("action"),
         context: field("context"),
         row: None,
-        keys: &[],
+        keys: Vec::new(),
         problem: None,
     };
     let Some(obj) = value.as_object() else {
@@ -562,91 +628,18 @@ fn judge_entry(value: &Value) -> Entry {
     };
     let ns_name = entry.namespace.clone().unwrap_or_default();
     let action = entry.action.clone().unwrap_or_default();
-
-    let Some(ns) = KeyNamespace::parse(&ns_name) else {
-        let valid: Vec<String> = KeyNamespace::ALL
-            .iter()
-            .map(|n| n.name().to_string())
-            .collect();
-        entry.refuse_listing(
-            KeyOverrideProblem::UnknownNamespace,
-            &format!("\"{}\" is not a namespace; write one of: ", echo(&ns_name)),
-            &valid,
-        );
-        return entry;
-    };
-    let rows: Vec<usize> = (0..KEY_BINDINGS.len())
-        .filter(|&i| KEY_BINDINGS[i].namespace == ns && KEY_BINDINGS[i].action == action)
-        .collect();
-    if rows.is_empty() {
-        let mut actions: Vec<String> = Vec::new();
-        for b in KEY_BINDINGS.iter().filter(|b| b.namespace == ns) {
-            if !actions.iter().any(|a| a == b.action) {
-                actions.push(b.action.to_string());
+    let row = match resolve_row(&ns_name, &action, entry.context.as_deref()) {
+        Ok(row) => row,
+        Err(problem) => {
+            if entry.problem.is_none() {
+                entry.problem = Some(problem);
             }
-        }
-        entry.refuse_listing(
-            KeyOverrideProblem::UnknownAction,
-            &format!(
-                "{ns_name} has no action \"{}\"; its actions are: ",
-                echo(&action)
-            ),
-            &actions,
-        );
-        return entry;
-    }
-    let contexts_of_rows = || {
-        rows.iter()
-            .map(|&i| {
-                KEY_BINDINGS[i]
-                    .context
-                    .map_or("no context".to_string(), |c| format!("\"{}\"", c.literal()))
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    let row = match &entry.context {
-        Some(lit) => {
-            let found = KeyContext::parse(lit).and_then(|c| {
-                rows.iter()
-                    .copied()
-                    .find(|&i| KEY_BINDINGS[i].context == Some(c))
-            });
-            let Some(row) = found else {
-                entry.refuse(
-                    KeyOverrideProblem::UnknownContext,
-                    format!(
-                        "{ns_name} {action} has no row with context \"{}\"; its rows have: {}",
-                        echo(lit),
-                        contexts_of_rows()
-                    ),
-                );
-                return entry;
-            };
-            row
-        }
-        None => {
-            let free = rows
-                .iter()
-                .copied()
-                .find(|&i| KEY_BINDINGS[i].context.is_none());
-            match (free, rows.as_slice()) {
-                (Some(row), _) | (None, &[row]) => row,
-                (None, _) => {
-                    entry.refuse(
-                        KeyOverrideProblem::AmbiguousRow,
-                        format!(
-                            "{ns_name} {action} has several rows; add \"context\" with one of: {}",
-                            contexts_of_rows()
-                        ),
-                    );
-                    return entry;
-                }
-            }
+            return entry;
         }
     };
     entry.row = Some(row);
     let default = &KEY_BINDINGS[row];
+    let ns = default.namespace;
 
     if default.keys.contains(&ANY_OTHER_KEY) {
         entry.refuse(
@@ -717,8 +710,94 @@ fn judge_entry(value: &Value) -> Entry {
         );
         return entry;
     }
-    entry.keys = leak_keys(unique);
+    entry.keys = unique;
     entry
+}
+
+/// A refusal before it is attached to an entry: the problem, its message and
+/// the popup's shorter form of it, if any.
+type Refusal = (KeyOverrideProblem, String, Option<String>);
+
+/// The row of `KEY_BINDINGS` that a namespace, action and optional context
+/// literal name, as an entry names one: with no context, the action's
+/// context-free row when there is one, else its only row.
+fn resolve_row(ns_name: &str, action: &str, context: Option<&str>) -> Result<usize, Refusal> {
+    let Some(ns) = KeyNamespace::parse(ns_name) else {
+        let valid: Vec<String> = KeyNamespace::ALL
+            .iter()
+            .map(|n| n.name().to_string())
+            .collect();
+        let (whole, short) = listing(
+            &format!("\"{}\" is not a namespace; write one of: ", echo(ns_name)),
+            &valid,
+        );
+        return Err((KeyOverrideProblem::UnknownNamespace, whole, short));
+    };
+    let rows: Vec<usize> = (0..KEY_BINDINGS.len())
+        .filter(|&i| KEY_BINDINGS[i].namespace == ns && KEY_BINDINGS[i].action == action)
+        .collect();
+    if rows.is_empty() {
+        let mut actions: Vec<String> = Vec::new();
+        for b in KEY_BINDINGS.iter().filter(|b| b.namespace == ns) {
+            if !actions.iter().any(|a| a == b.action) {
+                actions.push(b.action.to_string());
+            }
+        }
+        let (whole, short) = listing(
+            &format!(
+                "{ns_name} has no action \"{}\"; its actions are: ",
+                echo(action)
+            ),
+            &actions,
+        );
+        return Err((KeyOverrideProblem::UnknownAction, whole, short));
+    }
+    let contexts_of_rows = || {
+        rows.iter()
+            .map(|&i| {
+                KEY_BINDINGS[i]
+                    .context
+                    .map_or("no context".to_string(), |c| format!("\"{}\"", c.literal()))
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match context {
+        Some(lit) => KeyContext::parse(lit)
+            .and_then(|c| {
+                rows.iter()
+                    .copied()
+                    .find(|&i| KEY_BINDINGS[i].context == Some(c))
+            })
+            .ok_or_else(|| {
+                (
+                    KeyOverrideProblem::UnknownContext,
+                    format!(
+                        "{ns_name} {action} has no row with context \"{}\"; its rows have: {}",
+                        echo(lit),
+                        contexts_of_rows()
+                    ),
+                    None,
+                )
+            }),
+        None => {
+            let free = rows
+                .iter()
+                .copied()
+                .find(|&i| KEY_BINDINGS[i].context.is_none());
+            match (free, rows.as_slice()) {
+                (Some(row), _) | (None, &[row]) => Ok(row),
+                (None, _) => Err((
+                    KeyOverrideProblem::AmbiguousRow,
+                    format!(
+                        "{ns_name} {action} has several rows; add \"context\" with one of: {}",
+                        contexts_of_rows()
+                    ),
+                    None,
+                )),
+            }
+        }
+    }
 }
 
 /// Every entry that names a row another entry names is refused, all of them.
@@ -745,41 +824,58 @@ fn refuse_duplicates(entries: &mut [Entry]) {
     }
 }
 
-/// The default table with every accepted entry applied.
-fn apply(entries: &[Entry]) -> Vec<KeyBinding> {
-    let mut rows = KEY_BINDINGS.to_vec();
+/// Every row's keys, in `KEY_BINDINGS` order, with every accepted entry
+/// applied.
+fn row_keys(entries: &[Entry]) -> Vec<Vec<&str>> {
+    let mut keys: Vec<Vec<&str>> = KEY_BINDINGS.iter().map(|b| b.keys.to_vec()).collect();
     for e in entries.iter().filter(|e| e.problem.is_none()) {
         if let Some(row) = e.row {
-            rows[row].keys = e.keys;
+            keys[row] = e.keys.iter().map(String::as_str).collect();
         }
     }
-    rows
+    keys
 }
 
 /// Refuse every accepted entry that takes part in a clash, round after round,
-/// until the table has none; return that table.
-fn refuse_clashes(entries: &mut [Entry]) -> &'static [KeyBinding] {
+/// until the table has none.
+fn refuse_clashes(entries: &mut [Entry]) {
     loop {
         if entries
             .iter()
             .all(|e| e.problem.is_some() || e.row.is_none())
         {
-            return KEY_BINDINGS;
+            return;
         }
-        let rows = apply(entries);
-        let clashes = table_clashes(&rows);
+        let clashes: Vec<(Clash, KeyOverrideProblem, String)> = {
+            let keys = row_keys(entries);
+            let rows: Vec<RowKeys<'_>> = KEY_BINDINGS
+                .iter()
+                .zip(keys)
+                .map(|(b, keys)| RowKeys {
+                    namespace: b.namespace,
+                    context: b.context,
+                    keys,
+                })
+                .collect();
+            clashes_in(&rows)
+                .into_iter()
+                .map(|c| {
+                    let (problem, message) = c.describe();
+                    (c, problem, message)
+                })
+                .collect()
+        };
         if clashes.is_empty() {
-            return Box::leak(rows.into_boxed_slice());
+            return;
         }
         let mut refused_any = false;
-        for clash in &clashes {
-            let (problem, message) = clash.describe(&rows);
+        for (clash, problem, message) in &clashes {
             for row in [clash.a, clash.b] {
                 if let Some(e) = entries
                     .iter_mut()
                     .find(|e| e.problem.is_none() && e.row == Some(row))
                 {
-                    e.refuse(problem, message.clone());
+                    e.refuse(*problem, message.clone());
                     refused_any = true;
                 }
             }
@@ -787,7 +883,7 @@ fn refuse_clashes(entries: &mut [Entry]) -> &'static [KeyBinding] {
         if !refused_any {
             // A clash no entry takes part in is in the default table, which
             // the drift gate rules out. Stop rather than loop.
-            return Box::leak(rows.into_boxed_slice());
+            return;
         }
     }
 }
@@ -800,13 +896,17 @@ pub struct Clash {
     /// For a chord clash, the row listing the chord's first character.
     pub b: usize,
     /// The shared key, or the chord.
-    pub key: &'static str,
+    pub key: String,
     pub chord: bool,
 }
 
 impl Clash {
-    fn describe(&self, rows: &[KeyBinding]) -> (KeyOverrideProblem, String) {
-        let (a, b) = (row_label(&rows[self.a]), row_label(&rows[self.b]));
+    /// The refusal for a clash between two rows of `KEY_BINDINGS`.
+    fn describe(&self) -> (KeyOverrideProblem, String) {
+        let (a, b) = (
+            row_label(&KEY_BINDINGS[self.a]),
+            row_label(&KEY_BINDINGS[self.b]),
+        );
         if self.chord {
             let first: String = self.key.chars().take(1).collect();
             (
@@ -828,12 +928,32 @@ impl Clash {
     }
 }
 
+/// What the clash check reads of a row.
+struct RowKeys<'a> {
+    namespace: KeyNamespace,
+    context: Option<KeyContext>,
+    keys: Vec<&'a str>,
+}
+
 /// Every clash in `rows`: two rows of a namespace that can apply at once
 /// sharing a key (`KeyUniquePerContext`, `ContextsDoNotOverlapForAKey`), and
 /// a chord whose first character is a key of the namespace
 /// (`ChordPrefixIsFree`). Empty for a well-formed table. Row numbers are
 /// indices into `rows`.
+#[cfg(test)]
 pub fn table_clashes(rows: &[KeyBinding]) -> Vec<Clash> {
+    let rows: Vec<RowKeys<'_>> = rows
+        .iter()
+        .map(|b| RowKeys {
+            namespace: b.namespace,
+            context: b.context,
+            keys: b.keys.to_vec(),
+        })
+        .collect();
+    clashes_in(&rows)
+}
+
+fn clashes_in(rows: &[RowKeys<'_>]) -> Vec<Clash> {
     let mut clashes = Vec::new();
     for (i, a) in rows.iter().enumerate() {
         for (j, b) in rows.iter().enumerate() {
@@ -848,7 +968,7 @@ pub fn table_clashes(rows: &[KeyBinding]) -> Vec<Clash> {
                         clashes.push(Clash {
                             a: i,
                             b: j,
-                            key,
+                            key: (*key).to_string(),
                             chord: false,
                         });
                     }
@@ -860,7 +980,7 @@ pub fn table_clashes(rows: &[KeyBinding]) -> Vec<Clash> {
                     clashes.push(Clash {
                         a: i,
                         b: j,
-                        key: chord,
+                        key: (*chord).to_string(),
                         chord: true,
                     });
                 }
@@ -869,6 +989,9 @@ pub fn table_clashes(rows: &[KeyBinding]) -> Vec<Clash> {
     }
     clashes
 }
+
+mod set;
+pub use set::{set_key_overrides, KeyChange, KeySetOutcome};
 
 #[cfg(test)]
 mod tests;

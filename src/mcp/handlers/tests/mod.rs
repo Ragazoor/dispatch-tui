@@ -74,7 +74,7 @@ fn state_over(
             runner,
             embedding_service: EmbeddingService::new_test(),
             data_dir: std::env::temp_dir(),
-            key_table: crate::keybindings::KeyTableLoad::defaults(&std::env::temp_dir()),
+            key_table: crate::keybindings::KeyTableLoad::defaults(&no_data_dir()),
         },
         notify_tx,
     );
@@ -83,6 +83,16 @@ fn state_over(
     }
     state.test_hooks.bg_write_done_tx = bg_write_done_tx;
     (Arc::new(state), db)
+}
+
+/// A data directory no test creates, so the board of a test state has no
+/// override file and keybinding_set refuses to create one there.
+fn no_data_dir() -> std::path::PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir()
+        .join(format!("dispatch-mcp-test-{}-{n}", std::process::id()))
+        .join("missing")
 }
 
 async fn test_state() -> Arc<McpState> {
@@ -1384,6 +1394,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("feed-config_set", json!({"reviews_command": null})),
         ("usage_read", json!({})),
         ("keybinding_search", json!({})),
+        (
+            "keybinding_set",
+            json!({"overrides": [{"namespace": "board.normal", "action": "delete_task", "keys": []}]}),
+        ),
         ("context_read", json!({"uri": "dispatch://task/self"})),
         ("work-package_create", json!({"title": "t"})),
         ("work-package_search", json!({})),

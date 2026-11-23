@@ -542,7 +542,8 @@ impl KeyBinding {
 mod overrides;
 mod table;
 pub use overrides::{
-    is_key_name, load_key_table, KeyLoadError, KeyOverrideProblem, KeyTableLoad, KeyTableReader,
+    check_overrides, is_key_name, load_key_table, read_override_entries, set_key_overrides,
+    KeyChange, KeyLoadError, KeyOverrideProblem, KeySetOutcome, KeyTableLoad, KeyTableReader,
     KEY_OVERRIDE_FILE_NAME,
 };
 pub use table::KEY_BINDINGS;

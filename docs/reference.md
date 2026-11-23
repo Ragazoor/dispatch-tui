@@ -13,7 +13,11 @@ it. There is no key list in this document to drift out of date:
   (`board.normal`, `board.detail`, `board.search`, `board.picker`, `board.confirm`,
   `agent_tree.tree`, `agent_tree.commits`, `agent_tree.agents`, `agent_diff`, `tmux.global`, …). Each row
   carries its keys, the context it applies in, its action id and any warning (for
-  example, that `G` jumps to the last row and does not enter an epic).
+  example, that `G` jumps to the last row and does not enter an epic). A row the user rebound
+  also carries its default keys.
+- **Changing keys from an agent**: call `keybinding_set`. It writes the user's `keybindings.json` in
+  the data directory with the loader's own checks, refuses a change the board would refuse, and an
+  empty key list restores a row's default. The running board keeps its keys until it restarts.
 
 A Ctrl or Alt press matches only a row that lists the modified form (`Ctrl+D`), never
 the bare key's row. See `docs/specs/keybindings.allium`.
