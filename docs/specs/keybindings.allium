@@ -19,6 +19,8 @@
 --           the default keys and the accepted overrides into the one table
 --           every reader uses; the canonical key names; what a bad entry
 --           does; and keybinding_set, the MCP tool that writes the file.
+--           The key editor: the board screen that changes the same file
+--           through the same checks (KeyEditor).
 -- Excludes: What each action DOES once run — that belongs to the spec owning
 --           the behaviour (core, tasks, epics, split-pane, agent-tree,
 --           …). This spec says `G` runs navigate_row_last; it does
@@ -252,6 +254,10 @@ contract KeybindingDriftGate {
 --   board_confirm_trust_repo              board.confirm.trust_repo
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
 --   board_confirm_delete_work_package     board.confirm.delete_work_package
+--   board_key_editor             board.key_editor             the key editor (opened from the help overlay; KeyEditor)
+--   board_key_editor_search      board.key_editor_search      typing the key editor's row search
+--   board_key_capture            board.key_capture            the key editor waiting for the key press to stage
+--   board_confirm_discard_key_edits       board.confirm.discard_key_edits
 --   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
 --   agent_tree_commits           agent_tree.commits           companion pane, Commits section
 --   agent_tree_agents            agent_tree.agents            companion pane, Agents section
@@ -278,10 +284,13 @@ contract KeybindingDriftGate {
 -- repo_filter_delete_repo_path and stays recorded. board.filter_search carries
 -- only text_backspace [Backspace], records_usage false, like board.search.
 --
--- Text namespaces. Six namespaces take typed text, and a plain character or
+-- Text namespaces. Eight namespaces take typed text, and a plain character or
 -- Space pressed there is data, not a binding: board.text, board.search,
--- board.filter_search, board.picker.repo_path, board.picker.base_branch and
--- board.picker.quick_dispatch. namespace_takes_text holds for exactly these.
+-- board.filter_search, board.picker.repo_path, board.picker.base_branch,
+-- board.picker.quick_dispatch, board.key_editor_search and board.key_capture.
+-- namespace_takes_text holds for exactly these. board.key_capture takes more
+-- than characters as data: every press no row of it lists, a named or a
+-- modified key included, is the key being captured (CaptureTakesThePress).
 -- No row of a text namespace lists a key that can be typed
 -- (TextNamespacesBindNoTypedKey).
 --
@@ -390,6 +399,8 @@ enum KeyNamespace {
     board_confirm_delete_repo_path | board_confirm_trust_repo |
     board_confirm_trust_repo_quick_dispatch |
     board_confirm_delete_work_package |
+    board_key_editor | board_key_editor_search | board_key_capture |
+    board_confirm_discard_key_edits |
     agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
     tmux_global
 }
@@ -798,7 +809,8 @@ enum KeyOverrideProblem {
 --     "context": "on_column_select_all", "keys": ["Enter"]}]
 -- It is not a store setting (settings.allium): keys belong to this machine's
 -- keyboard, and the panes, which open no store connection, read it too.
--- Dispatch never creates it unasked; keybinding_set writes it. A missing
+-- Dispatch never creates it unasked; keybinding_set and the key editor
+-- (SaveKeyEdits) write it. A missing
 -- file is not an error and means every row keeps its default keys.
 entity KeyOverrideFile {
     directory: storage/DataDirectory
@@ -1121,6 +1133,260 @@ rule SetKeyOverridesViaMcp {
         -- (mcp-task-tools.allium: ToolsAdvertiseAnnotations).
         -- A rejection is JSON-RPC -32602, as for an invalid namespace in
         -- keybinding_search.
+}
+
+-- == The key editor ==
+
+-- The board's screen for changing the user's keys: what keybinding_set does
+-- for an agent, for the user at the keyboard. It writes the same override
+-- file through the same checks (WritersShareTheLoadersChecks), and like the
+-- tool it changes nothing in the running board.
+--
+-- Its own keys are rows of the table, in namespaces of their own, so they
+-- can be rebound and the help overlay lists them. Default keys:
+--   board.help
+--     open_key_editor               e            opens the editor
+--   board.key_editor
+--     key_editor_row_down           j, Down      next row
+--     key_editor_row_up             k, Up        previous row
+--     key_editor_next_key           l, Right     pick the row's next key
+--     key_editor_previous_key       h, Left      pick the row's previous key
+--     key_editor_add_key            a            capture one key, add it to the row
+--     key_editor_add_chord          c            capture a chord, add it to the row
+--     key_editor_replace_key        Enter        capture one key, put it in place
+--                                                of the picked key
+--     key_editor_remove_key         x            remove the picked key
+--     key_editor_restore_default    r            give the row its default keys
+--     key_editor_save               w            write the staged edits
+--     key_editor_search             /            open the row search
+--     key_editor_close              Esc, q       close the editor
+--   board.key_editor_search
+--     key_editor_search_cancel      Esc          leave the search and clear it
+--     key_editor_search_commit      Enter        leave the search and keep it
+--     text_backspace                Backspace    records_usage false
+--   board.key_capture
+--     cancel_key_capture            Esc          leave capture, stage nothing
+--   board.confirm.discard_key_edits
+--     confirm_discard_key_edits_yes y, Y         drop the staged edits and close
+--     confirm_discard_key_edits_no  any other key  stay in the editor
+
+-- What the editor is doing with a row's keys while it waits for a press.
+enum KeyCaptureKind { add_key | add_chord | replace_key }
+
+-- One staged edit: the keys the editor will give a row when the user saves.
+-- An empty keys list means "remove the row's entry from the file", which
+-- gives the row its default keys, as in keybinding_set.
+value StagedKeyEdit {
+    row:  KeyBinding
+    keys: List<String>
+}
+
+-- The open editor. One at a time, on the board, held only while it is open:
+-- closing it drops everything staged (CloseKeyEditor).
+entity KeyEditor {
+    -- Every row of the table, grouped by namespace in KeyNamespace order,
+    -- the catch-all rows included. A row shows its namespace, action,
+    -- context words and description, and up to four sets of keys: the keys
+    -- the running board loaded, always; its default keys, when they differ
+    -- from the loaded keys; the keys the override file gives it now, when
+    -- they differ from the loaded keys (such a change waits for a restart);
+    -- and its staged keys, when an edit is staged.
+    rows:         List<KeyBinding>
+    -- The override file's entries as the editor last read them, and the
+    -- message when the file is not a JSON list (file_unreadable).
+    file:         KeyOverrideFile
+    file_error:   String?
+    cursor:       KeyBinding
+    -- Which key of the cursor row is picked, for replace_key and
+    -- remove_key. Moving the cursor picks the row's first key.
+    picked_key:   Integer
+    staged:       List<StagedKeyEdit>
+    -- Each message the checks give the staged edits, by the row it is
+    -- about (StagedEditsAreChecked).
+    problems:     List<KeyLoadError>
+    search_query: String
+    capture:      KeyCaptureKind?
+    -- The first character of a chord being captured.
+    chord_first:  String?
+}
+
+rule OpenKeyEditor {
+    -- From the help overlay, which already lists the table.
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_help and action = "open_key_editor"
+
+    ensures: KeyEditor.created(search_query: "")
+
+    @guidance
+        -- The editor opens with nothing staged, no search, the cursor on the
+        -- first row, and the override file read as it is now. The help
+        -- overlay stays where it was scrolled: closing the editor returns
+        -- to it (CloseKeyEditor).
+}
+
+rule CaptureTakesThePress {
+    -- Capturing a key press is a text-like mode: the pressed key is data,
+    -- not a binding. Only the rows of board.key_capture are bindings there.
+    when: KeyPressed(user, namespace, key)
+
+    requires: namespace = board_key_capture
+    requires: not exists b in KeyBindings where
+        b.namespace = board_key_capture and key in b.keys
+
+    ensures: KeyCaptured(key: key)
+
+    @guidance
+        -- a (add_key), Enter (replace_key) and c (add_chord) open capture.
+        -- Esc, the key of cancel_key_capture, leaves it and stages nothing;
+        -- it is the one key the editor cannot capture, and a row that wants
+        -- it is set through keybinding_set or after rebinding
+        -- cancel_key_capture. Every other press is captured as its key name
+        -- (KeyBinding.keys), a modified press included: no catch-all is
+        -- involved, so ModifiedPressMatchesOnlyItsOwnRow does not stop it.
+        -- A press with no key name (a media key) stages nothing and the
+        -- editor says the key has no name.
+        --
+        -- add_key and replace_key take one press, then leave capture.
+        -- add_chord takes two presses that must both be characters, and
+        -- their two characters must form a chord (is_chord): "U" then "p"
+        -- spells the named key Up and is refused. Any other press ends the
+        -- capture with a message and stages nothing. The first half waits
+        -- for the second with no time limit.
+        --
+        -- For a tmux_global row the board never sees the prefix press, so
+        -- the user presses only the key after it and the editor stages
+        -- "Prefix+" and that key. Such a row keeps one key
+        -- (TmuxGlobalRowsHaveOneKey), so replace_key is the edit that works
+        -- there: add_key gives it a second key and add_chord a chord, and
+        -- the checks refuse both.
+        --
+        -- add_key appends the key to the row's keys. replace_key puts it in
+        -- place of the picked key. Either way a key the row already lists
+        -- stays once, so replacing a key with another key of the row leaves
+        -- the row one key shorter. The result is staged for the row,
+        -- replacing an earlier staged edit of the row, and checked
+        -- (StagedEditsAreChecked). An edit that leaves the row as the file
+        -- has it is not staged: removing a key and adding it back leaves
+        -- nothing staged. Capture records no usage: the key opening it
+        -- already did.
+}
+
+rule RemoveKeyFromRow {
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_key_editor and action = "key_editor_remove_key"
+    let editor = open_key_editor()
+
+    -- A row always keeps at least one key; r gives it its defaults back.
+    requires: editor_row_keys(editor.cursor).count > 1
+
+    ensures: KeyEditStaged(row: editor.cursor)
+
+    @guidance
+        -- Removes the picked key from the row's keys (staged keys when the
+        -- row has an edit staged, else the keys the file gives it) and
+        -- stages the result. On a row with one key it changes nothing,
+        -- records nothing, and the editor says to press the
+        -- restore_default key instead.
+}
+
+rule RestoreRowDefault {
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_key_editor and action = "key_editor_restore_default"
+    let editor = open_key_editor()
+
+    -- Nothing to restore: the file has no entry for the row and nothing is
+    -- staged for it.
+    requires: row_has_file_entry(editor.cursor) or row_has_staged_edit(editor.cursor)
+
+    ensures: KeyEditStaged(row: editor.cursor)
+
+    @guidance
+        -- With an entry in the file, stages its removal (an empty keys
+        -- list, as keybinding_set takes it), so saving gives the row its
+        -- default keys; the row shows its default keys as staged. With no
+        -- entry, drops the row's staged edit, and the row keeps its default
+        -- keys. A press that has nothing to restore, a removal already
+        -- staged included, records nothing.
+}
+
+rule StagedEditsAreChecked {
+    -- A clash is shown before it is saved.
+    when: KeyEditStaged(row)
+
+    ensures: KeyEditorProblemsShown()
+
+    @guidance
+        -- After every staged edit the editor runs the checks keybinding_set
+        -- runs, over the default table plus the file's entries plus every
+        -- staged edit, and keeps the problems the staged edits add. A row
+        -- whose staged keys are refused shows its message under it, in the
+        -- error colour, with the same words keybinding_set and the load
+        -- give; a clash names both rows and the key, and shows under each
+        -- row it involves that has a staged edit or an entry in the file,
+        -- each such row counting one problem. The counts of staged edits and of
+        -- problems are shown in the editor's footer, beside its keys. Entries already in the file that
+        -- the load refuses are shown as the load reports them and are not
+        -- the editor's problems. Edits are checked together, so a swap of
+        -- two rows' keys clashes after the first edit and is clean after
+        -- the second.
+}
+
+rule SaveKeyEdits {
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_key_editor and action = "key_editor_save"
+    let editor = open_key_editor()
+
+    requires: editor.staged.count >= 1
+
+    ensures: KeyOverrideFileWritten(changes: editor.staged)
+
+    @guidance
+        -- Saves every staged edit in one write, as one keybinding_set call
+        -- with those changes would: the file is read again at save, since
+        -- an agent may have written it since the editor opened, and checked
+        -- with the staged edits together. If any edit would add a problem,
+        -- nothing is written, the staged edits stay, and the editor shows
+        -- each message. A file that is not a JSON list is never written
+        -- over: the editor shows the file's error when it opens, and a save
+        -- is refused with keybinding_set's message to fix or remove the
+        -- file. After a save, nothing is staged and the editor reads the
+        -- file again. It says the keys apply when the board next starts (a
+        -- pane opened before then already uses them), or, when the file
+        -- already said what was staged, that nothing was written. With
+        -- nothing staged, the key changes nothing and records nothing.
+}
+
+rule CloseKeyEditor {
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_key_editor and action = "key_editor_close"
+    let editor = open_key_editor()
+
+    ensures:
+        if editor.staged.count = 0:
+            KeyEditorClosed()
+        else:
+            KeyEditorDiscardAsked()
+
+    @guidance
+        -- Closing returns to the help overlay, at the scroll it had. With
+        -- edits staged, a confirmation asks first: its yes row drops them
+        -- and closes the editor, any other key keeps the editor open with
+        -- its edits.
+}
+
+rule SearchKeyEditorRows {
+    when: KeyActionRun(namespace, action, key, records_usage)
+    requires: namespace = board_key_editor and action = "key_editor_search"
+    let editor = open_key_editor()
+
+    ensures: KeyEditorSearchOpened()
+
+    @guidance
+        -- Typed characters filter the rows, ignoring case, to those whose
+        -- namespace name, action, description or current keys contain the
+        -- query; the cursor moves to the first match. The commit row keeps
+        -- the filter and returns to the editor; the cancel row clears it.
+        -- Staged edits are kept for rows the filter hides.
 }
 
 -- == Reading the table ==
@@ -1520,9 +1786,10 @@ surface HelpOverlay {
 
     @guarantee OverlayTitleNamesItsOwnKeys
         -- The overlay's border title is built from the table too: it names
-        -- the keys of board.help's scroll_help_down and scroll_help_up rows
-        -- and of its close_help row (with the default keys, "j/Down/k/Up
-        -- scroll, ? or Esc close"). Rebinding any of these rows
+        -- the keys of board.help's scroll_help_down and scroll_help_up rows,
+        -- of its open_key_editor row and of its close_help row (with the
+        -- default keys, "j/Down/k/Up
+        -- scroll, e edit keys, ? or Esc close"). Rebinding any of these rows
         -- changes the title with no second edit; the title never names a key
         -- the overlay does not answer to.
 
@@ -1535,7 +1802,8 @@ surface HelpOverlay {
         -- than from neither.
 }
 
--- Where a change to the user's keys enters: keybinding_set.
+-- Where a change to the user's keys enters: keybinding_set, and the key
+-- editor (KeyEditorScreen).
 surface KeyOverrideWrites {
     facing agent: core/McpClient
 
@@ -1548,13 +1816,49 @@ surface KeyOverrideWrites {
         -- (SetKeyOverridesViaMcp).
 
     @guarantee WritersShareTheLoadersChecks
-        -- Whatever writes the override file checks a change with the checks
+        -- Whatever writes the override file — keybinding_set and the key
+        -- editor (SaveKeyEdits) — checks a change with the checks
         -- LoadKeyTable runs, not with a copy of them, so nothing dispatch
-        -- writes is refused at the next start.
+        -- writes is refused at the next start, and a change one refuses the
+        -- other refuses with the same message.
 
     @guarantee TheAnswerSaysWhenItApplies
         -- The answer lists each changed row with its new keys and says the
         -- change applies when the board next starts.
+}
+
+
+-- The key editor, as the user sees it.
+surface KeyEditorScreen {
+    facing user: core/Operator
+
+    exposes:
+        for binding in KeyBindings:
+            binding.namespace
+            binding.action
+            binding.context
+            binding.description
+            binding.keys
+            binding.default_keys
+
+    provides:
+        KeyPressed(user, namespace, key)
+
+    @guarantee EditorShowsWhatWillChange
+        -- Each row shows its current keys, its default keys where they
+        -- differ, the keys that wait for a restart, its staged keys and any
+        -- problem a staged edit has (KeyEditor.rows, StagedEditsAreChecked).
+
+    @guarantee TheEditorChangesNothingLive
+        -- A save writes the override file only. The running board keeps the
+        -- keys it loaded (KeyTableLoading.OneLoadPerProcess) and says so.
+
+    @guarantee EditorKeysAreTableRows
+        -- Every key the editor answers is a row of board.key_editor,
+        -- board.key_editor_search, board.key_capture or
+        -- board.confirm.discard_key_edits, so it can be rebound and the help
+        -- overlay lists it. The only exception is the captured press, which
+        -- is data (CaptureTakesThePress).
 }
 
 -- Where a process announces that it needs its table. The board and the two
