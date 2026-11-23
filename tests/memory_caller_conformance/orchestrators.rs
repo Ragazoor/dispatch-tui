@@ -416,3 +416,151 @@ fn memory_caller_runs_orchestrator_sessions_like_the_real_module() {
         wait_for!(rows_real.orchestrators().is_empty());
     });
 }
+
+/// `store-split.allium: RequestDispatch`'s limit in an orchestrated epic
+/// (`orchestrators.allium: running_here`), and its one-winner claim. Both
+/// sides stop a burst at the limit with the same words, give the slot back
+/// when a request fails, and let only one of two machines start one task.
+#[test]
+fn memory_caller_holds_starts_to_the_limit_like_the_real_module() {
+    use dispatch_tui::models::DispatchRequestId;
+
+    if !spacetime_available_or_skip() {
+        return;
+    }
+
+    let instance = Instance::start("memory-caller-start-limit");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows_real = Arc::new(SharedRows::new());
+    let rows_mem = Arc::new(SharedRows::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_identity_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        register_profiles(&real, &mem, &accepted.identity).await;
+        let identity = accepted.identity.clone();
+        for host in ["host-a", "host-b"] {
+            for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+                caller
+                    .register_host(host.into(), String::new(), identity.clone())
+                    .await
+                    .unwrap()
+                    .applied()
+                    .unwrap();
+            }
+        }
+
+        let mut woken = rows_real.changed();
+        macro_rules! wait_for {
+            ($cond:expr) => {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !$cond {
+                        woken.changed().await.expect("subscription must deliver");
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+            };
+        }
+        macro_rules! both {
+            ($call:ident ( $($arg:expr),* )) => {{
+                let r = real.$call($($arg.clone()),*).await.unwrap();
+                let m = mem.$call($($arg.clone()),*).await.unwrap();
+                match (r, m) {
+                    (ReducerOutcome::Applied(r), ReducerOutcome::Applied(m)) => {
+                        Ok((r, m))
+                    }
+                    (ReducerOutcome::Refused(r), ReducerOutcome::Refused(m)) => {
+                        assert_eq!(r, m, "both sides must refuse in the same words");
+                        Err(r)
+                    }
+                    other => panic!("the two sides disagree: {other:?}"),
+                }
+            }};
+        }
+
+        let row = bindings::Epic {
+            title: "E".into(),
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let epic = real.create_epic(row.clone()).await.unwrap();
+        assert_eq!(epic, mem.create_epic(row).await.unwrap());
+        wait_for!(rows_real.epic(epic).is_some());
+        let none_rule: Option<String> = None;
+        both!(switch_orchestrator_on(epic, none_rule, Some(1_i64))).expect("switch on");
+
+        let task_row = bindings::Task {
+            created_by: identity.clone(),
+            ..blank_task_in_epic(epic.0)
+        };
+        let first = create_task_both(&real, &mem, &rows_real, &rows_mem, task_row.clone()).await;
+        let second = create_task_both(&real, &mem, &rows_real, &rows_mem, task_row).await;
+        let (host_a, host_b, mcp, derive) = (
+            "host-a".to_string(),
+            "host-b".to_string(),
+            "mcp".to_string(),
+            String::new(),
+        );
+
+        // A burst stops at the limit, on both sides, in the same words.
+        let (r_ids, m_ids) =
+            both!(request_dispatch(first, host_a, mcp, derive)).expect("the first start");
+        let refused = both!(request_dispatch(second, host_a, mcp, derive))
+            .expect_err("the epic is at its limit");
+        assert_eq!(
+            refused,
+            format!("epic {} already runs 1 of 1 tasks", epic.0)
+        );
+
+        // Another machine has its own slots; but the first claim on a task
+        // wins, so host b cannot start the task host a holds.
+        assert!(both!(request_dispatch(first, host_b, mcp, derive)).is_err());
+
+        // A failed request gives the slot back.
+        let (r_req, m_req) = (DispatchRequestId(r_ids[0]), DispatchRequestId(m_ids[0]));
+        wait_for!(rows_real.dispatch_request(r_req).is_some());
+        for (caller, req) in [
+            (&real as &dyn ReducerCaller, r_req),
+            (&mem as &dyn ReducerCaller, m_req),
+        ] {
+            caller
+                .claim_dispatch_request(req, host_a.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+            caller
+                .report_dispatch_failed(req, host_a.clone(), "boom".into())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+        wait_for!(rows_real
+            .dispatch_request(r_req)
+            .is_some_and(|r| !r.is_open()));
+        both!(request_dispatch(second, host_a, mcp, derive)).expect("the slot is free again");
+    });
+}

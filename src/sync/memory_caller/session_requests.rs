@@ -424,6 +424,7 @@ impl MemoryReducerCaller {
                 has_open,
                 &stamp,
             )
+            .and_then(|()| module::check_start_limit(&*tables, &candidate, host))
             .is_err()
             {
                 continue;

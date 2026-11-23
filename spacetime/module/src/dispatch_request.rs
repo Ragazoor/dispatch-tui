@@ -694,6 +694,7 @@ pub fn request_dispatch(
         .filter(&task_id)
         .any(|r| dispatch_request_is_open(&r.state));
     validate_dispatch_request(&task, &requester, &origin, has_open, &now(ctx))?;
+    check_start_limit(ctx, &task, &requester)?;
     let mode = choose_dispatch_mode(&task, &mode)?;
     create_dispatch_request(ctx, task, &requester, mode, &origin)
 }

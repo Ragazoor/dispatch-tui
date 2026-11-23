@@ -11,6 +11,9 @@ pub const START_RULE_MARKED_ONLY: &str = "marked_only";
 pub const START_RULE_EVERYTHING: &str = "everything";
 pub const READY_MARKER_OPERATOR: &str = "operator";
 pub const READY_MARKER_AGENT: &str = "agent";
+/// `core.allium: config.orchestrator_max_parallel`, the limit of a switch
+/// whose `max_parallel` is `0` (none of its own).
+pub const DEFAULT_ORCHESTRATOR_LIMIT: i64 = 3;
 
 fn check_start_rule(rule: &str) -> Result<(), String> {
     match rule {
@@ -42,6 +45,56 @@ pub fn covering_orchestration(r: &impl StoreReads, epic_id: i64) -> Option<EpicO
         next = r.epic(next)?.parent_epic_id;
     }
     None
+}
+
+/// `core.allium: EpicOrchestration.limit`.
+pub fn orchestration_limit(o: &EpicOrchestration) -> i64 {
+    if o.max_parallel > 0 {
+        o.max_parallel
+    } else {
+        DEFAULT_ORCHESTRATOR_LIMIT
+    }
+}
+
+/// `orchestrators.allium`'s `running_here(epic, host)`, counted: the running
+/// tasks of `epic_id`'s subtree whose current agent is on `host` and has a
+/// window or is still being started.
+pub fn running_here_count(r: &impl StoreReads, epic_id: i64, host: &str) -> usize {
+    std::iter::once(epic_id)
+        .chain(descendant_epic_ids(r, epic_id))
+        .flat_map(|epic| r.tasks_in_epic(epic))
+        .filter(|t| t.status == RUNNING)
+        .filter(|t| {
+            let starting = || {
+                r.dispatch_requests_of(t.id)
+                    .iter()
+                    .any(|q| dispatch_request_is_open(&q.state))
+            };
+            r.agents_of(t.id).iter().any(|a| {
+                a.state == AGENT_CURRENT
+                    && a.host == host
+                    && (!a.tmux_window.is_empty() || starting())
+            })
+        })
+        .count()
+}
+
+/// `store-split.allium: RequestDispatch`'s limit: a start of `task` on
+/// `host` is refused while the epic that covers it already runs its limit
+/// there.
+pub fn check_start_limit(r: &impl StoreReads, task: &Task, host: &str) -> Result<(), String> {
+    let Some(orchestration) = covering_orchestration(r, task.epic_id) else {
+        return Ok(());
+    };
+    let limit = orchestration_limit(&orchestration);
+    let running = running_here_count(r, orchestration.epic_id, host);
+    if i64::try_from(running).unwrap_or(i64::MAX) >= limit {
+        return Err(format!(
+            "epic {} already runs {running} of {limit} tasks",
+            orchestration.epic_id
+        ));
+    }
+    Ok(())
 }
 
 /// Every epic id under `root`, `root` itself excluded, ascending.

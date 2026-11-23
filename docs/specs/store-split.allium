@@ -410,6 +410,7 @@ use "./settings.allium" as settings
 use "./tasks.allium" as tasks
 use "./sync.allium" as sync
 use "./feeds.allium" as feeds
+use "./orchestrators.allium" as orchestrators
 
 ------------------------------------------------------------
 -- Contracts
@@ -796,6 +797,12 @@ rule RequestDispatch {
     -- whose clock runs ahead of the store's, and a board acting on a view
     -- older than a ClearSchedule.
     requires: origin != schedule or (task.next_due != null and task.next_due <= now)
+    -- orchestrators.allium O7: in an orchestrated epic, every start on a
+    -- machine is held to the epic's one limit, whatever its origin, the
+    -- operator's own key included. A task no orchestrator covers has none.
+    requires: orchestrators/covering(task) = null
+        or orchestrators/running_here(orchestrators/covering(task).epic, requester).count
+           < orchestrators/covering(task).limit
 
     -- D3: the caller's mode when it names one, else the derivation.
     let chosen_mode = if mode != null: mode else: task.default_dispatch_mode
@@ -845,8 +852,18 @@ rule RequestDispatch {
         -- The refusal names why (not backlog, owned by another machine, an
         -- open request already exists, a phoenix task or a task still
         -- waiting for its scheduled time the epic chain may not take, a
-        -- schedule-origin request for a task that is not due), and nothing
-        -- was written. The epic chain treats every refusal
+        -- schedule-origin request for a task that is not due, an epic at its
+        -- limit), and nothing was written. The limit's refusal reads "epic
+        -- <id> already runs <n> of <limit> tasks", naming the orchestrated
+        -- epic. A refused schedule-origin request is asked again by the
+        -- board's next schedule pass (schedules.allium: FireDueTask), so a
+        -- due task starts once a slot frees. A resume of a task that already
+        -- runs is not a start and is not held to the limit.
+        --
+        -- Of two requests for one task, from two machines or two entry
+        -- points, one wins: the request is one transaction, and the first
+        -- claim moves the task out of backlog and leaves an open request, so
+        -- the second is refused. The epic chain treats every refusal
         -- alike and offers its next candidate (epics.allium:
         -- AutoDispatchNextSubtask).
         --

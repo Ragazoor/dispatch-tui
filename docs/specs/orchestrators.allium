@@ -45,7 +45,11 @@
 -- (CreateTaskViaMcp's caller_identity, UpdateTaskViaMcp's ready mark), its
 -- name in agents.allium (the picker, OrchestratorNameIsNotATask,
 -- OrchestratorNameResolvesToItsEpic), its prompt in dispatch-prompt.allium
--- (OrchestratorSessionPrompt).
+-- (OrchestratorSessionPrompt). Built (step 4): the limit. It is a
+-- requires of store-split.allium's RequestDispatch, which every start in an
+-- orchestrated epic passes through, and running_here below is what it
+-- counts. OrchestratorStartsATask is built but for its log entry (step 5):
+-- the orchestrator starts a task with task_dispatch, as its prompt says.
 -- Left by step 3 for the steps that own them, so none is missed:
 --   - step 5: the session log entry of StartOrchestratorSession; the
 --     WaitingItem of OrchestratorThatKeepsDyingWaitsForTheOperator (until
@@ -207,8 +211,15 @@ entity WaitingItem {
 --
 -- has_open_work(epic): some task in the epic's subtree is not done.
 -- running_here(epic, host): the tasks in the epic's subtree with status =
--- running whose current agent is live on this host. A task in review, and a
--- running task whose agent is detached (no window), are not among them (O7).
+-- running whose current agent is on this host and either is live (has a
+-- window) or is still being started (the task holds an open
+-- split/DispatchRequest: requested or provisioning). A task in review, a
+-- running task whose agent is detached (no window and no open request), and
+-- a task whose request ended failed are not among them (O7). The start
+-- still being provisioned counts so that a burst of starts stops at the
+-- limit: the claim makes the task running at once, but its window is
+-- reported seconds later. Decided by the epic's acting orchestrator while
+-- the operator was away; open to the operator's review.
 -- counts_as_ready(task): the task has a core/ReadyMark, or covering(task) has
 -- start_rule = everything.
 -- wanted(orchestrator): its epic has open work.
@@ -521,7 +532,6 @@ rule OrchestratorStartsATask {
     requires: task.status = backlog
     requires: counts_as_ready(task)
 
-    ensures: StartAsked(task: task, host: orchestrator.host)
     ensures: split/DispatchRequested(
         task: task,
         requester: orchestrator.host,
@@ -537,13 +547,17 @@ rule OrchestratorStartsATask {
         -- The start is an ordinary dispatch request, so every refusal of
         -- RequestDispatch applies as it stands: a task another machine holds,
         -- a task with an open request, a phoenix task, a task still waiting
-        -- for its scheduled time. Two machines' orchestrators that pick the
-        -- same task race on that request and the store accepts one.
+        -- for its scheduled time, an epic at its limit. Two machines'
+        -- orchestrators that pick the same task race on that request and the
+        -- store accepts one: the request is one transaction, and the first
+        -- claim moves the task out of backlog and leaves an open request, so
+        -- the second is refused.
         --
-        -- The limit is every start's, whoever asks
-        -- (StartsInAnOrchestratedEpicShareOneLimit). Ready is not: the store
-        -- never checks the mark, and the operator starts any backlog task
-        -- with the usual key, marked or not.
+        -- The limit is every start's, whoever asks (O7; store-split.allium:
+        -- RequestDispatch). Ready is not: the store never checks the mark,
+        -- and the operator starts any backlog task with the usual key, marked
+        -- or not. The three requires above are the orchestrator's own
+        -- discipline, from its prompt, and no store check.
         --
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on
@@ -555,25 +569,8 @@ rule OrchestratorStartsATask {
         -- may tell the operator that one looks unblocked.
 }
 
-rule StartsInAnOrchestratedEpicShareOneLimit {
-    when: StartAsked(task, host)
-
-    -- O7. Every way a task of an orchestrated epic starts on a machine, the
-    -- operator's own key included, is held to the one limit. A task no
-    -- orchestrator covers has none.
-    requires: covering(task) = null
-        or running_here(covering(task).epic, host).count < covering(task).limit
-
-    ensures: StartAllowed(task, host)
-
-    @guidance
-        -- Once built this is a requires of RequestDispatch itself, with no
-        -- exception for who asks. The refusal reads "epic <id> already runs
-        -- <n> of <limit> tasks". A resume of a task that already runs is not
-        -- a start and is not held to it. Because a task in review and a
-        -- detached task take no slot, an agent that waits for a PR review
-        -- does not hold up the next task.
-}
+-- The limit (O7) is store-split.allium's: a requires of RequestDispatch,
+-- with running_here above as what it counts.
 
 -- == Answering ==
 
@@ -1048,8 +1045,6 @@ surface OrchestratorMcpTools {
         EpicNoteWritten(epic, text)
         EpicNoteChanged(note, text?, done?)
         EpicNoteRemoved(note)
-        -- Any start of a task, by any tool or key.
-        StartAsked(task, host)
 
     @guarantee EpicReadsShowTheOrchestrator
         -- epic_search for one epic says whether it is orchestrated, its
@@ -1189,8 +1184,8 @@ surface OrchestratorNotifications {
 --     subtask when a session closed, its failure report and the stalled-chain
 --     mark on a card. Also the epic edit form's orchestrator section. (The
 --     re-parent and delete effects on the switch are there already.)
---   - store-split.allium: the chain's request origin goes, and
---     RequestDispatch gains the limit. schedules.allium and
+--   - store-split.allium: the chain's request origin goes (RequestDispatch
+--     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
 --   - tasks.allium and mcp-task-tools.allium: what the task and epic reads
 --     add once the items, the notes and the log exist (the ready argument,

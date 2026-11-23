@@ -36,8 +36,8 @@ define_str_enum!(ReadyMarker, "ready marker" {
 });
 
 /// `core.allium: config.orchestrator_max_parallel`, the limit of an epic that
-/// sets none.
-pub const DEFAULT_ORCHESTRATOR_LIMIT: i64 = 3;
+/// sets none: the store's, which refuses a start past it.
+pub const DEFAULT_ORCHESTRATOR_LIMIT: i64 = dispatch_spacetime_module::DEFAULT_ORCHESTRATOR_LIMIT;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EpicOrchestration {

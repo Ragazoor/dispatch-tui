@@ -346,8 +346,14 @@ use super::*;
 /// that removes it. Agent names now skip orchestrator names. A board on an
 /// older build lacks the reducers.
 ///
+/// Bumped: `request_dispatch` and the epic chain refuse a start in an
+/// orchestrated epic that already runs its limit on the requesting machine
+/// (`orchestration.rs: check_start_limit`; `store-split.allium:
+/// RequestDispatch`). A board on an older build would let its mirror start
+/// what the store refuses.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 66;
+pub const RULES_VERSION: i64 = 67;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

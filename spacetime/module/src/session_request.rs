@@ -805,6 +805,7 @@ fn chain_next_subtask(ctx: &ReducerContext, closed: &Task, host: &str) -> i64 {
             has_open,
             &stamp,
         )
+        .and_then(|()| check_start_limit(ctx, &candidate, host))
         .is_err()
         {
             continue;
