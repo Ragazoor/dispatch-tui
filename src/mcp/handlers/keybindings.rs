@@ -59,7 +59,7 @@ pub(crate) async fn handle_keybinding_search(
                     "namespace": ns.name(),
                     "receiver": ns.receiver().as_str(),
                     "bindings": rows.clone().count(),
-                    "overridden": rows.filter(|(i, b)| b.keys != KEY_BINDINGS[*i].keys).count(),
+                    "overridden": rows.filter(|(i, b)| is_overridden(*i, b)).count(),
                 })
             })
             .collect();
@@ -135,7 +135,7 @@ pub(crate) async fn handle_keybinding_search(
                         "action": b.action,
                         "description": b.description,
                     });
-                    if b.keys != KEY_BINDINGS[i].keys {
+                    if is_overridden(i, b) {
                         row["default_keys"] = json!(KEY_BINDINGS[i].keys);
                     }
                     if let Some(pending) = next.get(i).filter(|k| !same_keys(b, k)) {
@@ -175,13 +175,16 @@ pub(crate) async fn handle_keybinding_search(
             .is_some_and(|rows| rows.iter().any(|r| r.get("pending_keys").is_some()))
     });
     if pending_shown {
-        text.push_str(&format!("\n{PENDING_NOTE}"));
+        text.push_str(&format!("\n{PENDING_NOTE}{APPLIES_AT_RESTART}"));
     }
     JsonRpcResponse::ok(id, json!({ "content": [{ "type": "text", "text": text }] }))
 }
 
 /// What a row's pending keys mean, wherever they are shown.
-const PENDING_NOTE: &str = "pending_keys are the keys the override file gives a row now: they apply when the board next starts, and a companion or diff pane opened before then already uses them.";
+const PENDING_NOTE: &str = "pending_keys are the keys the override file gives a row now: ";
+
+/// When a change to the override file applies, as both tools say it.
+const APPLIES_AT_RESTART: &str = "they apply when the board next starts, and a companion or diff pane opened before then already uses them.";
 
 /// The rows of `ns` in `table`, each with its index, which is also its index
 /// in `KEY_BINDINGS` (a loaded table has the same rows in the same order).
@@ -199,13 +202,13 @@ fn rows_in(
 /// the override file as it is now would produce (`LoadKeyTable`). A file the
 /// load would refuse whole gives every row its default keys.
 fn next_keys(state: &McpState) -> Vec<Vec<String>> {
-    match read_override_entries(&state.key_table.file) {
-        Ok(list) => check_overrides(&list).keys,
-        Err(_) => KEY_BINDINGS
-            .iter()
-            .map(|b| b.keys.iter().map(|k| (*k).to_string()).collect())
-            .collect(),
-    }
+    let entries = read_override_entries(&state.key_table.file).unwrap_or_default();
+    check_overrides(&entries).keys
+}
+
+/// Whether row `i` of a loaded table has keys other than its defaults.
+fn is_overridden(i: usize, b: &KeyBinding) -> bool {
+    b.keys != KEY_BINDINGS[i].keys
 }
 
 fn same_keys(b: &KeyBinding, keys: &[String]) -> bool {
@@ -227,17 +230,7 @@ fn pending_rows<'a>(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct KeybindingSetArgs {
-    pub(super) overrides: Vec<KeyOverrideArg>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct KeyOverrideArg {
-    pub(super) namespace: String,
-    pub(super) action: String,
-    #[serde(default)]
-    pub(super) context: Option<String>,
-    pub(super) keys: Vec<String>,
+    pub(super) overrides: Vec<KeyChange>,
 }
 
 /// `keybinding_set` (`SetKeyOverridesViaMcp`): change the keys of one or
@@ -253,18 +246,8 @@ pub(crate) async fn handle_keybinding_set(
         Ok(a) => a,
         Err(e) => return e,
     };
-    let changes: Vec<KeyChange> = args
-        .overrides
-        .into_iter()
-        .map(|o| KeyChange {
-            namespace: o.namespace,
-            action: o.action,
-            context: o.context,
-            keys: o.keys,
-        })
-        .collect();
     let file = state.key_table.file.clone();
-    let outcome = match set_key_overrides(&file, &changes) {
+    let outcome = match set_key_overrides(&file, &args.overrides) {
         Ok(outcome) => outcome,
         Err(KeySetError::Write(message)) => {
             return JsonRpcResponse::err(id, INTERNAL_ERROR, message)
@@ -293,7 +276,9 @@ pub(crate) async fn handle_keybinding_set(
             text.push_str(&format!("\n- {}: {keys}", row.label));
         }
     }
-    text.push_str("\nThe running board keeps the keys it loaded: these apply when the board next starts, and a companion or diff pane opened before then already uses them.");
+    text.push_str(&format!(
+        "\nThe running board keeps the keys it loaded: {APPLIES_AT_RESTART}"
+    ));
     if !outcome.kept_errors.is_empty() {
         text.push_str(
             "\nThese entries already in the file are refused at load and were left as they are:",

@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use super::{
@@ -15,10 +16,12 @@ use super::{
 /// One change of a call: the row, named as an entry names it, and its keys.
 /// An empty key list removes the row's entry, which restores its default
 /// keys.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KeyChange {
     pub namespace: String,
     pub action: String,
+    #[serde(default)]
     pub context: Option<String>,
     pub keys: Vec<String>,
 }
@@ -124,7 +127,7 @@ pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOut
     // A problem on an entry the call wrote, or on a file entry the load
     // accepted before, is one the call adds.
     let after = check_overrides(&list);
-    let added: Vec<String> = after
+    let mut added: Vec<String> = after
         .entries
         .iter()
         .zip(&origin)
@@ -135,7 +138,6 @@ pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOut
         })
         .collect();
     if !added.is_empty() {
-        let mut added = added;
         added.dedup();
         return Err(Refused(added));
     }

@@ -403,7 +403,7 @@ struct Entry {
     row: Option<usize>,
     keys: Vec<String>,
     /// The problem, its message and the popup's shorter form of it, if any.
-    problem: Option<(KeyOverrideProblem, String, Option<String>)>,
+    problem: Option<Refusal>,
 }
 
 impl Entry {
@@ -457,6 +457,9 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
 
 /// The merge over entries already parsed: the table a load builds, leaked.
 fn merge_entries(list: &[Value]) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
+    if list.is_empty() {
+        return (KEY_BINDINGS, Vec::new());
+    }
     let check = check_overrides(list);
     let errors = check.errors();
     if check
