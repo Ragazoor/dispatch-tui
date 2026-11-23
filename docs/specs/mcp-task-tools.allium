@@ -484,7 +484,9 @@ rule UpdateTaskViaMcp {
         -- agents.allium) for Task(t), and null for Session. A Task(t) caller
         -- whose task has no agent at all is refused, before any write: an
         -- agent's mark names the agent. Decided by the epic's orchestrator
-        -- agent (task 99386) while the operator was away.
+        -- agent (task 99386) while the operator was away. An
+        -- Orchestrator(name) caller marks as agent, named by its own name
+        -- (orchestrators.allium: ItsOwnCallerIdentity).
         --
         -- The argument is named ready, as the board's marker is. The open
         -- question in orchestrators.allium on that word stands.
@@ -801,10 +803,21 @@ rule CreateTaskViaMcp {
     -- caller_identity is supplied by the dispatch HTTP transport, not by
     -- the tool arguments. It is one of:
     --   Task(task_id)   — a dispatched agent
-    --   Session         — any non-dispatched session
+    --   Orchestrator(name) — an epic's orchestrator on this machine
+    --                     (core/Orchestrator)
+    --   Session         — any other session
     --
-    -- The two identities reach the transport by different routes, and the
-    -- headersHelper supplies only one of them:
+    -- The identities reach the transport by different routes, and the
+    -- headersHelper supplies only Session:
+    --   Orchestrator(name) — a fixed X-Caller-Orchestrator header in the MCP
+    --     configuration the board writes into the orchestrator's own
+    --     directory before it launches it (orchestrators.allium:
+    --     StartOrchestratorSession). It is read where the other two are,
+    --     with the same rules: one identity header per request, and a
+    --     request with two is refused as conflicting. An orchestrator is
+    --     no task's agent, so wherever a tool reads its caller's task it
+    --     reads an orchestrator as it reads a Session, except where a rule
+    --     says otherwise (UpdateTaskViaMcp's ready mark).
     --   Task(id) — a fixed X-Caller-Task-Id header in the per-task MCP
     --     configuration the launcher writes for that agent (see
     --     AgentCarriesItsOwnCallerIdentity in dispatch.allium).

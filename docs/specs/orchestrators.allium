@@ -28,18 +28,41 @@
 -- and their invariants are in core.allium; the ready mark's rules are in
 -- tasks.allium; the re-parent and delete effects on the switch are in
 -- epics.allium; SwitchOrchestratorOn and ChangeOrchestratorSettings below
--- are built, and SwitchOrchestratorOff is built for the switch itself (its
--- Orchestrator rows and WaitingItems wait for their steps). Built (step 2):
--- the MCP side of the switch, the settings and the ready mark, and the task
--- and epic reads as far as step 1's data goes (mcp-task-tools.allium:
--- UpdateTaskViaMcp, CreateTaskViaMcp, GetTaskViaMcp, ListTasksViaMcp;
--- epics.allium: UpdateEpicViaMcp, GetEpicViaMcp). epic_update's reply to a
--- move names the switches it turned off; the board's own move
--- (ReparentEpicFromTui) does not yet, and waits for step 9. Everything else
--- here is decided and not yet built, and every other spec still describes
--- the system as it runs. Each build step moves the facts it implements into
--- the specs that own them (the list is under "What the build changes
--- elsewhere", at the end) in the same change as its code.
+-- are built. Built (step 2): the MCP side of the switch, the settings and
+-- the ready mark, and the task and epic reads as far as step 1's data goes
+-- (mcp-task-tools.allium: UpdateTaskViaMcp, CreateTaskViaMcp,
+-- GetTaskViaMcp, ListTasksViaMcp; epics.allium: UpdateEpicViaMcp,
+-- GetEpicViaMcp). epic_update's reply to a move names the switches it
+-- turned off; the board's own move (ReparentEpicFromTui) does not yet, and
+-- waits for step 9. Built (step 3): the session. The Orchestrator entity and
+-- its invariants are in core.allium; BoardRunsItsOrchestrators,
+-- OrchestratorWindowGone, StartOrchestratorSession,
+-- OrchestratorTurnClearsTheRestartFlag and EndOrchestratorSession below are
+-- built, and SwitchOrchestratorOff for everything but its WaitingItems; the
+-- surfaces OrchestratorIdentity and OrchestratorPrompt are built as far as
+-- step 3's data goes. Its hooks are in agent-health.allium
+-- (OrchestratorHooks), its caller identity in mcp-task-tools.allium
+-- (CreateTaskViaMcp's caller_identity, UpdateTaskViaMcp's ready mark), its
+-- name in agents.allium (the picker, OrchestratorNameIsNotATask,
+-- OrchestratorNameResolvesToItsEpic), its prompt in dispatch-prompt.allium
+-- (OrchestratorSessionPrompt).
+-- Left by step 3 for the steps that own them, so none is missed:
+--   - step 5: the session log entry of StartOrchestratorSession; the
+--     WaitingItem of OrchestratorThatKeepsDyingWaitsForTheOperator (until
+--     then the board logs it to its own log, and the orchestrator stays
+--     down); the closing summary of EndOrchestratorSession; switch-off
+--     resolving the epic's WaitingItems; the notes, the open items, the log
+--     and the learnings in the prompt (EnoughForAFreshStart,
+--     GivenItsLearnings).
+--   - step 6: the answer line in the prompt (OrchestratorAnswerLine).
+--   - step 9: EpicFinishedNotified from EndOrchestratorSession, and
+--     OrchestratorRestartAsked (the orchestrator key on a down
+--     orchestrator). Until then switching the orchestrator off and on is the
+--     only way out of down.
+-- Everything else here is decided and not yet built, and every other spec
+-- still describes the system as it runs. Each build step moves the facts it
+-- implements into the specs that own them (the list is under "What the
+-- build changes elsewhere", at the end) in the same change as its code.
 --
 -- Decisions taken with the user, recorded so they are not re-litigated:
 --   - O1, what orchestration is. The orchestrator starts tasks, watches the
@@ -136,20 +159,7 @@ config {
 -- The switch (O3) is core/EpicOrchestration and the ready mark (O5) is
 -- core/ReadyMark.
 
--- An epic's orchestrator on one machine (O11). The row keeps the name and
--- whatever is needed to resume the same conversation; the session is live
--- while it holds a window.
-entity Orchestrator {
-    orchestration: core/EpicOrchestration
-    host: core/Host
-    name: String             -- an agent name, from the pool task agents use
-    tmux_window: core/TmuxWindow?
-    started_at: Timestamp?   -- when the session it now holds started
-    restarted_once: Boolean = false  -- a session that died was started again and has not yet done a turn
-
-    epic: orchestration.epic
-    is_live: tmux_window != null
-}
+-- An epic's orchestrator on one machine (O11) is core/Orchestrator.
 
 -- One line of the epic's log (O13). Append-only.
 entity OrchestratorLogEntry {
@@ -271,7 +281,7 @@ rule SwitchOrchestratorOff {
     -- Every machine's session ends. The task agents run on and ask the
     -- operator again.
     ensures:
-        for o in Orchestrators where orchestration = orchestration:
+        for o in core/Orchestrators where orchestration = orchestration:
             not exists o
     ensures: not exists orchestration
     ensures:
@@ -304,14 +314,16 @@ rule DeletingAnEpicRemovesItsOrchestratorMemory {
 -- == The session ==
 
 rule BoardRunsItsOrchestrators {
-    when: BoardChecksOrchestrators(host)
+    when: core/Tick()
+
+    let host = core/local_host()
 
     -- Each running board, on its tick, for every orchestrated epic.
     ensures:
         for orchestration in core/EpicOrchestrations:
             if has_open_work(orchestration.epic)
-               and not exists Orchestrator{orchestration: orchestration, host: host}:
-                Orchestrator.created(
+               and not exists core/Orchestrator{orchestration: orchestration, host: host}:
+                core/Orchestrator.created(
                     orchestration: orchestration,
                     host: host,
                     name: fresh_agent_name(),
@@ -319,7 +331,9 @@ rule BoardRunsItsOrchestrators {
                     started_at: null
                 )
     ensures:
-        for o in Orchestrators where host = host:
+        for o in core/Orchestrators where host = host:
+            if o.is_live and not window_exists(o.tmux_window):
+                OrchestratorWindowLost(o)
             if wanted(o) and not o.is_live:
                 OrchestratorSessionWanted(o)
             if not wanted(o) and o.is_live:
@@ -328,9 +342,43 @@ rule BoardRunsItsOrchestrators {
     @guidance
         -- HOST-SIDE. This is what "always running" means (O12): while the
         -- board runs and the epic has open work, a missing session is started
-        -- again without asking, whatever ended it. A board start is the same
-        -- check, so every wanted orchestrator comes back with the board.
-        -- A board that does not run, runs none.
+        -- again without asking, whatever ended it. The first tick after a
+        -- board start is the same check, so every wanted orchestrator comes
+        -- back with the board.
+        --
+        -- The window outlives the board, as a task agent's does: quitting
+        -- or restarting the board ends no orchestrator session, and the next
+        -- board finds the window and adopts it as it is. A board that does
+        -- not run starts none. A window that went while no board ran counts
+        -- as died at the next board's first tick (OrchestratorWindowGone).
+        -- Decided by the epic's acting orchestrator while the operator was
+        -- away; open to the operator's review.
+        --
+        -- The row is created by the store, once per epic and machine
+        -- (core/OneOrchestratorPerEpicAndHost): a second board tick, or a
+        -- second board, asking for the same pair gets the row that is there.
+        -- fresh_agent_name() is agents.allium's picker, which skips every
+        -- name an agent or an orchestrator holds
+        -- (core/OrchestratorNamesAreUnique). The row stays while its switch
+        -- is on: a session that ends for lack of work keeps its name for the
+        -- next one. window_exists reads this machine's tmux; a failed read
+        -- counts as present, as for a task agent's window.
+}
+
+rule OrchestratorWindowGone {
+    when: OrchestratorWindowLost(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: orchestrator.is_live
+
+    ensures: orchestrator.tmux_window = null
+    ensures: orchestrator.session_died = true
+
+    @guidance
+        -- The session ended without the board ending it: Claude exited, the
+        -- window was closed by hand, or the machine restarted. The window
+        -- runs claude as its own process, so it closes when claude does. A
+        -- launch that fails after its start was recorded ends the same way.
 }
 
 rule StartOrchestratorSession {
@@ -339,28 +387,35 @@ rule StartOrchestratorSession {
     requires: orchestrator.host = core/local_host()
     requires: not orchestrator.is_live
     -- O10 applied to itself: one restart without a completed turn between.
-    requires: not orchestrator.restarted_once or not session_died(orchestrator)
+    requires: not orchestrator.restarted_once or not orchestrator.session_died
 
     ensures: orchestrator.tmux_window = orchestrator_window(orchestrator)
     ensures: orchestrator.started_at = now
     ensures:
-        if session_died(orchestrator): orchestrator.restarted_once = true
-    ensures: OrchestratorLogEntry.created(
-        epic: orchestrator.epic, host: orchestrator.host, at: now,
-        kind: session, task: null, question: null, trouble: null,
-        text: session_start_text(orchestrator)
-    )
+        if orchestrator.session_died: orchestrator.restarted_once = true
+    ensures: orchestrator.session_died = false
 
     @guidance
-        -- The session resumes the conversation this machine last held for the
-        -- epic when it can, and starts fresh otherwise. Either way it gets
-        -- the prompt (OrchestratorPrompt), so a fresh start loses nothing
-        -- that matters (O13).
-        -- It runs in a directory of its own under the data directory, not in
-        -- a worktree and not in a repository (O2). Its session carries the
-        -- orchestrator's name, as a task agent's does, so agents and the
-        -- operator reach it by that name.
-        -- session_died: the last session ended without the board ending it.
+        -- The start is written to the store before the window opens, in one
+        -- write that checks the restart budget, so two ticks never launch
+        -- twice. orchestrator_window(o) is "orch-<epic id>".
+        --
+        -- The session runs in a directory of its own under the data
+        -- directory, orchestrators/epic-<epic id>, which is in no repository
+        -- and no worktree (O2), and which the board marks trusted in Claude
+        -- Code's configuration before the first launch, as it made it. It
+        -- launches with the orchestrator's name as its session name, as a
+        -- task agent's does, so agents and the operator reach it by that
+        -- name; with its own caller identity (OrchestratorIdentity); and
+        -- with DISPATCH_ORCHESTRATOR=<name> in its environment, which its
+        -- hooks read (agent-health.allium: OrchestratorHooks).
+        --
+        -- It resumes the conversation this machine last held for the epic
+        -- when Claude Code keeps one for that directory, and starts fresh
+        -- otherwise. Either way it gets the prompt (OrchestratorPrompt), so
+        -- a fresh start loses nothing that matters (O13).
+        --
+        -- The session log entry (kind session) comes with the log, in step 5.
 }
 
 rule OrchestratorThatKeepsDyingWaitsForTheOperator {
@@ -411,7 +466,13 @@ rule NotifyEpicFinished {
 rule OrchestratorTurnClearsTheRestartFlag {
     when: OrchestratorCompletedATurn(orchestrator)
 
+    ensures: orchestrator.last_turn_at = now
     ensures: orchestrator.restarted_once = false
+
+    @guidance
+        -- Its Stop hook (agent-health.allium: OrchestratorHooks). A session
+        -- that completed a turn has worked, so its next death is a fresh
+        -- bout and gets its one restart again.
 }
 
 rule EndOrchestratorSession {
@@ -421,6 +482,7 @@ rule EndOrchestratorSession {
     requires: orchestrator.is_live
 
     ensures: orchestrator.tmux_window = null
+    ensures: orchestrator.session_died = false
     ensures:
         if orchestrator.epic.status = done:
             OrchestratorLogEntry.created(
@@ -433,9 +495,11 @@ rule EndOrchestratorSession {
     @guidance
         -- No open work is the one condition (O12): a finished epic, and an
         -- epic that is not done but has nothing open, such as a feed with
-        -- nothing to handle. The orchestrator is asked for its closing
-        -- summary before its window closes. A task that reopens or arrives
-        -- makes the session wanted again on the next check.
+        -- nothing to handle. The board closes the window. A task that
+        -- reopens or arrives makes the session wanted again on the next
+        -- check. The closing summary, asked of the orchestrator before its
+        -- window closes, comes with the log in step 5; the notification
+        -- with step 9.
 }
 
 -- == Starting tasks ==
@@ -783,19 +847,9 @@ rule LongWaitInReview {
 -- O4 and the one switch per epic are core.allium's invariants
 -- (OneOrchestratorOnAPath, OneOrchestrationPerEpic).
 
--- O11. One per epic and machine.
-invariant OneOrchestratorPerEpicAndHost {
-    for a in Orchestrators: for b in Orchestrators:
-        (a.orchestration = b.orchestration and a.host = b.host) implies a = b
-}
-
--- An orchestrator's name is no task agent's name, and no other
--- orchestrator's: a message to a name reaches one session.
-invariant OrchestratorNamesAreUnique {
-    for o in Orchestrators:
-        not core/Agents.any(a => a.name = o.name)
-        and not Orchestrators.any(p => p != o and p.name = o.name)
-}
+-- O11's one orchestrator per epic and machine, and the unique names, are
+-- core.allium's invariants (OneOrchestratorPerEpicAndHost,
+-- OrchestratorNamesAreUnique).
 
 ------------------------------------------------------------
 -- Surfaces
@@ -904,7 +958,7 @@ surface OrchestratorWakeEvents {
 surface OrchestratorPrompt {
     facing agent: core/DispatchedAgent
 
-    context orchestrator: Orchestrator
+    context orchestrator: core/Orchestrator
 
     exposes:
         orchestrator.name
@@ -1010,7 +1064,7 @@ surface OrchestratorMcpTools {
 surface OrchestratorView {
     facing user: core/Operator
 
-    context orchestrator: Orchestrator
+    context orchestrator: core/Orchestrator
 
     let epic = orchestrator.epic
     let open_items = WaitingItems where epic = epic and is_open
@@ -1121,9 +1175,9 @@ surface OrchestratorNotifications {
 
 -- Each of these is true once its build step lands, and moves to its owner
 -- then:
---   - core.allium: the entities above (EpicOrchestration and ReadyMark are
---     there already). The Agent entity and agents.allium stay as they are,
---     for task agents only (OrchestratorIdentity).
+--   - core.allium: the entities above (EpicOrchestration, ReadyMark and
+--     Orchestrator are there already). The Agent entity stays as it is, for
+--     task agents only (OrchestratorIdentity).
 --   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
 --     toggle key and header indicator, the chain that started the next
 --     subtask when a session closed, its failure report and the stalled-chain
@@ -1132,14 +1186,14 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes, and
 --     RequestDispatch gains the limit. schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - tasks.allium and mcp-task-tools.allium: the caller identity of an
---     orchestrator, and what the task and epic reads add once the
---     Orchestrator rows, the items, the notes and the log exist (the ready
---     argument and the reads of the switch and the mark are there already).
---   - dispatch-prompt.allium: the line a covered task's prompt gains, and
---     the orchestrator's own prompt.
---   - agent-health.allium: the hooks of an orchestrator's session, and its
---     wake events.
+--   - tasks.allium and mcp-task-tools.allium: what the task and epic reads
+--     add once the items, the notes and the log exist (the ready argument,
+--     the reads of the switch and the mark, and the orchestrator's caller
+--     identity are there already).
+--   - dispatch-prompt.allium: the line a covered task's prompt gains (the
+--     orchestrator's own prompt is there already).
+--   - agent-health.allium: the orchestrator's wake events (its hooks are
+--     there already).
 --   - board-layout.allium, board-visuals.allium, agent-tree.allium and
 --     keybindings.allium: the lens order, the orchestrator view, the header,
 --     the ready marker and the two keys.

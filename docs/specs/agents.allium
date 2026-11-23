@@ -235,7 +235,9 @@ rule StartAgentOnFreshLaunch {
         -- fresh_agent_name() is the picker
         -- (spacetime/module/src/agent.rs::pick_agent_name). It starts at a
         -- clock-seeded place in the name list (A11) and walks forward to the
-        -- first name no Agent row holds. When every name is held it appends
+        -- first name no Agent row and no core/Orchestrator row holds: an
+        -- orchestrator draws from the same list (core:
+        -- OrchestratorNamesAreUnique). When every name is held it appends
         -- 2, 3, ... to the name at the seed (A4).
 }
 
@@ -395,6 +397,51 @@ rule AgentNameResolvesToTask {
             NotFound(reference: task_ref)
 }
 
+-- An orchestrator's name is no task's (orchestrators.allium:
+-- OrchestratorIdentity). Where a tool takes a task id or an agent name, an
+-- orchestrator's name is answered as what it is, not as "not found".
+rule OrchestratorNameIsNotATask {
+    when: McpToolCalled(task_ref)
+
+    requires: not is_all_digits(task_ref)
+    requires: not exists core/Agent{name: task_ref}
+
+    let orchestrator = core/Orchestrator{name: task_ref}
+
+    requires: exists orchestrator
+
+    -- observable output; no rule listens
+    ensures: NamesAnOrchestrator(reference: task_ref, epic: orchestrator.epic)
+
+    @guidance
+        -- The refusal reads "'<name>' is the orchestrator of epic <id>
+        -- (<title>), not a task". Resolved where agent names are, once,
+        -- before any tool runs (src/mcp/handlers/task_refs.rs).
+}
+
+-- Where a tool takes an epic id, an orchestrator's name stands for its epic
+-- (orchestrators.allium: TheNameResolvesToItsEpic).
+rule OrchestratorNameResolvesToItsEpic {
+    when: McpEpicRefGiven(epic_ref)
+
+    requires: not is_all_digits(epic_ref)
+
+    let orchestrator = core/Orchestrator{name: epic_ref}
+
+    ensures:
+        if exists orchestrator:
+            -- observable output; no rule listens
+            ResolvedToEpic(epic: orchestrator.epic)
+        else:
+            -- observable output; no rule listens
+            NotFound(reference: epic_ref)
+
+    @guidance
+        -- The argument is epic_id, in every tool that takes one. A word that
+        -- is no orchestrator's name is refused as "No epic has the
+        -- orchestrator name '<word>'".
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -461,7 +508,8 @@ invariant AgentsGoWithTheirTask {
 }
 
 -- No two agents hold the same name (A4), whatever their state. A name held
--- by an ended agent stays held until its task is deleted.
+-- by an ended agent stays held until its task is deleted. No agent holds an
+-- orchestrator's name either (core: OrchestratorNamesAreUnique).
 invariant AgentNamesAreUnique {
     for x in core/Agents: for y in core/Agents:
         x.name = y.name implies x = y

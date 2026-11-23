@@ -1593,3 +1593,47 @@ surface AgentPrompt {
         -- someone else authored, which is what the by-me sections, the
         -- PR-branch worktree and the wrap-up refusal all assume.
 }
+
+-- What an orchestrator's session is given when it starts, fresh or resumed
+-- (orchestrators.allium: OrchestratorPrompt). It is no task agent's prompt:
+-- none of AgentPrompt's skeleton applies, and it has no task block, worktree
+-- line or verify command.
+surface OrchestratorSessionPrompt {
+    facing _: core/DispatchedAgent
+
+    context orchestrator: core/Orchestrator
+
+    exposes:
+        orchestrator.name
+        orchestrator.epic.title
+        orchestrator.epic.description
+        orchestrator.epic.plan_path
+        orchestrator.orchestration.start_rule
+        orchestrator.orchestration.limit
+        orchestrator.epic.subtree_tasks
+
+    @guarantee ThePromptsParts
+        -- In this order:
+        --   who it is: its name, and that it orchestrates epic <id> (<title>)
+        --     on this machine;
+        --   what it does and does not (orchestrators.allium O1, O2): it
+        --     starts the epic's tasks, watches their agents, answers their
+        --     questions and tells the operator when a person is needed or the
+        --     epic is finished; it edits no file, has no worktree, and never
+        --     merges, rebases, approves, closes or deletes;
+        --   the epic's description, and its plan path when it has one;
+        --   the start rule, said in words ("only backlog tasks marked ready"
+        --     or "every backlog task"), and the limit;
+        --   the trouble rules with their one retry (O10);
+        --   one line per task of the subtree, in board order: id, title,
+        --     status, sub-status, ready (backlog only), agent name;
+        --   the first-turn check (FirstTurnChecksTheBoard): look for what
+        --     happened while no session ran before anything else.
+        -- The answer line joins it with step 6, and the notes, the open
+        -- items, the newest log entries and the learnings with step 5.
+
+    @guarantee ItIsGivenOnEveryStart
+        -- A resumed session gets the same prompt as its next message, so the
+        -- task list it works from is the board's now, not the one it last
+        -- saw.
+}

@@ -194,6 +194,8 @@ contract IdSequenceCounter {
 -- ReadyMark) are left out too. A restore must not switch an orchestrator on
 -- by itself, and a ready mark is cheap to set again. Losing both on a
 -- restore is accepted; either can be added later, as bookmarks can.
+-- `orchestrators` (core.allium: Orchestrator) goes with them: a row is a
+-- machine's running state for a switch the restore does not carry.
 -- (Decided for task #99385 by the epic's acting orchestrator while the
 -- operator was away; the operator reviews it.)
 --

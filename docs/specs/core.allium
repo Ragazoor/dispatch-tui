@@ -579,6 +579,30 @@ entity ReadyMark {
     }
 }
 
+-- Orchestrator: an orchestrated epic's orchestrator on one machine
+-- (orchestrators.allium, O11). A row of its own, not a task's agent: it has
+-- no task and no worktree. The row keeps the name and what the board needs to
+-- run and restart its session; the session is live while it holds a window.
+-- Created by orchestrators.allium's BoardRunsItsOrchestrators, its session
+-- run by StartOrchestratorSession, OrchestratorWindowGone and
+-- EndOrchestratorSession, its turns reported by its hooks
+-- (OrchestratorTurnClearsTheRestartFlag). It goes when its switch goes
+-- (SwitchOrchestratorOff, and the epic's delete and re-parent through it). A
+-- snapshot does not carry it (spacetime-seed.allium).
+entity Orchestrator {
+    orchestration: EpicOrchestration
+    host: Host
+    name: String             -- picked by the store from the pool agent names come from; never changes
+    tmux_window: TmuxWindow?
+    started_at: Timestamp?   -- when the session it now holds, or last held, started
+    restarted_once: Boolean = false  -- a session that died was started again and has not yet done a turn
+    session_died: Boolean = false    -- the last session ended without the board ending it
+    last_turn_at: Timestamp? -- when its session last completed a turn (its Stop hook)
+
+    epic: orchestration.epic
+    is_live: tmux_window != null
+}
+
 entity Task {
     title: String
     description: String
@@ -1669,6 +1693,22 @@ invariant OneOrchestratorOnAPath {
     for a in EpicOrchestrations:
         for b in EpicOrchestrations:
             a != b implies (a.epic not in b.epic.subtree_epics)
+}
+
+-- One orchestrator per epic and machine (orchestrators.allium, O11).
+invariant OneOrchestratorPerEpicAndHost {
+    for a in Orchestrators:
+        for b in Orchestrators:
+            (a.orchestration = b.orchestration and a.host = b.host) implies a = b
+}
+
+-- An orchestrator's name is no agent's name and no other orchestrator's, so a
+-- message to a name reaches one session (orchestrators.allium:
+-- OrchestratorIdentity).
+invariant OrchestratorNamesAreUnique {
+    for o in Orchestrators:
+        not Agents.any(a => a.name = o.name)
+        and not Orchestrators.any(p => p != o and p.name = o.name)
 }
 
 invariant ReadyMarkIsUniquePerTask {

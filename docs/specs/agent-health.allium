@@ -1406,6 +1406,29 @@ surface HookDelivery {
         -- one of those.
 }
 
+-- An orchestrator's session (core/Orchestrator) runs the same hook script as
+-- a task agent's. Its window environment carries DISPATCH_ORCHESTRATOR=<name>
+-- and no DISPATCH_TASK_ID, and the script checks for it before it looks for a
+-- task, so an orchestrator's hooks never reach a task.
+surface OrchestratorHooks {
+    facing _: core/HookRunner
+
+    @guarantee OnlyAStopIsReported
+        -- Its Stop runs `dispatch hook-orchestrator <name> stop`, which the
+        -- board applies as orchestrators.allium's
+        -- OrchestratorCompletedATurn. Every other event of its session ends
+        -- in the script: there is no needs input, stale, review or subagent
+        -- state for an orchestrator, and its window is the board's own record
+        -- (StartOrchestratorSession, OrchestratorWindowGone). The PR gate
+        -- does not apply to it either.
+
+    @guarantee DeliveredAsATaskHookIs
+        -- The delivery is HookDelivery's: through the running board, never
+        -- the store, bounded, and dropped when no board answers. A name that
+        -- is no orchestrator's any more (its switch went off) succeeds
+        -- quietly, as MissingTaskSucceeds does for a task.
+}
+
 -- The tmux liveness check. Every tick the board asks tmux which of this
 -- host's running and review tasks still have their window, and reports each
 -- one that does not. agent-tree.allium and pr-workflow.allium consume it
