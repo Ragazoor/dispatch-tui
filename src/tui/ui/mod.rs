@@ -8,7 +8,9 @@ pub(in crate::tui) use kanban::{build_reparent_tree, tree_state_at};
 // The tag step's prompt reaches three surfaces, one of them outside this
 // module tree (update/forms.rs), so it is re-exported rather than reached for
 // through the private module.
-pub(in crate::tui) use input_form::{model_prompt, retry_keys, tag_prompt, wrap_up_prompt};
+pub(in crate::tui) use input_form::{
+    model_prompt, repo_picker_hint, retry_keys, tag_prompt, wrap_up_prompt,
+};
 pub use kanban::render;
 pub use shared::{refresh_status, truncate};
 

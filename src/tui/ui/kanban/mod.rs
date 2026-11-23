@@ -626,7 +626,6 @@ pub(in crate::tui) fn action_hints(
             })
             .unwrap_or((Some(default), action))
     };
-    let mut push_hint = |context, action, key, label| bar.push(context, action, key, label);
 
     if let Some(task) = task {
         let off_epic = Some(C::OffEpicCard);
@@ -638,52 +637,52 @@ pub(in crate::tui) fn action_hints(
                 // and the plan's presence changes what the agent is told to do
                 // first, not what the user is doing by pressing Space.
                 let (context, action) = space_row(C::BacklogTask, "dispatch_task");
-                push_hint(context, action, "Space", "dispatch");
-                push_hint(None, "edit_task", "e", "edit");
-                push_hint(off_epic, "move_task_forward", "L", "move");
-                push_hint(None, "delete_task", "x", "done");
+                bar.push(context, action, "Space", "dispatch");
+                bar.push(None, "edit_task", "e", "edit");
+                bar.push(off_epic, "move_task_forward", "L", "move");
+                bar.push(None, "delete_task", "x", "done");
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
                     let (context, action) = space_row(C::TaskWithWindow, "jump_to_tmux");
-                    push_hint(context, action, "Space", "session");
+                    bar.push(context, action, "Space", "session");
                 } else if task.worktree.is_some() {
                     let (context, action) = space_row(C::TaskWithWorktree, "resume_task");
-                    push_hint(context, action, "Space", "resume");
+                    bar.push(context, action, "Space", "resume");
                 } else if !dispatch_in_flight {
                     // Unprovisioned: nothing to jump to or resume, but Space
                     // opens the kill-and-retry dialog. See RetryReachableInPlace
                     // in docs/specs/dispatch.allium.
                     let (context, action) = space_row(C::StuckTask, "open_retry_dialog");
-                    push_hint(context, action, "Space", "retry");
+                    bar.push(context, action, "Space", "retry");
                 }
-                push_hint(None, "edit_task", "e", "edit");
-                push_hint(off_epic, "move_task_forward", "L", "move");
-                push_hint(off_epic, "move_task_backward", "H", "back");
-                push_hint(None, "delete_task", "x", "done");
+                bar.push(None, "edit_task", "e", "edit");
+                bar.push(off_epic, "move_task_forward", "L", "move");
+                bar.push(off_epic, "move_task_backward", "H", "back");
+                bar.push(None, "delete_task", "x", "done");
             }
             TaskStatus::Review => {
                 if task.tmux_window.is_some() {
                     let (context, action) = space_row(C::TaskWithWindow, "jump_to_tmux");
-                    push_hint(context, action, "Space", "session");
-                    push_hint(None, "detach_tmux", "T", "detach");
+                    bar.push(context, action, "Space", "session");
+                    bar.push(None, "detach_tmux", "T", "detach");
                 } else if task.worktree.is_some() {
                     let (context, action) = space_row(C::TaskWithWorktree, "resume_task");
-                    push_hint(context, action, "Space", "resume");
+                    bar.push(context, action, "Space", "resume");
                 }
-                push_hint(None, "edit_task", "e", "edit");
-                push_hint(off_epic, "move_task_forward", "L", "move");
-                push_hint(off_epic, "move_task_backward", "H", "back");
-                push_hint(None, "delete_task", "x", "done");
+                bar.push(None, "edit_task", "e", "edit");
+                bar.push(off_epic, "move_task_forward", "L", "move");
+                bar.push(off_epic, "move_task_backward", "H", "back");
+                bar.push(None, "delete_task", "x", "done");
             }
             TaskStatus::Done => {
-                push_hint(None, "edit_task", "e", "edit");
-                push_hint(off_epic, "move_task_backward", "H", "back");
-                push_hint(None, "delete_task", "x", "delete");
+                bar.push(None, "edit_task", "e", "edit");
+                bar.push(off_epic, "move_task_backward", "H", "back");
+                bar.push(None, "delete_task", "x", "delete");
             }
         }
         if task.url.is_some() {
-            push_hint(None, "open_pr_url", "p", "open URL");
+            bar.push(None, "open_pr_url", "p", "open URL");
         }
     }
 
@@ -692,13 +691,13 @@ pub(in crate::tui) fn action_hints(
         // epic (and does nothing for a task with no epic); elsewhere it opens
         // the detail (`jump_to_task_epic` / `open_task_detail`).
         match (enter_jumps_to_epic, task.epic_id) {
-            (false, _) => push_hint(
+            (false, _) => bar.push(
                 Some(C::OnUnflattenedTaskCard),
                 "open_task_detail",
                 "Enter",
                 "detail",
             ),
-            (true, Some(_)) => push_hint(
+            (true, Some(_)) => bar.push(
                 Some(C::OnFlattenedTaskCard),
                 "jump_to_task_epic",
                 "Enter",
@@ -706,17 +705,17 @@ pub(in crate::tui) fn action_hints(
             ),
             (true, None) => {}
         }
-        push_hint(None, "copy_task", "c", "copy");
+        bar.push(None, "copy_task", "c", "copy");
     }
-    push_hint(None, "select_all", "a", "select all");
-    push_hint(None, "create_task", "n", "new");
-    push_hint(None, "create_epic", "E", "epic");
-    push_hint(None, "quick_dispatch", "D", "quick");
-    push_hint(None, "toggle_split_mode", "s", "split");
-    push_hint(None, "cycle_lens_forward", "Tab", "lens");
-    push_hint(None, "open_board_filter", "f", "filter");
-    push_hint(None, "search_tasks", "/", "search");
-    push_hint(None, "toggle_help", "?", "help");
+    bar.push(None, "select_all", "a", "select all");
+    bar.push(None, "create_task", "n", "new");
+    bar.push(None, "create_epic", "E", "epic");
+    bar.push(None, "quick_dispatch", "D", "quick");
+    bar.push(None, "toggle_split_mode", "s", "split");
+    bar.push(None, "cycle_lens_forward", "Tab", "lens");
+    bar.push(None, "open_board_filter", "f", "filter");
+    bar.push(None, "search_tasks", "/", "search");
+    bar.push(None, "toggle_help", "?", "help");
 
     bar.spans
 }

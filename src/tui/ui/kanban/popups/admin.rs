@@ -14,7 +14,9 @@ use crate::keybindings::{hint_key, hint_keys, yes_no_hint, KeyNamespace as N};
 use crate::models::MemberRole;
 use crate::palette::{CYAN, FG, GREEN, MUTED, RED, YELLOW};
 use crate::tui::types::{AdminConfirm, AdminPane, AdminPrompt, AdminScreen};
-use crate::tui::ui::shared::{caret_line, centered_rect, open_overlay, titled_block, truncate};
+use crate::tui::ui::shared::{
+    caret_line, centered_rect, open_overlay, text_field_hint, titled_block, truncate,
+};
 use crate::tui::{App, InputMode};
 
 /// Draw the screen while it, or a prompt or confirmation over it, is open.
@@ -164,7 +166,7 @@ pub(super) fn admin_lines(screen: &AdminScreen, width: usize) -> Vec<Line<'stati
 fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'static>> {
     let hint = |text: &str| Line::from(Span::styled(text.to_string(), Style::default().fg(MUTED)));
     let t = app.key_table;
-    let yes_no = yes_no_hint(t, N::BoardConfirmAdmin, "n");
+    let yes_no = yes_no_hint(t, N::BoardConfirmAdmin);
     let key = |action, shown| format!("[{}]", hint_key(t, N::BoardAdmin, None, action, shown));
     match app.input.mode {
         InputMode::InputAdminText => {
@@ -183,11 +185,7 @@ fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'stat
                     width.saturating_sub(label.len()).max(1),
                     Style::default().fg(YELLOW),
                 ),
-                hint(&format!(
-                    "[{}] send  [{}] cancel",
-                    hint_key(t, N::BoardText, None, "submit_input", "Enter"),
-                    hint_key(t, N::BoardText, None, "cancel_input", "Esc"),
-                )),
+                hint(&text_field_hint(t, "send", "cancel")),
             ]
         }
         InputMode::ConfirmAdmin => {

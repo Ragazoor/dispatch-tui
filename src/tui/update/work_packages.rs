@@ -19,7 +19,6 @@ pub(in crate::tui) fn delete_work_package_prompt(
     let keys = crate::keybindings::yes_no_hint(
         table,
         crate::keybindings::KeyNamespace::BoardConfirmDeleteWorkPackage,
-        "n",
     );
     format!("Delete work package {title}? Its tasks and epics are kept {keys}")
 }

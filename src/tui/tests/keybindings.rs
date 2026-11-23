@@ -1587,14 +1587,10 @@ fn probe(ns: KeyNamespace) -> KeyBinding {
 /// The table form of a key as a hint draws it: `Del`, `↑` and `↓` are the
 /// hints' short forms of Delete, Up and Down.
 fn table_form(hint: &str) -> &str {
-    match hint {
-        "Del" => "Delete",
-        "↑" => "Up",
-        "↓" => "Down",
-        "←" => "Left",
-        "→" => "Right",
-        other => other,
-    }
+    crate::keybindings::SHORT_KEY_FORMS
+        .iter()
+        .find(|(_, short)| *short == hint)
+        .map_or(hint, |(long, _)| long)
 }
 
 /// The modes whose hints name their keys without brackets.

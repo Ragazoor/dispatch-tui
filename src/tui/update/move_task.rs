@@ -82,11 +82,7 @@ impl App {
             .as_ref()
             .map_or(0, |p| p.batch.len());
 
-        let keys = crate::keybindings::yes_no_hint(
-            self.key_table,
-            crate::keybindings::KeyNamespace::BoardConfirmMoveToEpic,
-            "n",
-        );
+        let keys = self.yes_no(crate::keybindings::KeyNamespace::BoardConfirmMoveToEpic);
         let msg = match new_epic {
             None if batch_len > 0 => {
                 format!("Detach {batch_len} tasks from their epics? {keys}")

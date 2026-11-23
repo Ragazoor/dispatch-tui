@@ -13,7 +13,7 @@ use ratatui::{
     Frame,
 };
 
-use super::super::shared::HintBar;
+use super::super::shared::{text_field_hint, HintBar};
 use super::{action_hints, epic_action_hints};
 use crate::keybindings::{
     hint_key, hint_keys, hint_row_keys, keys_of, yes_no_hint, KeyContext as C, KeyNamespace as N,
@@ -61,14 +61,8 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
 
     let t = app.key_table;
     let key = |ns, action, shown| hint_key(t, ns, None, action, shown);
-    let yes_no = |ns| yes_no_hint(t, ns, "n");
-    let text_keys = |verb: &str| {
-        format!(
-            "[{}] {verb}  [{}] cancel",
-            key(N::BoardText, "submit_input", "Enter"),
-            key(N::BoardText, "cancel_input", "Esc"),
-        )
-    };
+    let yes_no = |ns| yes_no_hint(t, ns);
+    let text_keys = |verb: &str| text_field_hint(t, verb, "cancel");
     let editor_cancel = || key(N::BoardDescriptionEditor, "cancel_input", "Esc");
     match &app.input.mode {
         InputMode::Normal => normal_status_line(app),
@@ -169,7 +163,7 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             app,
             &format!(
                 "Take over polling for this feed? {}",
-                yes_no_hint(t, N::BoardConfirmOverrideFeedOwner, "N")
+                yes_no(N::BoardConfirmOverrideFeedOwner)
             ),
             YELLOW,
         ),
@@ -229,22 +223,18 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             &format!("Move task to epic? {}", yes_no(N::BoardConfirmMoveToEpic)),
             PURPLE,
         ),
-        InputMode::ConfirmTrustRepo { .. } => hint_text(
-            app,
-            &format!(
-                "Repo not trusted — trust it? {}",
-                yes_no_hint(t, N::BoardConfirmTrustRepo, "N")
-            ),
-            YELLOW,
-        ),
-        InputMode::ConfirmTrustRepoQuickDispatch { .. } => hint_text(
-            app,
-            &format!(
-                "Repo not trusted — trust it? {}",
-                yes_no_hint(t, N::BoardConfirmTrustRepoQuickDispatch, "N")
-            ),
-            YELLOW,
-        ),
+        InputMode::ConfirmTrustRepo { .. } | InputMode::ConfirmTrustRepoQuickDispatch { .. } => {
+            let ns = if matches!(app.input.mode, InputMode::ConfirmTrustRepo { .. }) {
+                N::BoardConfirmTrustRepo
+            } else {
+                N::BoardConfirmTrustRepoQuickDispatch
+            };
+            hint_text(
+                app,
+                &format!("Repo not trusted — trust it? {}", yes_no(ns)),
+                YELLOW,
+            )
+        }
         InputMode::LinkWorkPackage { .. } => {
             let ns = N::BoardPickerWorkPackage;
             hint(
@@ -266,9 +256,8 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         }
         InputMode::InputWorkPackageTitle(_) => hint(
             format!(
-                "New work package: type a title  [{}] create  [{}] back",
-                key(N::BoardText, "submit_input", "Enter"),
-                key(N::BoardText, "cancel_input", "Esc"),
+                "New work package: type a title  {}",
+                text_field_hint(t, "create", "back")
             ),
             CYAN,
         ),
@@ -359,19 +348,15 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
         }
     };
     if app.split_active() {
-        let key = hint_key(t, N::BoardNormal, None, "toggle_split_mode", "s");
-        let (key, rest) = if key == "s" {
-            ("[s]".to_string(), "plit ")
-        } else {
-            (format!("[{key}]"), " split ")
-        };
-        prepend(
-            &mut spans,
-            vec![
-                Span::styled(key, Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
-                Span::styled(rest, Style::default().fg(GREEN)),
-            ],
+        let mut split = HintBar::new(t, N::BoardNormal, GREEN);
+        split.push_styled(
+            None,
+            "toggle_split_mode",
+            "s",
+            "split",
+            Style::default().fg(GREEN),
         );
+        prepend(&mut spans, split.spans);
     }
     let (hidden_epics, hidden_packages) = app.live_hidden_counts();
     if let Some(badge) = hidden_badge(hidden_epics, hidden_packages) {

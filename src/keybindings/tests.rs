@@ -1016,11 +1016,11 @@ fn a_hint_picks_the_row_of_its_context() {
 #[test]
 fn a_catch_all_no_is_drawn_as_n_unless_a_row_takes_n() {
     let ns = KeyNamespace::BoardConfirmQuit;
-    assert_eq!(yes_no_hint(KEY_BINDINGS, ns, "n"), "[y/n]");
+    assert_eq!(yes_no_hint(KEY_BINDINGS, ns), "[y/n]");
     let yes_is_n = table_with_keys(ns, "confirm_quit_yes", &["n"]);
-    assert_eq!(yes_no_hint(yes_is_n, ns, "n"), "[n/Esc]");
+    assert_eq!(yes_no_hint(yes_is_n, ns), "[n/Esc]");
     let rebound = table_with_keys(ns, "confirm_quit_yes", &["Ctrl+T"]);
-    assert_eq!(yes_no_hint(rebound, ns, "n"), "[Ctrl+T/n]");
+    assert_eq!(yes_no_hint(rebound, ns), "[Ctrl+T/n]");
 }
 
 #[test]

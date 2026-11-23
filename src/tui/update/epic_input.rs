@@ -20,7 +20,6 @@ pub(in crate::tui) fn feed_owner_takeover_offered(
     let keys = crate::keybindings::yes_no_hint(
         table,
         crate::keybindings::KeyNamespace::BoardConfirmOverrideFeedOwner,
-        "N",
     );
     status.set(format!(
         "This feed is currently owned by host {other_host} — take over polling? {keys}"
@@ -155,7 +154,6 @@ pub(in crate::tui) fn reparent_confirm(
     let keys = crate::keybindings::yes_no_hint(
         table,
         crate::keybindings::KeyNamespace::BoardConfirmReparentEpic,
-        "n",
     );
     let msg = match new_parent {
         None => format!("Make {moving_title} a root epic? {keys}"),

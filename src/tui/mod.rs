@@ -950,11 +950,7 @@ impl App {
         }
 
         let count = detachable.len();
-        let keys = crate::keybindings::yes_no_hint(
-            self.key_table,
-            crate::keybindings::KeyNamespace::BoardConfirmDetachTmux,
-            "n",
-        );
+        let keys = self.yes_no(crate::keybindings::KeyNamespace::BoardConfirmDetachTmux);
         let msg = if count == 1 {
             format!("Detach tmux panel? {keys}")
         } else {

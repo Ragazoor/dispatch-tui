@@ -441,14 +441,20 @@ impl HintBar {
         shown: &str,
         label: &str,
     ) {
+        self.push_styled(context, action, shown, label, Style::default().fg(MUTED));
+    }
+
+    /// [`Self::push`] with the label drawn in `label_style`.
+    pub(in crate::tui::ui) fn push_styled(
+        &mut self,
+        context: Option<crate::keybindings::KeyContext>,
+        action: &str,
+        shown: &str,
+        label: &str,
+        label_style: Style,
+    ) {
         let key = crate::keybindings::hint_key(self.table, self.namespace, context, action, shown);
-        push_hint_spans(
-            &mut self.spans,
-            key,
-            label,
-            self.key_color,
-            Style::default().fg(MUTED),
-        );
+        push_hint_spans(&mut self.spans, key, label, self.key_color, label_style);
     }
 
     /// One hint naming several rows' keys, `/`-joined (`[j/k] scroll`).
@@ -462,6 +468,29 @@ impl HintBar {
             Style::default().fg(MUTED),
         );
     }
+}
+
+/// `[Enter] <submit>  [Esc] <cancel>` for a board.text field, built from
+/// its submit and cancel rows (`HintsNameOnlyTableKeys`).
+pub(in crate::tui::ui) fn text_field_hint(
+    table: &'static [crate::keybindings::KeyBinding],
+    submit: &str,
+    cancel: &str,
+) -> String {
+    let key = |action, shown| {
+        crate::keybindings::hint_key(
+            table,
+            crate::keybindings::KeyNamespace::BoardText,
+            None,
+            action,
+            shown,
+        )
+    };
+    format!(
+        "[{}] {submit}  [{}] {cancel}",
+        key("submit_input", "Enter"),
+        key("cancel_input", "Esc")
+    )
 }
 
 /// Push a keybinding hint as styled spans.

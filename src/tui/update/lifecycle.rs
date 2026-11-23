@@ -87,11 +87,7 @@ impl App {
         if ids.is_empty() {
             return;
         }
-        let keys = crate::keybindings::yes_no_hint(
-            self.key_table,
-            crate::keybindings::KeyNamespace::BoardConfirmDone,
-            "n",
-        );
+        let keys = self.yes_no(crate::keybindings::KeyNamespace::BoardConfirmDone);
         let status = match ids.as_slice() {
             [single] => {
                 let title = self
@@ -245,11 +241,7 @@ impl App {
         }
         let expanded = crate::models::expand_tilde(&repo_path);
         self.input.mode = InputMode::ConfirmTrustRepo { task_id, mode };
-        let keys = crate::keybindings::yes_no_hint(
-            self.key_table,
-            crate::keybindings::KeyNamespace::BoardConfirmTrustRepo,
-            "N",
-        );
+        let keys = self.yes_no(crate::keybindings::KeyNamespace::BoardConfirmTrustRepo);
         self.status.set(format!(
             "Repo '{expanded}' not trusted by Claude Code — trust it? {keys}"
         ));
@@ -266,11 +258,8 @@ impl App {
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
         let expanded = crate::models::expand_tilde(&draft.repo_path);
-        let keys = crate::keybindings::yes_no_hint(
-            self.key_table,
-            crate::keybindings::KeyNamespace::BoardConfirmTrustRepoQuickDispatch,
-            "N",
-        );
+        let keys =
+            self.yes_no(crate::keybindings::KeyNamespace::BoardConfirmTrustRepoQuickDispatch);
         self.status.set(format!(
             "Repo '{expanded}' not trusted by Claude Code — trust it? {keys}"
         ));

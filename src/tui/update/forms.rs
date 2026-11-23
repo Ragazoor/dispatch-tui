@@ -333,24 +333,10 @@ pub(in crate::tui) fn start_quick_dispatch_selection(
     status: &mut StatusState,
     table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
-    use crate::keybindings::{hint_key, hint_keys, KeyNamespace};
     input.mode = InputMode::QuickDispatch;
     input.repo_cursor = 0;
     input.clear_buffer();
-    let ns = KeyNamespace::BoardPickerQuickDispatch;
-    status.set(format!(
-        "Type to filter · {} navigate · {} select · {} cancel",
-        hint_keys(
-            table,
-            ns,
-            &[
-                ("quick_dispatch_cursor_up", "Up"),
-                ("quick_dispatch_cursor_down", "Down")
-            ]
-        ),
-        hint_key(table, ns, None, "quick_dispatch_select", "Enter"),
-        hint_key(table, ns, None, "quick_dispatch_cancel", "Esc"),
-    ));
+    status.set(crate::tui::ui::repo_picker_hint(table, &input.mode));
     vec![]
 }
 

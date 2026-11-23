@@ -698,14 +698,19 @@ pub fn hint_key(
     let row = rows()
         .find(|b| b.context == context)
         .or_else(|| rows().next());
-    let key = row.map_or("", |b| {
-        b.keys
-            .iter()
-            .copied()
-            .find(|k| *k == shown)
-            .or_else(|| b.keys.first().copied())
-            .unwrap_or_default()
-    });
+    row.map_or("", |b| row_key(b, shown))
+}
+
+/// The key a hint shows for `row`: `shown` while the row lists it, else its
+/// first key, in the hints' short form.
+fn row_key(row: &'static KeyBinding, shown: &str) -> &'static str {
+    let key = row
+        .keys
+        .iter()
+        .copied()
+        .find(|k| *k == shown)
+        .or_else(|| row.keys.first().copied())
+        .unwrap_or_default();
     short_key_form(key)
 }
 
@@ -742,7 +747,7 @@ pub fn hint_row_keys(
             .collect()
     });
     if listed.is_empty() {
-        return hint_key(table, namespace, None, action, "").to_string();
+        return row.map_or("", |b| row_key(b, "")).to_string();
     }
     listed
         .into_iter()
@@ -753,15 +758,30 @@ pub fn hint_row_keys(
 
 /// The `[y/n]` of a confirmation prompt in `namespace`: the key of its
 /// `_yes` row, then the key of its `_no` row. A catch-all no row has no key
-/// of its own and is drawn as `no` (`n`, or `N` where no is the default),
-/// unless another row of the namespace lists that key: then the first of Esc
-/// and q no row lists (`HintsNameOnlyTableKeys`).
-pub fn yes_no_hint(table: &'static [KeyBinding], namespace: KeyNamespace, no: &str) -> String {
-    let row = |suffix: &str| bindings_in(table, namespace).find(|b| b.action.ends_with(suffix));
-    let yes = row("_yes").map_or("", |b| hint_key(table, namespace, None, b.action, "y"));
+/// of its own and is drawn as `n` (`N` in the prompts whose no is the
+/// default: taking over a feed, trusting a repo), unless another row of the
+/// namespace lists that key: then the first of Esc and q no row lists
+/// (`HintsNameOnlyTableKeys`).
+pub fn yes_no_hint(table: &'static [KeyBinding], namespace: KeyNamespace) -> String {
+    use KeyNamespace as N;
+    let no = match namespace {
+        N::BoardConfirmOverrideFeedOwner
+        | N::BoardConfirmTrustRepo
+        | N::BoardConfirmTrustRepoQuickDispatch => "N",
+        _ => "n",
+    };
+    let row = |suffix: &str| {
+        let row = bindings_in(table, namespace).find(|b| b.action.ends_with(suffix));
+        #[cfg(test)]
+        if let Some(b) = row {
+            note_hint_row(namespace, b.action);
+        }
+        row
+    };
+    let yes = row("_yes").map_or("", |b| row_key(b, "y"));
     let no = match row("_no") {
         Some(b) if b.keys == [ANY_OTHER_KEY] => catch_all_keys(table, namespace, &[no]),
-        Some(b) => hint_key(table, namespace, None, b.action, no).to_string(),
+        Some(b) => row_key(b, no).to_string(),
         None => String::new(),
     };
     format!("[{yes}/{no}]")
@@ -832,16 +852,21 @@ pub(crate) fn record_hint_rows<T>(f: impl FnOnce() -> T) -> (T, Vec<(KeyNamespac
     (out, asked)
 }
 
-/// The short form a hint draws a key in.
+/// The keys a hint draws in a short form, and that form.
+pub const SHORT_KEY_FORMS: [(&str, &str); 5] = [
+    ("Delete", "Del"),
+    ("Up", "\u{2191}"),
+    ("Down", "\u{2193}"),
+    ("Left", "\u{2190}"),
+    ("Right", "\u{2192}"),
+];
+
+/// The short form a hint draws a key in ([`SHORT_KEY_FORMS`]).
 pub fn short_key_form(key: &'static str) -> &'static str {
-    match key {
-        "Delete" => "Del",
-        "Up" => "\u{2191}",
-        "Down" => "\u{2193}",
-        "Left" => "\u{2190}",
-        "Right" => "\u{2192}",
-        other => other,
-    }
+    SHORT_KEY_FORMS
+        .iter()
+        .find(|(long, _)| *long == key)
+        .map_or(key, |(_, short)| short)
 }
 
 /// Every key of `namespace`'s `action` rows in `table`, in table order:

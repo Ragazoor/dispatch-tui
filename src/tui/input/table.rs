@@ -190,6 +190,12 @@ impl App {
         }
     }
 
+    /// The `[y/n]` a confirmation prompt in `namespace` names, from this
+    /// board's table (`crate::keybindings::yes_no_hint`).
+    pub(in crate::tui) fn yes_no(&self, namespace: KeyNamespace) -> String {
+        crate::keybindings::yes_no_hint(self.key_table, namespace)
+    }
+
     /// Install the table this board loaded at startup (`LoadKeyTable` in
     /// `docs/specs/keybindings.allium`). A load that refused anything opens
     /// the error popup with what it refused (`BoardShowsKeyLoadErrors`); the

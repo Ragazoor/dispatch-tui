@@ -14,7 +14,7 @@ use crate::keybindings::{hint_key, hint_row_keys, KeyNamespace as N};
 use crate::models::WorkPackageItem;
 use crate::palette::{CYAN, FG, MUTED};
 use crate::tui::ui::shared::{
-    caret_line, centered_rect, open_overlay, scroll_offset, titled_block, truncate,
+    caret_line, centered_rect, open_overlay, scroll_offset, text_field_hint, titled_block, truncate,
 };
 use crate::tui::{App, InputMode};
 
@@ -91,11 +91,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
         vec![
             title_field_line(app, width),
             Line::from(Span::styled(
-                format!(
-                    "[{}] create  [{}] back",
-                    hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
-                    hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
-                ),
+                text_field_hint(app.key_table, "create", "back"),
                 Style::default().fg(MUTED),
             )),
         ]
@@ -171,11 +167,7 @@ pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
         field_line(app, width, label),
         Line::raw(""),
         Line::from(Span::styled(
-            format!(
-                "[{}] save  [{}] cancel",
-                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
-                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
-            ),
+            text_field_hint(app.key_table, "save", "cancel"),
             Style::default().fg(MUTED),
         )),
     ];

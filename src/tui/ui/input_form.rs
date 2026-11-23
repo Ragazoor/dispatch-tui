@@ -1,3 +1,4 @@
+use super::shared::text_field_hint;
 use crate::keybindings::{
     embedded_hint, hint_key, hint_keys, hint_row_keys, KeyBinding, KeyNamespace as N,
 };
@@ -190,11 +191,7 @@ pub(in crate::tui) fn input_title_lines(
         caret_field("  Title: ", app, area, styles.active),
         Line::from(""),
         Line::from(Span::styled(
-            format!(
-                "  [{}] confirm  [{}] cancel",
-                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
-                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
-            ),
+            format!("  {}", text_field_hint(app.key_table, "confirm", "cancel")),
             styles.hint,
         )),
     ]
@@ -330,11 +327,11 @@ pub(in crate::tui) fn input_description_lines(
     ]
 }
 
-/// The hint every `RepoPathPicker` surface closes with, built from the rows
-/// of the picker `app` is in. One builder rather than three, so the pickers
-/// cannot drift apart.
-fn repo_picker_hint(app: &App) -> String {
-    let (ns, down, up, select, cancel) = match app.input.mode {
+/// The hint every `RepoPathPicker` surface closes with, and the status set on
+/// opening quick dispatch, built from the rows of the picker `mode` is. One
+/// builder rather than four, so the pickers cannot drift apart.
+pub(in crate::tui) fn repo_picker_hint(table: &'static [KeyBinding], mode: &InputMode) -> String {
+    let (ns, down, up, select, cancel) = match mode {
         InputMode::QuickDispatch => (
             N::BoardPickerQuickDispatch,
             "quick_dispatch_cursor_down",
@@ -357,9 +354,8 @@ fn repo_picker_hint(app: &App) -> String {
             "cancel_input",
         ),
     };
-    let table = app.key_table;
     format!(
-        "  Type to filter · [{}] navigate · [{}] select · [{}] cancel",
+        "Type to filter · [{}] navigate · [{}] select · [{}] cancel",
         hint_keys(table, ns, &[(up, "Up"), (down, "Down")]),
         hint_key(table, ns, None, select, "Enter"),
         hint_key(table, ns, None, cancel, "Esc"),
@@ -394,7 +390,10 @@ fn append_picker_candidates<'a>(
         },
     );
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(repo_picker_hint(app), styles.hint)));
+    lines.push(Line::from(Span::styled(
+        format!("  {}", repo_picker_hint(app.key_table, &app.input.mode)),
+        styles.hint,
+    )));
 }
 
 /// Rows the repo-path step spends outside its candidate list: title, tag,
@@ -720,11 +719,7 @@ pub(in crate::tui) fn input_epic_title_lines(
         caret_field("  Title: ", app, area, styles.active),
         Line::from(""),
         Line::from(Span::styled(
-            format!(
-                "  [{}] confirm  [{}] cancel",
-                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
-                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
-            ),
+            format!("  {}", text_field_hint(app.key_table, "confirm", "cancel")),
             styles.hint,
         )),
     ]
