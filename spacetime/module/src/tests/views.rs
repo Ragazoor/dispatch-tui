@@ -90,6 +90,12 @@ impl StoreReads for Store {
     fn bookmarks_of(&self, who: &str) -> Vec<Bookmark> {
         keep(&self.bookmarks, |b| b.subscriber == who)
     }
+    fn orchestration_of(&self, _: i64) -> Option<EpicOrchestration> {
+        None
+    }
+    fn ready_mark_of(&self, _: i64) -> Option<ReadyMark> {
+        None
+    }
     fn subagents_of(&self, _: i64) -> Vec<TaskSubagent> {
         Vec::new()
     }
