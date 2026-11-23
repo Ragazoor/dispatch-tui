@@ -603,6 +603,36 @@ async fn a_change_that_breaks_an_accepted_entry_is_refused() {
     assert_eq!(file_text(dir.path()).as_deref(), Some(before));
 }
 
+/// Restoring a row's default is refused when the default key now belongs to
+/// another row the file rebound: the restore would make an entry the load
+/// accepts clash, so nothing is written.
+#[tokio::test]
+async fn restoring_a_default_that_another_row_now_holds_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let free = free_normal_keys();
+    let delete_default = default_keys("delete_task");
+    let before = json!([
+        {"namespace": "board.normal", "action": "delete_task", "keys": [free[0]]},
+        {"namespace": "board.normal", "action": "navigate_row_last", "keys": delete_default},
+    ])
+    .to_string();
+    write_file(dir.path(), &before);
+    let state = board_restarted_cleanly_in(dir.path()).await;
+
+    let resp = set(
+        &state,
+        json!([{"namespace": "board.normal", "action": "delete_task", "keys": []}]),
+    )
+    .await;
+    assert!(is_error(&resp), "{resp:?}");
+    let message = error_message(&resp);
+    assert!(
+        message.contains("delete_task") && message.contains("navigate_row_last"),
+        "{message}"
+    );
+    assert_eq!(file_text(dir.path()).as_deref(), Some(before.as_str()));
+}
+
 /// Two changes naming one row in one call are refused: the call would not
 /// say which keys the row gets.
 #[tokio::test]

@@ -991,7 +991,7 @@ fn clashes_in(rows: &[RowKeys<'_>]) -> Vec<Clash> {
 }
 
 mod set;
-pub use set::{set_key_overrides, KeyChange, KeySetOutcome};
+pub use set::{set_key_overrides, KeyChange, KeySetError, KeySetOutcome};
 
 #[cfg(test)]
 mod tests;

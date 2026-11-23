@@ -13,12 +13,12 @@ use serde_json::{json, Value};
 
 use crate::keybindings::{
     check_overrides, namespaces_matching, read_override_entries, set_key_overrides, KeyBinding,
-    KeyChange, KeyNamespace, KEY_BINDINGS, KEY_FAMILIES,
+    KeyChange, KeyNamespace, KeySetError, KEY_BINDINGS, KEY_FAMILIES,
 };
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 
-use super::types::{parse_args, JsonRpcResponse, INVALID_PARAMS};
+use super::types::{parse_args, JsonRpcResponse, INTERNAL_ERROR, INVALID_PARAMS};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -266,7 +266,10 @@ pub(crate) async fn handle_keybinding_set(
     let file = state.key_table.file.clone();
     let outcome = match set_key_overrides(&file, &changes) {
         Ok(outcome) => outcome,
-        Err(problems) => {
+        Err(KeySetError::Write(message)) => {
+            return JsonRpcResponse::err(id, INTERNAL_ERROR, message)
+        }
+        Err(KeySetError::Refused(problems)) => {
             return JsonRpcResponse::err(
                 id,
                 INVALID_PARAMS,

@@ -543,8 +543,8 @@ mod overrides;
 mod table;
 pub use overrides::{
     check_overrides, is_key_name, load_key_table, read_override_entries, set_key_overrides,
-    KeyChange, KeyLoadError, KeyOverrideProblem, KeySetOutcome, KeyTableLoad, KeyTableReader,
-    KEY_OVERRIDE_FILE_NAME,
+    KeyChange, KeyLoadError, KeyOverrideProblem, KeySetError, KeySetOutcome, KeyTableLoad,
+    KeyTableReader, KEY_OVERRIDE_FILE_NAME,
 };
 pub use table::KEY_BINDINGS;
 

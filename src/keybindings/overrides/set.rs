@@ -46,20 +46,29 @@ pub struct KeySetOutcome {
     pub kept_errors: Vec<KeyLoadError>,
 }
 
-/// Apply `changes` to the override file at `file`, all or nothing. `Err`
-/// holds one message per problem, each saying what to fix; the file is then
-/// left exactly as it was.
-pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOutcome, Vec<String>> {
+/// Why a call wrote nothing.
+#[derive(Debug, Clone)]
+pub enum KeySetError {
+    /// The call would add a problem: one message per problem, each saying
+    /// what to fix. The file is left exactly as it was.
+    Refused(Vec<String>),
+    /// The checks passed but the file could not be written.
+    Write(String),
+}
+
+/// Apply `changes` to the override file at `file`, all or nothing.
+pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOutcome, KeySetError> {
+    use KeySetError::{Refused, Write};
     if changes.is_empty() {
-        return Err(vec![
-            "overrides is empty; pass at least one change".to_string()
-        ]);
+        return Err(Refused(vec![
+            "overrides is empty; pass at least one change".to_string(),
+        ]));
     }
     let entries = read_override_entries(file).map_err(|e| {
-        vec![format!(
+        Refused(vec![format!(
             "{} The file was not changed; fix it or remove it, then set the keys again.",
             e.message
-        )]
+        )])
     })?;
 
     // Each change must name a row, whatever its keys.
@@ -76,7 +85,7 @@ pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOut
         }
     }
     if !problems.is_empty() {
-        return Err(problems);
+        return Err(Refused(problems));
     }
 
     let before = check_overrides(&entries);
@@ -128,20 +137,20 @@ pub fn set_key_overrides(file: &Path, changes: &[KeyChange]) -> Result<KeySetOut
     if !added.is_empty() {
         let mut added = added;
         added.dedup();
-        return Err(added);
+        return Err(Refused(added));
     }
 
     let written = list != entries;
     if written {
         let mut text = serde_json::to_string_pretty(&Value::Array(list))
-            .map_err(|e| vec![format!("the override file could not be written ({e})")])?;
+            .map_err(|e| Write(format!("the override file could not be written ({e})")))?;
         text.push('\n');
         crate::atomic_write::write_bytes(
             file,
             crate::atomic_write::Mode::KeepOr { default: 0o644 },
             text.as_bytes(),
         )
-        .map_err(|e| vec![format!("{} could not be written: {e:#}", file.display())])?;
+        .map_err(|e| Write(format!("{} could not be written: {e:#}", file.display())))?;
     }
 
     let rows = rows

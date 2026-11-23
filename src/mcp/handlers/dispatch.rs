@@ -1075,7 +1075,7 @@ to an epic with auto_dispatch enabled, closing it also starts that epic's next b
 ;
 
     async idempotent "keybinding_set" => keybindings::handle_keybinding_set,
-        "Change the user's keys: set the keys of one or more rows of the keybinding table, or restore a row's default keys, in the key override file in the data directory. Name each row the way keybinding_search shows it: namespace, action id, and the context literal where the action has several rows in the namespace. The changes of one call are checked together with the checks the board runs when it loads the file, so swapping two rows' keys is one call; if any change would be refused (an unknown name, a key name that is not canonical, a key the mode does not allow, a clash with another row), nothing is written and the error says what to fix. The running board keeps the keys it loaded: a change applies when the board next starts, and keybinding_search shows it as pending until then.",
+        "Change the user's keys: set the keys of one or more rows of the keybinding table, or restore a row's default keys, in the key override file in the data directory. Name each row the way keybinding_search shows it: namespace, action id, and the context literal where the action has several rows in the namespace. The changes of one call are checked together with the checks the board runs when it loads the file, so swapping two rows' keys is one call, and a call with any change the board would refuse writes nothing. It returns each changed row with the keys it gets. The running board keeps the keys it loaded: a change applies when the board next starts.",
         {
             "type": "object",
             "properties": {
