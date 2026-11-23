@@ -143,6 +143,28 @@ pub fn dispatch_request_is_open(state: &str) -> bool {
     state == DISPATCH_REQUESTED || state == DISPATCH_PROVISIONING
 }
 
+/// Whether `task_id` holds a request that is still open.
+pub fn has_open_dispatch_request(r: &impl StoreReads, task_id: i64) -> bool {
+    r.dispatch_requests_of(task_id)
+        .iter()
+        .any(|q| dispatch_request_is_open(&q.state))
+}
+
+/// Every `requires` of `RequestDispatch` over the task as stored: the checks
+/// on the task itself and the orchestrated epic's limit. Every path that
+/// writes a request asks this.
+pub fn check_dispatch_request(
+    r: &impl StoreReads,
+    task: &Task,
+    requester: &str,
+    origin: &str,
+    now: &str,
+) -> Result<(), String> {
+    let has_open = has_open_dispatch_request(r, task.id);
+    validate_dispatch_request(task, requester, origin, has_open, now)?;
+    check_start_limit(r, task, requester)
+}
+
 /// `DispatchRequest.deadline`, in the store's timestamp spelling. An
 /// unparseable `requested_at` gives `""`, the module's absent, rather than a
 /// panic inside a reducer; a module-clock stamp always parses.
@@ -687,14 +709,7 @@ pub fn request_dispatch(
     let Some(task) = ctx.db.tasks().id().find(task_id) else {
         return Err(format!("task {task_id} no longer exists"));
     };
-    let has_open = ctx
-        .db
-        .dispatch_requests()
-        .task_id()
-        .filter(&task_id)
-        .any(|r| dispatch_request_is_open(&r.state));
-    validate_dispatch_request(&task, &requester, &origin, has_open, &now(ctx))?;
-    check_start_limit(ctx, &task, &requester)?;
+    check_dispatch_request(ctx, &task, &requester, &origin, &now(ctx))?;
     let mode = choose_dispatch_mode(&task, &mode)?;
     create_dispatch_request(ctx, task, &requester, mode, &origin)
 }

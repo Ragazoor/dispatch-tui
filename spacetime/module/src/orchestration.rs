@@ -59,24 +59,18 @@ pub fn orchestration_limit(o: &EpicOrchestration) -> i64 {
 /// `orchestrators.allium`'s `running_here(epic, host)`, counted: the running
 /// tasks of `epic_id`'s subtree whose current agent is on `host` and has a
 /// window or is still being started.
-pub fn running_here_count(r: &impl StoreReads, epic_id: i64, host: &str) -> usize {
-    std::iter::once(epic_id)
+pub fn running_here_count(r: &impl StoreReads, epic_id: i64, host: &str) -> i64 {
+    let subtree: std::collections::BTreeSet<i64> = std::iter::once(epic_id)
         .chain(descendant_epic_ids(r, epic_id))
-        .flat_map(|epic| r.tasks_in_epic(epic))
-        .filter(|t| t.status == RUNNING)
-        .filter(|t| {
-            let starting = || {
-                r.dispatch_requests_of(t.id)
-                    .iter()
-                    .any(|q| dispatch_request_is_open(&q.state))
-            };
-            r.agents_of(t.id).iter().any(|a| {
-                a.state == AGENT_CURRENT
-                    && a.host == host
-                    && (!a.tmux_window.is_empty() || starting())
-            })
-        })
-        .count()
+        .collect();
+    let holds_a_slot = |a: &Agent| {
+        a.state == AGENT_CURRENT
+            && r.task(a.task_id)
+                .is_some_and(|t| t.status == RUNNING && subtree.contains(&t.epic_id))
+            && (!a.tmux_window.is_empty() || has_open_dispatch_request(r, a.task_id))
+    };
+    let held = r.agents_on_host(host).iter().filter(|a| holds_a_slot(a)).count();
+    i64::try_from(held).unwrap_or(i64::MAX)
 }
 
 /// `store-split.allium: RequestDispatch`'s limit: a start of `task` on
@@ -88,7 +82,7 @@ pub fn check_start_limit(r: &impl StoreReads, task: &Task, host: &str) -> Result
     };
     let limit = orchestration_limit(&orchestration);
     let running = running_here_count(r, orchestration.epic_id, host);
-    if i64::try_from(running).unwrap_or(i64::MAX) >= limit {
+    if running >= limit {
         return Err(format!(
             "epic {} already runs {running} of {limit} tasks",
             orchestration.epic_id

@@ -792,22 +792,7 @@ fn chain_next_subtask(ctx: &ReducerContext, closed: &Task, host: &str) -> i64 {
     let subtasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&closed.epic_id).collect();
     let stamp = now(ctx);
     for candidate in chain_candidates(subtasks) {
-        let has_open = ctx
-            .db
-            .dispatch_requests()
-            .task_id()
-            .filter(&candidate.id)
-            .any(|r| dispatch_request_is_open(&r.state));
-        if validate_dispatch_request(
-            &candidate,
-            host,
-            DISPATCH_ORIGIN_EPIC_CHAIN,
-            has_open,
-            &stamp,
-        )
-        .and_then(|()| check_start_limit(ctx, &candidate, host))
-        .is_err()
-        {
+        if check_dispatch_request(ctx, &candidate, host, DISPATCH_ORIGIN_EPIC_CHAIN, &stamp).is_err() {
             continue;
         }
         let Ok(mode) = choose_dispatch_mode(&candidate, "") else {

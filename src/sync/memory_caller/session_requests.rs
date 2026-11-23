@@ -413,18 +413,13 @@ impl MemoryReducerCaller {
             .collect();
         let stamp = self.now();
         for candidate in module::chain_candidates(subtasks) {
-            let has_open = tables
-                .dispatch_requests
-                .values()
-                .any(|r| r.task_id == candidate.id && module::dispatch_request_is_open(&r.state));
-            if module::validate_dispatch_request(
+            if module::check_dispatch_request(
+                &*tables,
                 &candidate,
                 host,
                 module::DISPATCH_ORIGIN_EPIC_CHAIN,
-                has_open,
                 &stamp,
             )
-            .and_then(|()| module::check_start_limit(&*tables, &candidate, host))
             .is_err()
             {
                 continue;

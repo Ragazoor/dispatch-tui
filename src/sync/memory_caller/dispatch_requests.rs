@@ -215,12 +215,7 @@ impl MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&task_id).cloned() else {
             return Err(format!("task {task_id} no longer exists"));
         };
-        let has_open = tables
-            .dispatch_requests
-            .values()
-            .any(|r| r.task_id == task_id && module::dispatch_request_is_open(&r.state));
-        module::validate_dispatch_request(&row, requester, origin, has_open, &self.now())?;
-        module::check_start_limit(&*tables, &row, requester)?;
+        module::check_dispatch_request(&*tables, &row, requester, origin, &self.now())?;
         let mode = module::choose_dispatch_mode(&row, mode)?;
         let id = self.create_dispatch_request_body(&mut tables, row, requester, mode, origin)?;
         Ok(vec![id])

@@ -36,8 +36,8 @@ fn open_request_id(store: &Store, task: i64) -> i64 {
         .expect("the request")
 }
 
-/// Request, claim and report the task dispatched, with a window.
-fn start_live(store: &Store, task: i64) {
+/// Request the task and claim the request for `HOST_A`: its id.
+fn claimed(store: &Store, task: i64) -> i64 {
     request(store, task).expect("request");
     let req = open_request_id(store, task);
     store
@@ -45,6 +45,12 @@ fn start_live(store: &Store, task: i64) {
             claim_dispatch_request(ctx, req, HOST_A.into())
         })
         .expect("claim");
+    req
+}
+
+/// Request, claim and report the task dispatched, with a window.
+fn start_live(store: &Store, task: i64) {
+    let req = claimed(store, task);
     store
         .call("alice", |ctx| {
             report_dispatch_provisioned(
@@ -125,13 +131,7 @@ fn a_failed_request_gives_its_slot_back() {
     let store = Store::new();
     let (epic, ids) = epic_with(&store, 2);
     switch_on(&store, epic, Some(1));
-    request(&store, ids[0]).expect("first");
-    let req = open_request_id(&store, ids[0]);
-    store
-        .call("alice", |ctx| {
-            claim_dispatch_request(ctx, req, HOST_A.into())
-        })
-        .expect("claim");
+    let req = claimed(&store, ids[0]);
     store
         .call("alice", |ctx| {
             report_dispatch_failed(ctx, req, HOST_A.into(), "boom".into())
@@ -148,14 +148,7 @@ fn a_task_in_review_and_a_detached_task_take_no_slot() {
     switch_on(&store, epic, Some(2));
     start_live(&store, ids[0]);
     start_live(&store, ids[1]);
-    patch(
-        &store,
-        ids[0],
-        TaskPatch {
-            status: Some("review".into()),
-            ..TaskPatch::default()
-        },
-    );
+    patch(&store, ids[0], status_patch("review"));
     patch(
         &store,
         ids[1],
@@ -293,14 +286,11 @@ fn two_machines_cannot_both_start_one_task() {
     assert!(request_on(&store, ids[0], HOST_B, "mcp").is_err());
 
     assert_eq!(store.db().dispatch_requests().iter().count(), 1);
-    assert_eq!(open_request_id(&store, ids[0]), {
-        let only = store
-            .db()
-            .dispatch_requests()
-            .iter()
-            .next()
-            .expect("one row");
-        assert_eq!(only.host, HOST_A);
-        only.id
-    });
+    let only = store
+        .db()
+        .dispatch_requests()
+        .iter()
+        .next()
+        .expect("one row");
+    assert_eq!(only.host, HOST_A);
 }
