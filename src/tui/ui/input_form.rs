@@ -517,6 +517,11 @@ fn form_step_page<'a>(
     settled
 }
 
+/// The `Line` count [`input_wrap_up_mode_lines`] returns: 4 settled (title,
+/// tag, repo, base branch) + active + blank + hint. `input_panel_height`
+/// reserves rows from it, so the `[Esc] cancel` hint is not cut off.
+pub(in crate::tui) const WRAP_UP_STEP_LINES: u16 = 7;
+
 /// The wrap-up step (see docs/specs/tasks.allium's CreateTask guidance):
 /// restates the four answered steps — with phoenix riding the settled tag line
 /// when it was armed at InputTag — then the wrap-up picker. Answering it opens
@@ -557,9 +562,10 @@ pub(in crate::tui) fn wrap_up_prompt(table: &'static [KeyBinding]) -> String {
     )
 }
 
-/// The model step's prompt, shared by all three surfaces that show it: the
-/// form panel's active line, the status-bar hint and the transient status set
-/// on entering the step (CreateTask: ModelPicker). `[Enter]` names the model
+/// The model step's prompt, shared by both surfaces that show it: the form
+/// panel's active line and the status-bar hint (CreateTask: ModelPicker).
+/// Entering the step clears the status message rather than storing a copy,
+/// which would keep the keys of the table it was built with. `[Enter]` names the model
 /// Enter keeps: the draft's own (a copy's), else the default. Each key is the
 /// key of its `model_picker_select_<model>` row in `table`, by default its
 /// alias's first letter.

@@ -82,7 +82,7 @@ impl App {
     /// (the `task_*` contexts), or `None` when the cursor is not on a task.
     /// One evaluation yields one rung, so the contexts are mutually exclusive
     /// by construction.
-    fn activation_context(&self) -> Option<KeyContext> {
+    pub(in crate::tui) fn activation_context(&self) -> Option<KeyContext> {
         use KeyContext as C;
         let Some(ColumnItem::Task(task)) = self.selected_column_item() else {
             return None;

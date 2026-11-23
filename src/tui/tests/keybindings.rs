@@ -1614,6 +1614,10 @@ struct HintLine {
     keys: Vec<String>,
 }
 
+/// The rows of its own namespace a board's hints were built from: the
+/// namespace, which of its boards, and the actions asked for.
+type HintRows = Vec<(KeyNamespace, usize, Vec<String>)>;
+
 /// Every board each mode of HintsNameOnlyTableKeys is read on.
 fn hint_boards(ns: KeyNamespace) -> Vec<App> {
     match ns {
@@ -1641,17 +1645,29 @@ fn hint_boards(ns: KeyNamespace) -> Vec<App> {
 
 /// HintsNameOnlyTableKeys: the hint lines every board mode draws under
 /// `table`. board.normal's are its status bar and the indicator row above
-/// the board; board.detail's are its status bar and the detail's footer;
+/// the board (the two rows at either edge, framed or not); board.detail's are its status bar and the detail's footer;
 /// every other mode's are the lines it draws over the plain board (its popup,
 /// form prompt, overlay footer and status bar).
 fn read_hints(table: &'static [KeyBinding]) -> Vec<HintLine> {
+    read_hints_in(table, None).0
+}
+
+/// [`read_hints`] over every namespace, or only the given boards of one,
+/// with the rows each board's hints were built from.
+fn read_hints_in(
+    table: &'static [KeyBinding],
+    only: Option<(KeyNamespace, &[usize])>,
+) -> (Vec<HintLine>, HintRows) {
     // Wide enough that no status bar is cut off, so a longer user key
     // cannot push a hint out of the frame.
     const W: u16 = 300;
     const H: u16 = 50;
     let mut out = Vec::new();
+    let mut rows = Vec::new();
     for ns in board_namespaces() {
-        if matches!(ns, KeyNamespace::BoardHelp | KeyNamespace::BoardError) {
+        if matches!(ns, KeyNamespace::BoardHelp | KeyNamespace::BoardError)
+            || only.is_some_and(|(o, _)| o != ns)
+        {
             continue;
         }
         let is_key = |k: &str| {
@@ -1661,8 +1677,20 @@ fn read_hints(table: &'static [KeyBinding]) -> Vec<HintLine> {
                 .any(|t| t.iter().any(|b| b.namespace == ns && b.keys.contains(&k)))
         };
         for (board, mut app) in hint_boards(ns).into_iter().enumerate() {
+            if only.is_some_and(|(_, boards)| !boards.contains(&board)) {
+                continue;
+            }
             app.set_key_table(table);
-            let buf = render_to_buffer(&mut app, W, H);
+            let (buf, asked) =
+                crate::keybindings::record_hint_rows(|| render_to_buffer(&mut app, W, H));
+            let mut asked: Vec<String> = asked
+                .into_iter()
+                .filter(|(n, _)| *n == ns)
+                .map(|(_, action)| action)
+                .collect();
+            asked.sort();
+            asked.dedup();
+            rows.push((ns, board, asked));
             let line = |y: u16| buffer_line(&buf, y);
             let mut push = |y: u16, keys: Vec<String>| {
                 out.push(HintLine {
@@ -1675,8 +1703,11 @@ fn read_hints(table: &'static [KeyBinding]) -> Vec<HintLine> {
             };
             match ns {
                 KeyNamespace::BoardNormal => {
-                    push(0, bracketed_keys(&line(0), is_key));
-                    push(H - 1, bracketed_keys(&line(H - 1), is_key));
+                    // With the split pane open the board is framed, so its
+                    // indicator row and status bar sit one row in.
+                    for y in [0, 1, H - 2, H - 1] {
+                        push(y, bracketed_keys(&line(y), is_key));
+                    }
                 }
                 KeyNamespace::BoardDetail => {
                     // The footer is the detail's bottom border: the last line
@@ -1714,7 +1745,7 @@ fn read_hints(table: &'static [KeyBinding]) -> Vec<HintLine> {
             }
         }
     }
-    out
+    (out, rows)
 }
 
 /// Every key read is a key of its mode's namespace in `table` (or stands for
@@ -1812,6 +1843,90 @@ fn under_the_remapped_table_every_hint_names_the_users_key() {
     assert!(
         failures.is_empty(),
         "hints that do not follow the remap:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// HintsNameOnlyTableKeys, one row at a time: for every row a drawn hint is
+/// built from, a table with only that row rebound draws the new key on that
+/// board. The remapped table leaves most rows where they were; this reaches
+/// the rest, so a hint written by hand beside a row the remap does not move
+/// fails too.
+#[test]
+fn each_hint_names_its_row_when_that_row_alone_is_rebound() {
+    let (drawn, asked) = read_hints_in(KEY_BINDINGS, None);
+    let mut failures = Vec::new();
+    // A hint written by hand asks no row: every drawn key that is a key of
+    // its mode must be a key of a row the board's hints were built from.
+    for h in &drawn {
+        let built_from = asked
+            .iter()
+            .find(|(ns, board, _)| *ns == h.ns && *board == h.board)
+            .map_or(&[][..], |(_, _, actions)| actions.as_slice());
+        for hint in &h.keys {
+            let key = table_form(hint);
+            let rows: Vec<&KeyBinding> = KEY_BINDINGS
+                .iter()
+                .filter(|b| b.namespace == h.ns && b.keys.contains(&key))
+                .collect();
+            if !rows.is_empty()
+                && !rows
+                    .iter()
+                    .any(|b| built_from.iter().any(|a| a == b.action))
+            {
+                failures.push(format!(
+                    "{} (board #{}): `{hint}` in {:?} is built from no row",
+                    h.ns.name(),
+                    h.board,
+                    h.line
+                ));
+            }
+        }
+    }
+    let mut by_row: std::collections::BTreeMap<(&str, String), (KeyNamespace, Vec<usize>)> =
+        std::collections::BTreeMap::new();
+    for (ns, board, actions) in &asked {
+        for action in actions {
+            by_row
+                .entry((ns.name(), action.clone()))
+                .or_insert((*ns, Vec::new()))
+                .1
+                .push(*board);
+        }
+    }
+    assert!(
+        by_row.len() > 100,
+        "too few rows were drawn ({})",
+        by_row.len()
+    );
+    for ((_, action), (ns, boards)) in &by_row {
+        let listed = |k: &str| {
+            KEY_BINDINGS
+                .iter()
+                .any(|b| b.namespace == *ns && b.keys.contains(&k))
+        };
+        let (key, keys): (&str, &'static [&'static str]) = if !listed("Ctrl+T") {
+            ("Ctrl+T", &["Ctrl+T"])
+        } else {
+            ("Ctrl+Y", &["Ctrl+Y"])
+        };
+        let table = crate::keybindings::table_with_keys(*ns, action, keys);
+        let (lines, _) = read_hints_in(table, Some((*ns, boards)));
+        for board in boards {
+            let shown = lines
+                .iter()
+                .any(|h| h.board == *board && h.keys.iter().any(|k| k == key));
+            if !shown {
+                failures.push(format!(
+                    "{} {action} (board #{board}): rebound to {key}, no hint names it",
+                    ns.name()
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "hints that do not follow their own row:\n{}",
         failures.join("\n")
     );
 }

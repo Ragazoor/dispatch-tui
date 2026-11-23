@@ -162,6 +162,7 @@ fn action_hints_hide_retry_while_dispatch_in_flight() {
     let task = make_unprovisioned_task(4, TaskStatus::Running);
     let hints = crate::tui::ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         true,
         false,

@@ -121,19 +121,21 @@ pub fn reconcile_diff_pane(
 /// create. A pane already running the editor is replaced too, losing any
 /// unsaved edits: the user chose that over having to quit it first (task
 /// 98620). A path with no working-tree file is refused, because an editor
-/// handed a missing path opens a misleading empty buffer. Focus ends in the
-/// pane.
+/// handed a missing path opens a misleading empty buffer; the refusal names
+/// `diff_key`, the key of the tree's `toggle_diff` row in the pane's loaded
+/// table. Focus ends in the pane.
 pub fn show_in_editor(
     my_pane: &PaneId,
     worktree: &Path,
     relative: &Path,
     editor: &[String],
+    diff_key: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let file = worktree.join(relative);
     if !file.exists() {
         anyhow::bail!(
-            "{} no longer exists; Space shows its diff",
+            "{} no longer exists; {diff_key} shows its diff",
             relative.display()
         );
     }
@@ -531,6 +533,7 @@ mod tests {
             wt.path(),
             Path::new("a.rs"),
             &editor(),
+            "Space",
             &runner,
         )
         .unwrap();
@@ -570,6 +573,7 @@ mod tests {
             wt.path(),
             Path::new("a.rs"),
             &editor(),
+            "Space",
             &runner,
         )
         .unwrap();
@@ -598,6 +602,7 @@ mod tests {
             wt.path(),
             Path::new("gone.rs"),
             &editor(),
+            "Space",
             &runner,
         )
         .unwrap_err();
@@ -690,6 +695,7 @@ mod tests {
             wt.path(),
             Path::new("a.rs"),
             &editor(),
+            "Space",
             &runner,
         )
         .unwrap();

@@ -304,6 +304,10 @@ rule CreateTask {
         -- key is never a mnemonic sitting outside the word. This is why
         -- PrReview is v and not p: p belongs to "[p]hoenix", and moving
         -- PrReview to "pr-re[v]iew" keeps both keys inside their own labels.
+        -- This holds for the default keys. A key the user rebinds to one its
+        -- label does not contain is drawn before the label instead ("[q] bug"):
+        -- the hint names the row's key either way
+        -- (keybindings.allium: HintsNameOnlyTableKeys).
         --
         -- EnterKeepsTheDraft. Enter does not clear tag — it leaves whatever
         -- the draft already holds. For the manual creation form the draft

@@ -136,6 +136,13 @@ fn open_in_editor(
         context.root,
         relative,
         &crate::editor::editor_from_env(),
+        crate::keybindings::hint_key(
+            context.key_table,
+            crate::keybindings::KeyNamespace::AgentTreeTree,
+            Some(crate::keybindings::KeyContext::OnFile),
+            "toggle_diff",
+            "Space",
+        ),
         runner,
     ) {
         tracing::warn!(error = %format!("{e:#}"), "failed to open the editor pane");

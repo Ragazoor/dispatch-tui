@@ -15,6 +15,7 @@ async fn action_hints_backlog_task() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -51,6 +52,7 @@ async fn action_hints_backlog_task_with_plan() {
     task.plan_path = Some("plan.md".into());
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -75,6 +77,7 @@ async fn action_hints_running_with_window() {
     task.tmux_window = Some(test_tmux_window("win-4"));
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -99,6 +102,7 @@ async fn action_hints_running_with_worktree_no_window() {
     task.tmux_window = None;
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -125,6 +129,7 @@ async fn action_hints_running_no_worktree_no_window() {
     task.tmux_window = None;
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -154,6 +159,7 @@ async fn action_hints_review_with_window() {
     task.tmux_window = Some(test_tmux_window("win-6"));
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -175,6 +181,7 @@ async fn action_hints_done_task() {
     let task = make_task(5, TaskStatus::Done);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -196,6 +203,7 @@ async fn action_hints_done_task() {
 async fn action_hints_no_task() {
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         None,
         false,
         false,
@@ -219,6 +227,7 @@ async fn action_hints_no_longer_advertises_learnings_key() {
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
         None,
+        None,
         false,
         false,
         Color::Rgb(122, 162, 247),
@@ -235,6 +244,7 @@ async fn action_hints_backlog_shows_enter_detail() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -249,6 +259,7 @@ async fn action_hints_shows_filter_help() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -264,6 +275,7 @@ async fn action_hints_shows_copy_and_split() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,

@@ -84,6 +84,7 @@ fn action_hints_no_ctrl_g_outside_epic() {
     let task = make_task(1, TaskStatus::Backlog);
     let hints = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         Some(&task),
         false,
         false,
@@ -131,6 +132,7 @@ fn hint_bar_keys_are_all_in_the_keybinding_table() {
                 task.epic_id = Some(crate::models::EpicId(1));
                 bars.push(ui::action_hints(
                     crate::keybindings::KEY_BINDINGS,
+                    None,
                     Some(&task),
                     false,
                     flattened,
@@ -141,6 +143,7 @@ fn hint_bar_keys_are_all_in_the_keybinding_table() {
     }
     bars.push(ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         None,
         false,
         false,
@@ -205,6 +208,7 @@ fn enter_hint_names_what_enter_does() {
     assert_eq!(
         label_after_enter(&ui::action_hints(
             crate::keybindings::KEY_BINDINGS,
+            None,
             Some(&task),
             false,
             false,
@@ -216,6 +220,7 @@ fn enter_hint_names_what_enter_does() {
     assert_eq!(
         label_after_enter(&ui::action_hints(
             crate::keybindings::KEY_BINDINGS,
+            None,
             Some(&task),
             false,
             true,
@@ -228,6 +233,7 @@ fn enter_hint_names_what_enter_does() {
     assert_eq!(
         label_after_enter(&ui::action_hints(
             crate::keybindings::KEY_BINDINGS,
+            None,
             Some(&task),
             false,
             true,

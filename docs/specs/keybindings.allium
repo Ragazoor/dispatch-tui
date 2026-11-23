@@ -128,7 +128,12 @@ contract KeybindingDriftGate {
         -- remapped table of RemappedTableDrivesDispatch, where it names the
         -- user's key and no longer the default one: each key the remap moved
         -- carries, in the remapped frame, the label its default key carried
-        -- in the default frame.
+        -- in the default frame. And one row at a time: every key a frame
+        -- draws is a key of a row its hints were built from, and a table
+        -- with only that row rebound draws the new key on the same board, so
+        -- a hint written by hand beside a row the remap leaves alone fails.
+        -- board.detail's status bar names board.detail's keys, not the
+        -- board's.
         -- A hint that shows only some of a row's keys (`[q/Esc] close` of a
         -- row listing Enter and q) shows those it shows by default while the
         -- row still lists them, and otherwise the row's first key.

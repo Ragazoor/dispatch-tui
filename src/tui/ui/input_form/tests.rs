@@ -338,6 +338,17 @@ fn wrap_up_step_settled_lines_fit_one_row() {
     assert!(line_text(&lines[3]).starts_with("  Base branch: bbb"));
 }
 
+/// The wrap-up step shows WRAP_UP_STEP_LINES lines, what
+/// `input_panel_height` reserves from, so its cancel hint is drawn.
+#[test]
+fn wrap_up_step_shows_wrap_up_step_lines_lines() {
+    let mut app = crate::tui::App::new(vec![]);
+    app.input.task_draft = Some(long_draft());
+    let lines = input_wrap_up_mode_lines(&app, Rect::new(0, 0, 80, 20), &form_styles());
+    assert_eq!(lines.len(), WRAP_UP_STEP_LINES as usize);
+    assert_eq!(line_text(&lines[6]), "  [Esc] cancel");
+}
+
 /// The model step restates the wrap-up answer, shows MODEL_STEP_LINES lines
 /// (what `input_panel_height` reserves from), and its active line is the one
 /// shared prompt (CreateTask: ModelPicker).

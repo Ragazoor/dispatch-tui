@@ -491,15 +491,17 @@ fn append_browse_help_lines<'a>(
     let ns = KeyNamespace::BoardFilter;
     let key = |action, shown| hint_key(table, ns, None, action, shown);
     let hint = |key: String, label| footer_hint(key, label, styles);
-    let navigate = hint_keys(
-        table,
-        ns,
-        &[("filter_cursor_down", "j"), ("filter_cursor_up", "k")],
-    );
+    let navigate = || {
+        hint_keys(
+            table,
+            ns,
+            &[("filter_cursor_down", "j"), ("filter_cursor_up", "k")],
+        )
+    };
     let toggle = key("filter_toggle_row", "Space");
     let first: Vec<Span> = match tab {
         FilterTab::Repos => [
-            hint(format!("  [{navigate}]"), " navigate  "),
+            hint(format!("  [{}]", navigate()), " navigate  "),
             hint(format!("[{toggle}]"), " toggle  "),
             hint(
                 format!("[{}]", key("repo_filter_delete_repo_path", "Delete")),
@@ -521,7 +523,7 @@ fn append_browse_help_lines<'a>(
         ]
         .concat(),
         FilterTab::Packages => [
-            hint(format!("  [{navigate}]"), " navigate  "),
+            hint(format!("  [{}]", navigate()), " navigate  "),
             hint(format!("[{toggle}]"), " hide/show  "),
         ]
         .concat(),

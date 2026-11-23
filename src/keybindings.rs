@@ -692,6 +692,8 @@ pub fn hint_key(
     action: &str,
     shown: &str,
 ) -> &'static str {
+    #[cfg(test)]
+    note_hint_row(namespace, action);
     let rows = || bindings_in(table, namespace).filter(|b| b.action == action);
     let row = rows()
         .find(|b| b.context == context)
@@ -730,6 +732,8 @@ pub fn hint_row_keys(
     action: &str,
     shown: &[&str],
 ) -> String {
+    #[cfg(test)]
+    note_hint_row(namespace, action);
     let row = bindings_in(table, namespace).find(|b| b.action == action);
     let listed: Vec<&str> = row.map_or_else(Vec::new, |b| {
         shown
@@ -798,6 +802,36 @@ pub fn embedded_hint(key: &str, label: &str) -> String {
     format!("[{key}] {label}")
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The rows hint builders asked for while a test records them
+    /// ([`record_hint_rows`]): which action each drawn hint stands for.
+    static HINT_ROWS: std::cell::RefCell<Option<Vec<(KeyNamespace, String)>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn note_hint_row(namespace: KeyNamespace, action: &str) {
+    HINT_ROWS.with(|rows| {
+        if let Some(rows) = rows.borrow_mut().as_mut() {
+            rows.push((namespace, action.to_string()));
+        }
+    });
+}
+
+/// Run `f` and return the rows ([`hint_key`], [`hint_row_keys`] and what
+/// builds on them) it asked for a hint, so a test can rebind exactly the rows
+/// a frame's hints stand for.
+#[cfg(test)]
+pub(crate) fn record_hint_rows<T>(f: impl FnOnce() -> T) -> (T, Vec<(KeyNamespace, String)>) {
+    HINT_ROWS.with(|rows| *rows.borrow_mut() = Some(Vec::new()));
+    let out = f();
+    let asked = HINT_ROWS
+        .with(|rows| rows.borrow_mut().take())
+        .unwrap_or_default();
+    (out, asked)
+}
+
 /// The short form a hint draws a key in.
 pub fn short_key_form(key: &'static str) -> &'static str {
     match key {
@@ -818,6 +852,8 @@ pub fn keys_of(
     namespace: KeyNamespace,
     action: &str,
 ) -> Vec<&'static str> {
+    #[cfg(test)]
+    note_hint_row(namespace, action);
     bindings_in(table, namespace)
         .filter(|b| b.action == action)
         .flat_map(|b| b.keys.iter().copied())

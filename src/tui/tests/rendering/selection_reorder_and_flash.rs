@@ -102,6 +102,7 @@ async fn action_hints_include_select_all() {
     let task = app.selected_task();
     let spans = ui::action_hints(
         crate::keybindings::KEY_BINDINGS,
+        None,
         task,
         false,
         false,

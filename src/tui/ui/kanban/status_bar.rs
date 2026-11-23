@@ -349,6 +349,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
                 let in_flight = task.is_some_and(|t| app.dispatch_may_be_in_flight(t, now));
                 action_hints(
                     t,
+                    app.activation_context(),
                     task,
                     in_flight,
                     app.cursor_in_flattened_column(),

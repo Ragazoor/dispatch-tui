@@ -17,9 +17,10 @@ use super::input_form::{
     input_epic_description_lines, input_epic_title_lines, input_model_lines, input_placement_lines,
     input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
     quick_dispatch_lines, FormStyles, MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
+    WRAP_UP_STEP_LINES,
 };
 use super::shared::{render_top_indicators, rounded_block, HintBar};
-use crate::keybindings::{KeyBinding, KeyContext as C, KeyNamespace};
+use crate::keybindings::{KeyBinding, KeyContext, KeyContext as C, KeyNamespace};
 use crate::palette::{
     header_label_focused, header_label_unfocused, mix, BLUE, BOARD_GROUND, BOARD_GROUND_FOCUSED,
     BORDER, CARD_BORDER, CARD_SURFACE, CURSOR_BORDER, CYAN, FG, GREEN, HEADER_BG,
@@ -227,10 +228,10 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
             (PHOENIX_ARMED_TAG_STEP_LINES + 2).clamp(8, max_height)
         }
         InputMode::InputModel => (MODEL_STEP_LINES + 2).clamp(8, max_height),
+        InputMode::InputWrapUpMode => (WRAP_UP_STEP_LINES + 2).clamp(8, max_height),
         InputMode::InputTitle
         | InputMode::InputTag
         | InputMode::InputDescription
-        | InputMode::InputWrapUpMode
         | InputMode::ConfirmRetry(_)
         | InputMode::InputEpicTitle
         | InputMode::InputEpicDescription
@@ -597,18 +598,34 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 /// Each hint names the key of the board.normal row it stands for in `table`
 /// (`HintsNameOnlyTableKeys` in `docs/specs/keybindings.allium`).
 ///
+/// `space` is the activation rung the cursor's card is on
+/// ([`crate::tui::App::activation_context`]); Space's hint names the key of
+/// that rung's row, so a split pane's `swap_split_pane` row is the one shown
+/// when it is the one that answers. `None` reads each label's usual row.
+///
 /// `dispatch_in_flight` comes from [`crate::tui::App::dispatch_may_be_in_flight`].
 /// It is not cosmetic: an unprovisioned task is indistinguishable from one
 /// mid-provisioning, and advertising retry on the latter invites a second
 /// dispatch. See `RetryReachableInPlace` in `docs/specs/dispatch.allium`.
 pub(in crate::tui) fn action_hints(
     table: &'static [KeyBinding],
+    space: Option<KeyContext>,
     task: Option<&Task>,
     dispatch_in_flight: bool,
     enter_jumps_to_epic: bool,
     key_color: Color,
 ) -> Vec<Span<'static>> {
     let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
+    // The row Space runs on this card: the rung's own row, else `default`.
+    let space_row = |default: KeyContext, action: &'static str| {
+        space
+            .and_then(|c| {
+                crate::keybindings::bindings_in(table, KeyNamespace::BoardNormal)
+                    .find(|b| b.context == Some(c))
+                    .map(|b| (Some(c), b.action))
+            })
+            .unwrap_or((Some(default), action))
+    };
     let mut push_hint = |context, action, key, label| bar.push(context, action, key, label);
 
     if let Some(task) = task {
@@ -620,21 +637,25 @@ pub(in crate::tui) fn action_hints(
                 // a design step the dispatch prompt no longer has (#4366) —
                 // and the plan's presence changes what the agent is told to do
                 // first, not what the user is doing by pressing Space.
-                push_hint(Some(C::BacklogTask), "dispatch_task", "Space", "dispatch");
+                let (context, action) = space_row(C::BacklogTask, "dispatch_task");
+                push_hint(context, action, "Space", "dispatch");
                 push_hint(None, "edit_task", "e", "edit");
                 push_hint(off_epic, "move_task_forward", "L", "move");
                 push_hint(None, "delete_task", "x", "done");
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
-                    push_hint(Some(C::TaskWithWindow), "jump_to_tmux", "Space", "session");
+                    let (context, action) = space_row(C::TaskWithWindow, "jump_to_tmux");
+                    push_hint(context, action, "Space", "session");
                 } else if task.worktree.is_some() {
-                    push_hint(Some(C::TaskWithWorktree), "resume_task", "Space", "resume");
+                    let (context, action) = space_row(C::TaskWithWorktree, "resume_task");
+                    push_hint(context, action, "Space", "resume");
                 } else if !dispatch_in_flight {
                     // Unprovisioned: nothing to jump to or resume, but Space
                     // opens the kill-and-retry dialog. See RetryReachableInPlace
                     // in docs/specs/dispatch.allium.
-                    push_hint(Some(C::StuckTask), "open_retry_dialog", "Space", "retry");
+                    let (context, action) = space_row(C::StuckTask, "open_retry_dialog");
+                    push_hint(context, action, "Space", "retry");
                 }
                 push_hint(None, "edit_task", "e", "edit");
                 push_hint(off_epic, "move_task_forward", "L", "move");
@@ -643,10 +664,12 @@ pub(in crate::tui) fn action_hints(
             }
             TaskStatus::Review => {
                 if task.tmux_window.is_some() {
-                    push_hint(Some(C::TaskWithWindow), "jump_to_tmux", "Space", "session");
+                    let (context, action) = space_row(C::TaskWithWindow, "jump_to_tmux");
+                    push_hint(context, action, "Space", "session");
                     push_hint(None, "detach_tmux", "T", "detach");
                 } else if task.worktree.is_some() {
-                    push_hint(Some(C::TaskWithWorktree), "resume_task", "Space", "resume");
+                    let (context, action) = space_row(C::TaskWithWorktree, "resume_task");
+                    push_hint(context, action, "Space", "resume");
                 }
                 push_hint(None, "edit_task", "e", "edit");
                 push_hint(off_epic, "move_task_forward", "L", "move");
