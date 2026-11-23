@@ -1333,7 +1333,7 @@ async fn step_shared_store(
     tx: &tokio::sync::mpsc::UnboundedSender<Message>,
 ) -> bool {
     match session.step(store, std::time::Instant::now()).await {
-        Ok(crate::sync::StepOutcome::Conflicted) => {
+        crate::sync::StepOutcome::Conflicted => {
             // The connection already carries the composed message —
             // `identity_conflict_message` wrote it when the event
             // was applied — so this reports it rather than
@@ -1353,22 +1353,15 @@ async fn step_shared_store(
             ));
             return true;
         }
-        Ok(crate::sync::StepOutcome::Connected) => {
+        crate::sync::StepOutcome::Connected => {
             on_store_connected(store, settled_identity, reducer_caller).await;
         }
-        Ok(_) => {
+        _ => {
             // Publish why the connection is down, so a write made
             // during the outage can say. Cleared by `settle` on the
             // next success, so a refusal never quotes an outage
             // that is over.
             settled_identity.set_last_error(session.connection().last_error().map(str::to_string));
-        }
-        Err(e) => {
-            // A backstop. A step records every failure it meets on the
-            // connection as a failed attempt (backed off and shown), so
-            // nothing reaches here from the store or the identity reads;
-            // anything that does is logged and the next tick steps again.
-            tracing::warn!("shared store step failed: {e:#}");
         }
     }
     false

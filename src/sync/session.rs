@@ -247,11 +247,7 @@ impl SyncSession {
         store: &dyn SyncStore,
         now: Instant,
     ) -> std::result::Result<(), String> {
-        let outcome = self
-            .attempt(store, now)
-            .await
-            .map_err(|e| format!("{e:#}"))?;
-        match outcome {
+        match self.attempt(store, now).await {
             StepOutcome::Connected => Ok(()),
             _ => Err(self
                 .connection
@@ -266,12 +262,12 @@ impl SyncSession {
     /// Safe to call as often as the caller likes: every state but `Connecting`
     /// and a due `Disconnected` answers [`StepOutcome::Idle`] without touching
     /// the store.
-    pub async fn step(&mut self, store: &dyn SyncStore, now: Instant) -> Result<StepOutcome> {
+    pub async fn step(&mut self, store: &dyn SyncStore, now: Instant) -> StepOutcome {
         match self.connection.status() {
             ConnectionStatus::Connecting => self.attempt(store, now).await,
             ConnectionStatus::Disconnected if self.connection.is_retry_due(now) => {
                 self.connection.apply(ConnectionEvent::RetryDue, now);
-                Ok(StepOutcome::Retrying)
+                StepOutcome::Retrying
             }
             // Collected only while connected. The transport may notice a socket
             // die after the board has already given up on it, and applying that
@@ -291,17 +287,28 @@ impl SyncSession {
                     // (`AWriteWithNoConnectionIsRefused`). Disconnecting is
                     // what clears both.
                     self.connector.disconnect().await;
-                    Ok(StepOutcome::Dropped)
+                    StepOutcome::Dropped
                 }
-                None => Ok(StepOutcome::Idle),
+                None => StepOutcome::Idle,
             },
             // `Failed`, and a `Disconnected` whose backoff has not elapsed.
             // `Failed` is terminal and deliberately never retried.
-            _ => Ok(StepOutcome::Idle),
+            _ => StepOutcome::Idle,
         }
     }
 
-    async fn attempt(&mut self, store: &dyn SyncStore, now: Instant) -> Result<StepOutcome> {
+    /// A failed attempt (`sync.allium: ConnectionAttemptFailed`): recorded on
+    /// the connection, so it is backed off and names its reason.
+    fn attempt_failed(&mut self, reason: String, now: Instant) -> StepOutcome {
+        self.connection
+            .apply(ConnectionEvent::AttemptFailed { reason }, now);
+        StepOutcome::Failed
+    }
+
+    /// One attempt, start to finish. It cannot fail: every failure it meets is
+    /// recorded on the connection as an outage, so none is retried every tick
+    /// unrecorded.
+    async fn attempt(&mut self, store: &dyn SyncStore, now: Instant) -> StepOutcome {
         // A credential that cannot be read is an attempt that cannot be made:
         // a failed attempt like any other, backed off and named
         // (`sync.allium: ConnectionAttemptFailed`). Returned as an error it
@@ -309,13 +316,10 @@ impl SyncSession {
         let token = match store.user_identity_token().await {
             Ok(token) => token,
             Err(error) => {
-                self.connection.apply(
-                    ConnectionEvent::AttemptFailed {
-                        reason: format!("could not read this install's credential: {error:#}"),
-                    },
+                return self.attempt_failed(
+                    format!("could not read this install's credential: {error:#}"),
                     now,
                 );
-                return Ok(StepOutcome::Failed);
             }
         };
         let accepted = match self
@@ -324,15 +328,7 @@ impl SyncSession {
             .await
         {
             Ok(accepted) => accepted,
-            Err(error) => {
-                self.connection.apply(
-                    ConnectionEvent::AttemptFailed {
-                        reason: error.reason().to_string(),
-                    },
-                    now,
-                );
-                return Ok(StepOutcome::Failed);
-            }
+            Err(error) => return self.attempt_failed(error.reason().to_string(), now),
         };
 
         // The identity is settled BEFORE anything is subscribed. A session that
@@ -347,14 +343,8 @@ impl SyncSession {
         let stored = match store.user_identity().await {
             Ok(stored) => stored,
             Err(error) => {
-                self.connection.apply(
-                    ConnectionEvent::AttemptFailed {
-                        reason: error.to_string(),
-                    },
-                    now,
-                );
                 self.connector.disconnect().await;
-                return Ok(StepOutcome::Failed);
+                return self.attempt_failed(error.to_string(), now);
             }
         };
         let verdict = settle_identity(stored.as_deref(), &accepted.identity);
@@ -406,11 +396,11 @@ impl SyncSession {
                 // board whose status now says `disconnected` — and the
                 // next attempt would install a second connection beside it.
                 self.connector.disconnect().await;
-                return Ok(StepOutcome::Failed);
+                return StepOutcome::Failed;
             }
             self.connection
                 .apply(ConnectionEvent::SubscriptionApplied, now);
-            return Ok(StepOutcome::Connected);
+            return StepOutcome::Connected;
         };
 
         self.connection
@@ -420,6 +410,6 @@ impl SyncSession {
         // replaces it, and a live socket in the state the board calls fatal
         // would outlive everything else in this session.
         self.connector.disconnect().await;
-        Ok(StepOutcome::Conflicted)
+        StepOutcome::Conflicted
     }
 }

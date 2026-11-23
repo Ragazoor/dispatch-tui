@@ -33,7 +33,7 @@ async fn connected_session(db: &Store) -> (Arc<ScriptedConnector>, SyncSession, 
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
-    session.step(db, now).await.unwrap();
+    session.step(db, now).await;
     (connector, session, now)
 }
 
@@ -144,7 +144,7 @@ async fn a_subscription_request_can_only_ever_name_its_own_board() {
     let mut session = SyncSession::open("store.example", connector.clone());
 
     assert_eq!(
-        session.step(&db, Instant::now()).await.unwrap(),
+        session.step(&db, Instant::now()).await,
         StepOutcome::Connected
     );
 
@@ -171,12 +171,12 @@ async fn every_connection_re_asserts_the_subscription_set() {
     ]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
     session.report_drop("dropped", start);
 
     let due = start + crate::sync::RECONNECT_BACKOFF_BASE;
-    session.step(&db, due).await.unwrap();
-    session.step(&db, due).await.unwrap();
+    session.step(&db, due).await;
+    session.step(&db, due).await;
 
     assert_eq!(
         connector.subscriptions().len(),
@@ -272,8 +272,8 @@ async fn a_follow_or_an_unfollow_while_connected_does_not_resubscribe() {
 
     db.unsubscribe_from_epic("user-a", EpicId(7)).await.unwrap();
     db.subscribe_to_epic("user-a", EpicId(11)).await.unwrap();
-    session.step(&db, now).await.unwrap();
-    session.step(&db, now).await.unwrap();
+    session.step(&db, now).await;
+    session.step(&db, now).await;
 
     assert_eq!(
         connector.subscriptions().len(),

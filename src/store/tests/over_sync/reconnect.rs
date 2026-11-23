@@ -8,6 +8,7 @@ use crate::models::EpicId;
 use crate::store::{EpicCrud, HostStore, IdentityCredentialStore, Store, SubscriptionStore};
 use crate::sync::tests::{accepted, refused, RefusingSubscriber, ScriptedConnector};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// A store holding epics 1 through 42, so a test can follow any of them: the
@@ -31,10 +32,7 @@ async fn a_first_step_connects_and_settles_the_identity() {
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
 
-    assert_eq!(
-        session.step(&db, now).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, now).await, StepOutcome::Connected);
 
     assert_eq!(session.status(), ConnectionStatus::Connected);
     assert_eq!(
@@ -59,7 +57,7 @@ async fn a_dropped_connection_comes_back_by_itself() {
     ]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
 
     assert!(session.report_drop("socket closed", start));
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
@@ -67,20 +65,17 @@ async fn a_dropped_connection_comes_back_by_itself() {
     // Nothing happens before the backoff elapses. This is the assertion that a
     // hot retry loop would fail.
     assert_eq!(
-        session.step(&db, start).await.unwrap(),
+        session.step(&db, start).await,
         StepOutcome::Idle,
         "a retry before the backoff would hammer a store that is already down"
     );
     assert_eq!(connector.attempts(), 1);
 
     let due = start + RECONNECT_BACKOFF_BASE;
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Retrying);
     assert_eq!(session.status(), ConnectionStatus::Connecting);
 
-    assert_eq!(
-        session.step(&db, due).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, due).await, StepOutcome::Connected);
     assert_eq!(session.status(), ConnectionStatus::Connected);
     assert_eq!(connector.attempts(), 2);
 }
@@ -97,7 +92,7 @@ async fn the_board_shows_disconnected_for_as_long_as_the_store_is_down() {
     ]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
     session.report_drop("host unreachable", start);
 
     let mut now = start;
@@ -105,9 +100,9 @@ async fn the_board_shows_disconnected_for_as_long_as_the_store_is_down() {
     // Walk the outage minute by minute rather than waiting it out.
     for _ in 0..3 {
         now += Duration::from_secs(60);
-        let outcome = session.step(&db, now).await.unwrap();
+        let outcome = session.step(&db, now).await;
         if outcome == StepOutcome::Retrying {
-            session.step(&db, now).await.unwrap();
+            session.step(&db, now).await;
         }
         if !session.status().is_healthy() {
             seen_unhealthy += 1;
@@ -134,7 +129,7 @@ async fn an_unreachable_store_at_startup_is_reported_not_fatal() {
     let mut session = SyncSession::open("store.example", connector);
     let now = Instant::now();
 
-    assert_eq!(session.step(&db, now).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.step(&db, now).await, StepOutcome::Failed);
 
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(session.connection().last_error(), Some("no route to host"));
@@ -160,12 +155,12 @@ async fn every_reconnect_presents_the_stored_credential() {
     ]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
     session.report_drop("dropped", start);
 
     let due = start + RECONNECT_BACKOFF_BASE;
-    session.step(&db, due).await.unwrap();
-    session.step(&db, due).await.unwrap();
+    session.step(&db, due).await;
+    session.step(&db, due).await;
 
     assert_eq!(
         connector.presented_tokens(),
@@ -186,10 +181,7 @@ async fn a_changed_identity_stops_the_connection_for_good() {
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
 
-    assert_eq!(
-        session.step(&db, now).await.unwrap(),
-        StepOutcome::Conflicted
-    );
+    assert_eq!(session.step(&db, now).await, StepOutcome::Conflicted);
 
     assert_eq!(session.status(), ConnectionStatus::Failed);
     assert_eq!(
@@ -209,10 +201,7 @@ async fn a_changed_identity_stops_the_connection_for_good() {
 
     // Terminal: no retry, ever, and no further calls on the connector.
     assert_eq!(
-        session
-            .step(&db, now + Duration::from_secs(86_400))
-            .await
-            .unwrap(),
+        session.step(&db, now + Duration::from_secs(86_400)).await,
         StepOutcome::Idle
     );
     assert_eq!(connector.attempts(), 1);
@@ -230,7 +219,7 @@ async fn a_conflicted_connection_never_subscribes() {
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
 
-    session.step(&db, Instant::now()).await.unwrap();
+    session.step(&db, Instant::now()).await;
 
     assert!(
         connector.subscriptions().is_empty(),
@@ -269,7 +258,7 @@ async fn a_connection_that_cannot_subscribe_is_treated_as_an_outage() {
     let mut session = SyncSession::open("store.example", std::sync::Arc::new(RefusesSubscriptions));
     let now = Instant::now();
 
-    assert_eq!(session.step(&db, now).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.step(&db, now).await, StepOutcome::Failed);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(
         session.connection().last_error(),
@@ -298,15 +287,12 @@ async fn a_drop_the_transport_saw_takes_the_connection_down() {
     ]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
     assert_eq!(session.status(), ConnectionStatus::Connected);
 
     connector.drop_the_socket("socket closed");
 
-    assert_eq!(
-        session.step(&db, start).await.unwrap(),
-        StepOutcome::Dropped
-    );
+    assert_eq!(session.step(&db, start).await, StepOutcome::Dropped);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(
         session.connection().last_error(),
@@ -316,11 +302,8 @@ async fn a_drop_the_transport_saw_takes_the_connection_down() {
 
     // And the ordinary retry takes over from there.
     let due = start + RECONNECT_BACKOFF_BASE;
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
-    assert_eq!(
-        session.step(&db, due).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, due).await, StepOutcome::Retrying);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Connected);
 }
 
 /// A drop reported while already disconnected changes nothing.
@@ -334,14 +317,14 @@ async fn a_drop_reported_twice_does_not_reset_the_backoff() {
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
 
     connector.drop_the_socket("socket closed");
-    session.step(&db, start).await.unwrap();
+    session.step(&db, start).await;
     let first_due = session.connection().next_attempt_at();
 
     connector.drop_the_socket("socket closed again");
-    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Idle);
+    assert_eq!(session.step(&db, start).await, StepOutcome::Idle);
     assert_eq!(session.connection().next_attempt_at(), first_due);
 }
 
@@ -359,10 +342,7 @@ async fn a_connection_that_cannot_subscribe_is_closed() {
     let connector = RefusingSubscriber::new();
     let mut session = SyncSession::open("store.example", connector.clone());
 
-    assert_eq!(
-        session.step(&db, Instant::now()).await.unwrap(),
-        StepOutcome::Failed
-    );
+    assert_eq!(session.step(&db, Instant::now()).await, StepOutcome::Failed);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(
         connector.disconnects(),
@@ -375,23 +355,23 @@ async fn a_connection_that_cannot_subscribe_is_closed() {
 /// post-accept error path no real store produces on demand.
 struct FlakyAdopt {
     inner: Store,
-    fail: std::sync::atomic::AtomicBool,
+    fail: AtomicBool,
     /// Fail the stored-identity read the session makes after `connect`.
-    fail_read: std::sync::atomic::AtomicBool,
+    fail_read: AtomicBool,
     /// Fail the host-id read the session makes before it subscribes.
-    fail_host: std::sync::atomic::AtomicBool,
+    fail_host: AtomicBool,
     /// Fail the credential read the session makes before `connect`.
-    fail_token: std::sync::atomic::AtomicBool,
+    fail_token: AtomicBool,
 }
 
 impl FlakyAdopt {
     async fn new() -> Self {
         Self {
             inner: store().await,
-            fail: std::sync::atomic::AtomicBool::new(false),
-            fail_read: std::sync::atomic::AtomicBool::new(false),
-            fail_host: std::sync::atomic::AtomicBool::new(false),
-            fail_token: std::sync::atomic::AtomicBool::new(false),
+            fail: AtomicBool::new(false),
+            fail_read: AtomicBool::new(false),
+            fail_host: AtomicBool::new(false),
+            fail_token: AtomicBool::new(false),
         }
     }
 }
@@ -402,7 +382,7 @@ impl HostStore for FlakyAdopt {
         self.inner.host_id()
     }
     async fn ensure_host_identity(&self) -> anyhow::Result<(String, Option<String>)> {
-        if self.fail_host.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.fail_host.load(Ordering::SeqCst) {
             anyhow::bail!("host file unreadable");
         }
         self.inner.ensure_host_identity().await
@@ -411,7 +391,7 @@ impl HostStore for FlakyAdopt {
         self.inner.rename_host(label).await
     }
     async fn user_identity(&self) -> anyhow::Result<Option<String>> {
-        if self.fail_read.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.fail_read.load(Ordering::SeqCst) {
             anyhow::bail!("host file unreadable");
         }
         self.inner.user_identity().await
@@ -421,7 +401,7 @@ impl HostStore for FlakyAdopt {
 #[async_trait::async_trait]
 impl IdentityCredentialStore for FlakyAdopt {
     async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
-        if self.fail_token.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.fail_token.load(Ordering::SeqCst) {
             anyhow::bail!("credential unreadable");
         }
         self.inner.user_identity_token().await
@@ -431,7 +411,7 @@ impl IdentityCredentialStore for FlakyAdopt {
         identity: &str,
         credential: &str,
     ) -> anyhow::Result<()> {
-        if self.fail.load(std::sync::atomic::Ordering::SeqCst) {
+        if self.fail.load(Ordering::SeqCst) {
             anyhow::bail!("disk full");
         }
         self.inner
@@ -463,7 +443,7 @@ impl SubscriptionStore for FlakyAdopt {
 #[tokio::test]
 async fn an_error_after_accept_is_an_outage_that_is_retried() {
     let db = FlakyAdopt::new().await;
-    db.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
         accepted("user-a", "token-a"),
@@ -471,18 +451,15 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
 
-    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.step(&db, start).await, StepOutcome::Failed);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(connector.disconnects(), 1);
     assert!(connector.subscriptions().is_empty());
 
-    db.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+    db.fail.store(false, Ordering::SeqCst);
     let due = start + RECONNECT_BACKOFF_BASE;
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
-    assert_eq!(
-        session.step(&db, due).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, due).await, StepOutcome::Retrying);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Connected);
     assert_eq!(connector.subscriptions().len(), 1);
 }
 
@@ -493,8 +470,7 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
 #[tokio::test]
 async fn a_failed_identity_read_after_connect_closes_the_connection() {
     let db = FlakyAdopt::new().await;
-    db.fail_read
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail_read.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
         accepted("user-a", "token-a"),
@@ -502,19 +478,15 @@ async fn a_failed_identity_read_after_connect_closes_the_connection() {
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
 
-    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.step(&db, start).await, StepOutcome::Failed);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert_eq!(connector.disconnects(), 1);
     assert!(connector.subscriptions().is_empty());
 
-    db.fail_read
-        .store(false, std::sync::atomic::Ordering::SeqCst);
+    db.fail_read.store(false, Ordering::SeqCst);
     let due = start + RECONNECT_BACKOFF_BASE;
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
-    assert_eq!(
-        session.step(&db, due).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, due).await, StepOutcome::Retrying);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Connected);
 }
 
 // -- an accepted connection that fails to come up --------------------------
@@ -534,12 +506,12 @@ async fn waits_over_failed_come_ups(
     let mut now = Instant::now();
     let mut waits = Vec::new();
     for _ in 0..cycles {
-        assert_eq!(session.step(db, now).await.unwrap(), StepOutcome::Failed);
+        assert_eq!(session.step(db, now).await, StepOutcome::Failed);
         assert_eq!(session.status(), ConnectionStatus::Disconnected);
         let due = session.connection().next_attempt_at().unwrap();
         waits.push(due - now);
         now = due;
-        assert_eq!(session.step(db, now).await.unwrap(), StepOutcome::Retrying);
+        assert_eq!(session.step(db, now).await, StepOutcome::Retrying);
     }
     waits
 }
@@ -567,7 +539,7 @@ async fn a_store_that_keeps_refusing_the_subscription_is_backed_off() {
 #[tokio::test]
 async fn an_adoption_that_keeps_failing_is_backed_off() {
     let db = FlakyAdopt::new().await;
-    db.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 3]);
     let mut session = SyncSession::open("store.example", connector);
 
@@ -580,8 +552,7 @@ async fn an_adoption_that_keeps_failing_is_backed_off() {
 #[tokio::test]
 async fn a_host_id_read_that_keeps_failing_is_backed_off() {
     let db = FlakyAdopt::new().await;
-    db.fail_host
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail_host.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 3]);
     let mut session = SyncSession::open("store.example", connector);
 
@@ -596,19 +567,14 @@ async fn a_host_id_read_that_keeps_failing_is_backed_off() {
 #[tokio::test]
 async fn a_connection_that_comes_all_the_way_up_ends_the_outage() {
     let db = FlakyAdopt::new().await;
-    db.fail_host
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail_host.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 4]);
     let mut session = SyncSession::open("store.example", connector);
     waits_over_failed_come_ups(&mut session, &db, 3).await;
 
-    db.fail_host
-        .store(false, std::sync::atomic::Ordering::SeqCst);
+    db.fail_host.store(false, Ordering::SeqCst);
     let now = Instant::now();
-    assert_eq!(
-        session.step(&db, now).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, now).await, StepOutcome::Connected);
     assert_eq!(session.connection().attempts(), 0);
 
     assert!(session.report_drop("socket closed", now));
@@ -629,18 +595,14 @@ async fn an_unreadable_credential_on_a_reconnect_is_a_failed_attempt() {
     let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let start = Instant::now();
-    assert_eq!(
-        session.step(&db, start).await.unwrap(),
-        StepOutcome::Connected
-    );
+    assert_eq!(session.step(&db, start).await, StepOutcome::Connected);
     session.report_drop("socket closed", start);
 
-    db.fail_token
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail_token.store(true, Ordering::SeqCst);
     let due = start + RECONNECT_BACKOFF_BASE;
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Retrying);
 
-    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.step(&db, due).await, StepOutcome::Failed);
     assert_eq!(session.status(), ConnectionStatus::Disconnected);
     assert!(
         session
@@ -667,8 +629,7 @@ async fn an_unreadable_credential_on_a_reconnect_is_a_failed_attempt() {
 #[tokio::test]
 async fn an_unreadable_credential_at_startup_aborts_with_the_reason() {
     let db = FlakyAdopt::new().await;
-    db.fail_token
-        .store(true, std::sync::atomic::Ordering::SeqCst);
+    db.fail_token.store(true, Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![]);
     let mut session = SyncSession::open("store.example", connector);
 
