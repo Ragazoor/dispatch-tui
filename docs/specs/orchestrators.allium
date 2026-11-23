@@ -54,8 +54,11 @@
 --     everything, where every backlog task counts as ready (a feed of work
 --     that should all be handled).
 --   - O7, at most three task agents at once per epic, changeable per epic.
---     Tasks the operator started count.
---   - O8, it replaces auto dispatch. An epic never has both.
+--     One limit for every start in an orchestrated epic, the operator's
+--     included. Only a running task with a live session counts: a task in
+--     review or a detached one takes no slot.
+--   - O8, it replaces auto dispatch, which is removed. An orchestrator is the
+--     one way tasks start by themselves.
 --   - O9, the answer line. See OrchestratorAnswerLine.
 --   - O10, one retry, then the operator. See the trouble rules.
 --   - O11, one user. Each machine that runs the board runs its own
@@ -65,6 +68,11 @@
 --     the epic has no open work and comes back when work does.
 --   - O13, its memory is in the store: the epic's log, the epic's notes and
 --     the items that wait for the operator. It must work from a fresh start.
+--   - O17, notes and learnings. An epic note is the orchestrator's working
+--     memory: a to-do or a fact about this epic's work now, with a done tick.
+--     A learning is what stays true and useful after the epic is done. The
+--     orchestrator uses the knowledge base as any agent does: it is given the
+--     learnings that fit its epic, and it may search, record and rate.
 --   - O14, the board. Tab cycles flat, then flat and active only, then the
 --     orchestrator view; the board opens on flat. The orchestrator view
 --     replaces the epic-grouped view. In it an orchestrated epic has one
@@ -166,6 +174,7 @@ entity OrchestratorLogEntry {
 entity EpicNote {
     epic: core/Epic
     text: String
+    done: Boolean = false    -- a to-do that is finished; a plain fact never is
     written_at: Timestamp
 }
 
@@ -194,7 +203,8 @@ entity WaitingItem {
 --
 -- has_open_work(epic): some task in the epic's subtree is not done.
 -- running_here(epic, host): the tasks in the epic's subtree with status =
--- running whose host is this one.
+-- running whose current agent is live on this host. A task in review, and a
+-- running task whose agent is detached (no window), are not among them (O7).
 -- counts_as_ready(task): the task has a ReadyMark, or covering(task) has
 -- start_rule = everything.
 -- wanted(orchestrator): its epic has open work.
@@ -225,19 +235,11 @@ rule SwitchOrchestratorOn {
         max_parallel: max_parallel,
         switched_on_at: now
     )
-    -- O8. Auto dispatch goes off on the epic and on every epic below it.
-    ensures: epic.auto_dispatch = false
-    ensures:
-        for sub in epic.subtree_epics:
-            sub.auto_dispatch = false
 
     @guidance
         -- One store write. The refusals read "epic <id> already has an
         -- orchestrator" and "epic <id> (<title>) above this one has an
         -- orchestrator" or "... below this one ...", and write nothing.
-        -- Switching on an epic with auto dispatch on is not refused: the
-        -- orchestrator takes the chain's place, and the reply says auto
-        -- dispatch was turned off.
 }
 
 rule ChangeOrchestratorSettings {
@@ -279,17 +281,6 @@ rule SwitchOrchestratorOff {
         -- window of the orchestrator it ran when it sees the row go.
 }
 
-rule AutoDispatchIsRefusedUnderAnOrchestrator {
-    when: AutoDispatchTurnedOn(epic)
-
-    -- O8. Reached from the board's toggle and from any other writer of the
-    -- flag. The refusal reads "epic <id> is run by the orchestrator of epic
-    -- <id> (<title>)".
-    requires: covering(epic) = null
-
-    ensures: epic.auto_dispatch = true
-}
-
 rule ReparentingKeepsOneOrchestratorOnAPath {
     when: EpicReparented(epic, new_parent)
 
@@ -300,7 +291,6 @@ rule ReparentingKeepsOneOrchestratorOnAPath {
             for e in epic.subtree_epics + {epic}:
                 if orchestration_of(e) != null:
                     OrchestratorSwitchedOff(e)
-                e.auto_dispatch = false
 
     @guidance
         -- In the same write as the move. The reply to the move says which
@@ -479,7 +469,6 @@ rule OrchestratorStartsATask {
     requires: covering(task) = orchestration
     requires: task.status = backlog
     requires: counts_as_ready(task)
-    -- O7. Counted on this machine, the operator's own starts included.
     requires: running_here(orchestrator.epic, orchestrator.host).count < orchestration.limit
 
     ensures: split/DispatchRequested(
@@ -500,11 +489,10 @@ rule OrchestratorStartsATask {
         -- for its scheduled time. Two machines' orchestrators that pick the
         -- same task race on that request and the store accepts one.
         --
-        -- The three requires above are the store's, not only the prompt's:
-        -- a start by an orchestrator is refused for a task that is not
-        -- ready, not in its subtree, or over the limit, with a message that
-        -- says which. The operator's own start of any task is never held to
-        -- them.
+        -- The requires above are the store's, not only the prompt's: a start
+        -- by an orchestrator is refused for a task that is not ready or not
+        -- in its subtree, with a message that says which. The limit is every
+        -- start's (StartsInAnOrchestratedEpicShareOneLimit).
         --
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on
@@ -514,6 +502,26 @@ rule OrchestratorStartsATask {
         -- It starts work when it wakes (OrchestratorWakeEvents) and a slot is
         -- free. A task that is not ready is never started; the orchestrator
         -- may tell the operator that one looks unblocked.
+}
+
+rule StartsInAnOrchestratedEpicShareOneLimit {
+    when: StartAsked(task, host)
+
+    -- O7. Every way a task of an orchestrated epic starts on a machine, the
+    -- operator's own key included, is held to the one limit. A task no
+    -- orchestrator covers has none.
+    requires: covering(task) = null
+        or running_here(covering(task).epic, host).count < covering(task).limit
+
+    ensures: StartAllowed(task, host)
+
+    @guidance
+        -- Once built this is a requires of RequestDispatch itself, with no
+        -- exception for who asks. The refusal reads "epic <id> already runs
+        -- <n> of <limit> tasks". A resume of a task that already runs is not
+        -- a start and is not held to it. Because a task in review and a
+        -- detached task take no slot, an agent that waits for a PR review
+        -- does not hold up the next task.
 }
 
 -- == Answering ==
@@ -596,6 +604,25 @@ rule WriteEpicNote {
         -- notes that fit into its brief to a task agent it starts or answers.
         -- A task agent sends what it learns to the orchestrator, which
         -- decides whether it is a note.
+        --
+        -- O17: what will still be true and useful after the epic is done is
+        -- a learning, recorded in the knowledge base as any agent records
+        -- one; the rest is a note. The closing summary of a finished epic
+        -- names the notes that look worth keeping as learnings.
+}
+
+rule ChangeEpicNote {
+    when: EpicNoteChanged(note, text?, done?)
+
+    ensures:
+        if text != null: note.text = text
+    ensures:
+        if done != null: note.done = done
+
+    @guidance
+        -- A to-do is ticked done and stays readable until the orchestrator
+        -- removes it. An open to-do that only a person can do is also raised
+        -- as a WaitingItem, so the operator sees it.
 }
 
 rule RemoveEpicNote {
@@ -756,13 +783,6 @@ invariant OneOrchestratorPerEpicAndHost {
         (a.orchestration = b.orchestration and a.host = b.host) implies a = b
 }
 
--- O8.
-invariant NoAutoDispatchUnderAnOrchestrator {
-    for o in EpicOrchestrations:
-        o.epic.auto_dispatch = false
-        and o.epic.subtree_epics.all(e => e.auto_dispatch = false)
-}
-
 -- An orchestrator's name is no task agent's name, and no other
 -- orchestrator's: a message to a name reaches one session.
 invariant OrchestratorNamesAreUnique {
@@ -868,6 +888,11 @@ surface OrchestratorPrompt {
         -- the answer line (OrchestratorAnswerLine), the start rule and the
         -- limit, and the trouble rules with their one retry (O10).
 
+    @guarantee GivenItsLearnings
+        -- O17. The prompt carries the learnings that fit the epic, chosen as
+        -- for a task of that epic, and the one sentence that tells a note
+        -- from a learning. It rates what it acts on, as a task agent does.
+
     @guarantee EnoughForAFreshStart
         -- Each task of the subtree with its id, title, status, sub-status,
         -- ready mark and agent name; every note; every open item; and the
@@ -926,7 +951,10 @@ surface OrchestratorMcpTools {
         WaitingItemRaised(epic, host, task?, about, tried, recommendation)
         WaitingItemResolved(item)
         EpicNoteWritten(epic, text)
+        EpicNoteChanged(note, text?, done?)
         EpicNoteRemoved(note)
+        -- Any start of a task, by any tool or key.
+        StartAsked(task, host)
 
     @guarantee EpicReadsShowTheOrchestrator
         -- epic_search for one epic says whether it is orchestrated, its
@@ -1059,8 +1087,14 @@ surface OrchestratorNotifications {
 --   - core.allium: the entities above; an orchestrator is an agent that
 --     belongs to an epic and has no task and no worktree, which the Agent
 --     entity and agents.allium's invariants do not allow for today.
---   - epics.allium: ToggleAutoDispatch's refusal, the re-parent and delete
---     effects, and the epic edit form's orchestrator section.
+--   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
+--     toggle key and header indicator, the chain that started the next
+--     subtask when a session closed, its failure report and the stalled-chain
+--     mark on a card. Also the re-parent and delete effects, and the epic
+--     edit form's orchestrator section.
+--   - store-split.allium: the chain's request origin goes, and
+--     RequestDispatch gains the limit. schedules.allium and
+--     mcp-task-tools.allium lose their mentions of the chain.
 --   - tasks.allium and mcp-task-tools.allium: the ready argument, the task
 --     and epic reads, and the caller identity of an orchestrator.
 --   - dispatch-prompt.allium: the line a covered task's prompt gains, and
@@ -1079,6 +1113,6 @@ open question "With the epic-grouped lens gone, an epic is entered from one of i
 
 open question "The limit counts running tasks per machine, since each machine has its own orchestrator. Two machines can then run twice the limit for one epic. Is that wanted, or should the limit hold across machines?"
 
-open question "A task agent's findings now reach later tasks through the orchestrator's epic notes. Should epic-scoped learnings be retired in their favour, and what carries repo-wide pitfalls to a task that no orchestrator covers?"
+open question "The knowledge base has weak feedback, almost no epic-scoped entries and nothing that expires an entry. With an orchestrator that owns its epic's notes and reads its learnings, should it also curate the epic's learnings, and how is a note promoted to a learning when an epic ends?"
 
 open question "Should a managed epic (Bot PRs) come with its orchestrator switched on when it is provisioned, or does the operator switch it on once by hand?"
