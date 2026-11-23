@@ -2,7 +2,7 @@
 //! agent-tree toggle: the keys come from the tmux.global rows of the key table
 //! the board loaded (`TmuxPrefixKeys` in `docs/specs/keybindings.allium`).
 
-use crate::keybindings::{tmux_key_name, KeyBinding, KeyNamespace};
+use crate::keybindings::{first_key, tmux_key_name, KeyBinding, KeyNamespace};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
@@ -58,7 +58,7 @@ impl Default for PrefixKeys {
 impl PrefixKeys {
     /// The keys of `table`'s jump_to_dispatch and toggle_agent_tree rows. A
     /// row whose key is not a tmux key keeps its default.
-    pub fn from_table(table: &[KeyBinding]) -> Self {
+    pub fn from_table(table: &'static [KeyBinding]) -> Self {
         Self {
             jump_back: row_key(table, "jump_to_dispatch", JUMP_BACK_KEY),
             agent_tree_toggle: row_key(table, "toggle_agent_tree", AGENT_TREE_TOGGLE_KEY),
@@ -66,27 +66,17 @@ impl PrefixKeys {
     }
 }
 
-fn row_key(table: &[KeyBinding], action: &str, default: &str) -> String {
-    let key = table
-        .iter()
-        .find(|b| b.namespace == KeyNamespace::TmuxGlobal && b.action == action)
-        .and_then(|b| b.keys.first());
-    match key.and_then(|k| tmux_key_name(k)) {
-        Some(tmux_key) => tmux_key,
-        None => {
-            tracing::warn!(
-                action,
-                ?key,
-                "not a tmux key; binding the default {default}"
-            );
-            default.to_string()
-        }
-    }
+fn row_key(table: &'static [KeyBinding], action: &str, default: &str) -> String {
+    let key = first_key(table, KeyNamespace::TmuxGlobal, action);
+    tmux_key_name(key).unwrap_or_else(|| {
+        tracing::warn!(action, key, "not a tmux key; binding the default {default}");
+        default.to_string()
+    })
 }
 
 /// Whether `command`, as `list-keys` prints it, is one the board binds.
-fn is_board_command(command: &str) -> bool {
-    command == jump_back_command() || command == AGENT_TREE_TOGGLE_COMMAND
+fn is_board_command(command: &str, jump_back: &str) -> bool {
+    command == jump_back || command == AGENT_TREE_TOGGLE_COMMAND
 }
 
 /// Bind `keys`, first removing every prefix binding that runs one of the
@@ -99,29 +89,37 @@ pub fn bind_prefix_keys(
     keys: &PrefixKeys,
     runner: &dyn ProcessRunner,
 ) -> (PrefixKeys, Option<String>) {
+    let jump_command = jump_back_command();
     match tmux::prefix_bindings(runner) {
         Ok(bindings) => {
-            for stale in bindings.iter().filter(|b| is_board_command(&b.command)) {
-                let _ = tmux::unbind_key(&stale.key, runner);
+            let stale = bindings.iter().filter(|b| {
+                is_board_command(&b.command, &jump_command)
+                    && b.key != keys.jump_back
+                    && b.key != keys.agent_tree_toggle
+            });
+            for binding in stale {
+                let _ = tmux::unbind_key(&binding.key, runner);
             }
         }
         Err(e) => tracing::warn!("could not list tmux prefix bindings: {e:#}"),
     }
-    let mut refused = Vec::new();
-    let jump_back = bind_or_default(
-        &keys.jump_back,
-        JUMP_BACK_KEY,
-        &jump_back_command(),
-        runner,
-        &mut refused,
-    );
-    let agent_tree_toggle = bind_or_default(
-        &keys.agent_tree_toggle,
-        AGENT_TREE_TOGGLE_KEY,
-        AGENT_TREE_TOGGLE_COMMAND,
-        runner,
-        &mut refused,
-    );
+    let bound = PrefixKeys {
+        jump_back: bind_or_default(&keys.jump_back, JUMP_BACK_KEY, &jump_command, runner),
+        agent_tree_toggle: bind_or_default(
+            &keys.agent_tree_toggle,
+            AGENT_TREE_TOGGLE_KEY,
+            AGENT_TREE_TOGGLE_COMMAND,
+            runner,
+        ),
+    };
+    let refused: Vec<String> = [
+        (&keys.jump_back, &bound.jump_back),
+        (&keys.agent_tree_toggle, &bound.agent_tree_toggle),
+    ]
+    .into_iter()
+    .filter(|(asked, got)| asked != got)
+    .map(|(asked, _)| format!("\"{asked}\""))
+    .collect();
     let error = (!refused.is_empty()).then(|| {
         format!(
             "tmux refused the prefix key{} {}; the default is bound instead.",
@@ -129,29 +127,16 @@ pub fn bind_prefix_keys(
             refused.join(", ")
         )
     });
-    (
-        PrefixKeys {
-            jump_back,
-            agent_tree_toggle,
-        },
-        error,
-    )
+    (bound, error)
 }
 
 /// Bind `key` to `command`, or `default` when tmux refuses a `key` that is
 /// not the default. Returns the key it bound.
-fn bind_or_default(
-    key: &str,
-    default: &str,
-    command: &str,
-    runner: &dyn ProcessRunner,
-    refused: &mut Vec<String>,
-) -> String {
+fn bind_or_default(key: &str, default: &str, command: &str, runner: &dyn ProcessRunner) -> String {
     match tmux::bind_key(key, command, runner) {
         Ok(()) => key.to_string(),
         Err(e) if key != default => {
             tracing::warn!("tmux refused prefix key {key}: {e:#}; binding {default}");
-            refused.push(format!("\"{key}\""));
             let _ = tmux::bind_key(default, command, runner);
             default.to_string()
         }

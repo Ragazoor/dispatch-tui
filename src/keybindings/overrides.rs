@@ -108,29 +108,22 @@ pub fn tmux_key_name(key: &str) -> Option<String> {
     if !is_single_key(rest) {
         return None;
     }
-    let (modifier, base) = MODIFIERS
+    let (tmux_modifier, base) = [("Ctrl+Alt+", "C-M-"), ("Ctrl+", "C-"), ("Alt+", "M-")]
         .iter()
-        .find_map(|m| rest.strip_prefix(m).map(|base| (*m, base)))
+        .find_map(|(m, tmux)| rest.strip_prefix(m).map(|base| (*tmux, base)))
         .unwrap_or(("", rest));
-    let tmux_modifier = match modifier {
-        "Ctrl+Alt+" => "C-M-",
-        "Ctrl+" => "C-",
-        "Alt+" => "M-",
-        _ => "",
-    };
     let tmux_base = match base {
-        "Esc" => "Escape".to_string(),
-        "BackTab" => "BTab".to_string(),
-        "Backspace" => "BSpace".to_string(),
-        "Delete" => "DC".to_string(),
-        "Insert" => "IC".to_string(),
-        "PageUp" => "PPage".to_string(),
-        "PageDown" => "NPage".to_string(),
-        // tmux reads a bare `;` argument as the end of a command.
-        ";" => "\\;".to_string(),
-        named if is_named_key(named) => named.to_string(),
-        c if !modifier.is_empty() => c.to_lowercase(),
-        c => c.to_string(),
+        "Esc" => "Escape",
+        "BackTab" => "BTab",
+        "Backspace" => "BSpace",
+        "Delete" => "DC",
+        "Insert" => "IC",
+        "PageUp" => "PPage",
+        "PageDown" => "NPage",
+        // tmux reads an argument ending in `;` as the end of a command.
+        ";" => "\\;",
+        named if is_named_key(named) || tmux_modifier.is_empty() => named,
+        c => return Some(format!("{tmux_modifier}{}", c.to_lowercase())),
     };
     Some(format!("{tmux_modifier}{tmux_base}"))
 }

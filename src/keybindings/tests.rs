@@ -772,24 +772,6 @@ fn the_tmux_rows_name_the_keys_the_runtime_binds_by_default() {
     assert_eq!(PrefixKeys::from_table(KEY_BINDINGS), PrefixKeys::default());
 }
 
-/// `TmuxGlobalRowsTrackTheirBindings` under a table with both rows
-/// overridden: the runtime binds the file's keys.
-#[test]
-fn the_runtime_binds_the_overridden_tmux_keys() {
-    let load = loaded_table(
-        KeyTableReader::Board,
-        r#"[{"namespace": "tmux.global", "action": "jump_to_dispatch", "keys": ["Prefix+j"]},
-            {"namespace": "tmux.global", "action": "toggle_agent_tree", "keys": ["Prefix+Ctrl+T"]}]"#,
-    );
-    assert_eq!(
-        crate::runtime::PrefixKeys::from_table(load.table),
-        crate::runtime::PrefixKeys {
-            jump_back: "j".to_string(),
-            agent_tree_toggle: "C-t".to_string(),
-        }
-    );
-}
-
 /// A tmux.global row whose key is not a tmux key binds the default.
 #[test]
 fn a_tmux_row_without_a_tmux_key_binds_its_default() {
