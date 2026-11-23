@@ -188,13 +188,13 @@ fn model_step_ignores_other_keys_and_esc_cancels() {
     assert!(app.input.task_draft.is_none());
 }
 
-/// The prompt says what Enter means: the draft's own model, else sonnet.
+/// The prompt says what Enter means: the draft's own model, else opus.
 #[test]
 fn model_prompt_names_what_enter_picks() {
     use crate::models::TaskModel;
     assert_eq!(
         crate::tui::ui::model_prompt(None),
-        "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] sonnet"
+        "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] opus"
     );
     assert!(crate::tui::ui::model_prompt(Some(TaskModel::Fable)).ends_with("[Enter] fable"));
 }

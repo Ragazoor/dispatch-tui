@@ -317,7 +317,7 @@ rule UpdateTaskViaMcp {
     ensures:
         -- model has the same three states as wrap_up_mode: omitted (no
         -- change), one of TaskModel's literals (set), or explicit null (clear,
-        -- so the task launches on sonnet again). The write is tasks.allium's
+        -- so the task launches on opus again). The write is tasks.allium's
         -- SetModel, the same one the task editor raises.
         if model != omitted: tasks/SetModel(task: task, model: model)
     ensures:
@@ -997,7 +997,7 @@ rule GetTaskViaMcp {
         -- (see UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on the
         -- task. It is that one person's bookmark, never anyone else's.
         -- Model always renders, as the alias the agent launches on: task.model,
-        -- or "sonnet (default)" when it is null. A missing line would read as
+        -- or "opus (default)" when it is null. A missing line would read as
         -- "no model applies", and a null model is a concrete one
         -- (core/TaskModel).
         -- [Dispatch request] is not a Task field: it is the task's most recent

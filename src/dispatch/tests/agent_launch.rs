@@ -498,10 +498,10 @@ fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
 }
 
 // --- model tests (EveryTaskAgentLaunchesOnItsModel: every launch passes
-// `--model`, the task's own or sonnet) ---
+// `--model`, the task's own or opus) ---
 
 #[test]
-fn dispatch_agent_launches_a_task_without_a_model_on_sonnet() {
+fn dispatch_agent_launches_a_task_without_a_model_on_opus() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
     let script = DispatchScript::dispatch();
@@ -522,8 +522,8 @@ fn dispatch_agent_launches_a_task_without_a_model_on_sonnet() {
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
-        send_keys_arg.contains(" --model sonnet "),
-        "a task with no model launches on sonnet, got: {send_keys_arg}"
+        send_keys_arg.contains(" --model opus "),
+        "a task with no model launches on opus, got: {send_keys_arg}"
     );
 }
 

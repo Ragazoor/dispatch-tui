@@ -359,7 +359,7 @@ fn model_step_restates_wrap_up_and_shows_the_shared_prompt() {
     app.input.task_draft = Some(long_draft());
     let lines = input_model_lines(&app, area, &form_styles());
     assert_eq!(line_text(&lines[4]), "  Wrap-up: decide at wrap-up");
-    assert!(line_text(&lines[5]).ends_with("[Enter] sonnet"));
+    assert!(line_text(&lines[5]).ends_with("[Enter] opus"));
 }
 
 #[test]

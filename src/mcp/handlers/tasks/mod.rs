@@ -150,7 +150,7 @@ mcp_args! {
     #[serde(default, deserialize_with = "deserialize_nullable_model")]
     optional model: Option<Option<TaskModel>> = [set(model)] {
         "type": ["string", "null"],
-        "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on sonnet. Takes effect at the agent's next launch. Pass null to clear.",
+        "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on opus. Takes effect at the agent's next launch. Pass null to clear.",
         "enum": crate::models::TaskModel::ALL.iter().map(|m| Some(m.as_str())).chain(std::iter::once(None)).collect::<Vec<Option<&str>>>()
     };
 

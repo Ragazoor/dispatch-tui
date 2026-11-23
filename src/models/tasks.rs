@@ -1038,7 +1038,7 @@ impl TaskModel {
 
     /// What a task with no model launches on
     /// (`dispatch.allium: EveryTaskAgentLaunchesOnItsModel`).
-    pub const DEFAULT: TaskModel = TaskModel::Sonnet;
+    pub const DEFAULT: TaskModel = TaskModel::Opus;
 
     /// Every alias, comma-separated, for error messages.
     pub fn valid_list() -> String {

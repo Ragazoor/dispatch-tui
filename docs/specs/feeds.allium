@@ -3011,9 +3011,9 @@ rule ReviewTaskModelIsSetByRole {
         -- FIXED, NOT CONFIGURED. The mapping is written in the rule. No role
         -- sub-epic carries a model setting.
         --
-        -- BOTS ARE SET EXPLICITLY. Sonnet is also the default for a task with no
-        -- model (core.allium: TaskModel), but the feed writes it, so a change to
-        -- the default does not change Bots.
+        -- BOTS ARE SET EXPLICITLY. The feed writes sonnet, so Bots stays on
+        -- sonnet whatever the default for a task with no model is (core.allium:
+        -- TaskModel).
         --
         -- The additive path (DegradedNonEmptyEmission, AppendOnlyFeed) inserts
         -- the same way and sets the model the same way. Flat, grouped, CVE and

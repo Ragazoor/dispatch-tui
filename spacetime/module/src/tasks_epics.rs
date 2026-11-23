@@ -246,7 +246,7 @@ pub struct TaskPatch {
     /// [`schedule_after_patch`] after the rest of the patch and its status
     /// effects.
     pub schedule: Patch<String>,
-    /// A model alias sets it, `""` clears it back to the sonnet default
+    /// A model alias sets it, `""` clears it back to the opus default
     /// (`tasks.allium: SetModel`).
     pub model: Patch<String>,
 }

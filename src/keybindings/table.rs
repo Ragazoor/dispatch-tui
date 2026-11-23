@@ -997,7 +997,7 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         N::BoardPickerModel,
         &["Enter"],
         "model_picker_default",
-        "Create the task with the model shown after [Enter] (sonnet unless copied)",
+        "Create the task with the model shown after [Enter] (opus unless copied)",
     ),
     r(
         N::BoardPickerModel,

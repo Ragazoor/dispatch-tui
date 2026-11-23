@@ -53,7 +53,7 @@ async fn create_task_without_a_model_leaves_it_unset() {
     let id = extract_created_task_id(&create(&state, json!({})).await);
     let task = state.db.get_task(id).await.unwrap();
     assert_eq!(task.model, None);
-    assert_eq!(task.launch_model(), TaskModel::Sonnet);
+    assert_eq!(task.launch_model(), TaskModel::Opus);
 }
 
 #[tokio::test]
@@ -90,7 +90,7 @@ async fn get_task_shows_the_model_and_the_default() {
     assert!(
         get_task_text(&state, unset)
             .await
-            .contains("\nModel: sonnet (default)"),
+            .contains("\nModel: opus (default)"),
         "{}",
         get_task_text(&state, unset).await
     );

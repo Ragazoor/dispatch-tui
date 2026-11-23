@@ -395,11 +395,11 @@ rule CreateTask {
         -- letter of the alias it picks). Enter means "no explicit pick" and
         -- keeps the draft (EnterKeepsTheDraft), so for the manual form,
         -- whose draft holds null, Enter leaves model null — which launches on
-        -- sonnet (core/TaskModel). Esc cancels creation. Any other key is
+        -- opus (core/TaskModel). Esc cancels creation. Any other key is
         -- silently ignored. Answering it finishes the form and creates the
         -- task.
         --
-        -- The prompt says what Enter means — "[Enter] sonnet" — because a null
+        -- The prompt says what Enter means — "[Enter] opus" — because a null
         -- model is not "undecided" the way a null wrap_up_mode is: it is a
         -- concrete model the agent will run on. Like InputTag's, the prompt
         -- is ONE value that the transient status message, the form hint and
@@ -437,7 +437,7 @@ rule SetModel {
         -- Sets or clears the model an existing task's agent launches on.
         -- Raised by the task editor's MODEL section (EditTask) and by MCP
         -- task_update(model: "haiku"|"sonnet"|"opus"|"fable"|null). model = null clears it, and the
-        -- task launches on sonnet again (core/TaskModel).
+        -- task launches on opus again (core/TaskModel).
         -- No status precondition, like SetWrapUpMode. The change reaches the
         -- agent at its next launch: a running agent keeps the model it was
         -- launched on, and a resume (dispatch.allium: ResumeTask) or a
@@ -2104,7 +2104,7 @@ rule EditTask {
     -- Empty title/description/repo_path retain their previous values.
     -- Empty plan or tag clears the field. Empty base_branch retains the
     -- previous value. Empty wrap_up_mode clears the preference. Empty model
-    -- clears it, so the task launches on sonnet again.
+    -- clears it, so the task launches on opus again.
     -- PHOENIX joins the enum-ish sections under the same one parse rule: it
     -- accepts a boolean spelled any of true/false, yes/no, on/off or 1/0,
     -- case-insensitively, and an empty or unparseable section yields no value —

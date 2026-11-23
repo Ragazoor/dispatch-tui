@@ -137,7 +137,7 @@ pub struct Task {
     #[default("")]
     pub schedule_error: String,
     /// The Claude model alias the task's agent launches on (`haiku`,
-    /// `sonnet`, `opus`, `fable`), or `""` for sonnet, the default
+    /// `sonnet`, `opus`, `fable`), or `""` for opus, the default
     /// (`core.allium: TaskModel`). The board validates it, as it does
     /// `wrap_up_mode`. Appended last, as every column since `owner` is.
     #[default("")]

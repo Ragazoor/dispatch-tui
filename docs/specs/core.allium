@@ -379,8 +379,8 @@ enum WrapUpMode { rebase | pr | done }
 -- TaskModel is the Claude model a task's agent runs on. Each literal is a
 -- Claude Code model alias, passed verbatim as `claude --model <alias>`, so it
 -- always names the latest model of that family rather than a pinned version.
--- A task with no model set runs on sonnet (dispatch.allium:
--- EveryTaskAgentLaunchesOnItsModel): sonnet is the default everywhere, for a
+-- A task with no model set runs on opus (dispatch.allium:
+-- EveryTaskAgentLaunchesOnItsModel): opus is the default everywhere, for a
 -- task made in the wizard, over MCP or by a feed alike. The one exception is a reviews_parent feed, which
 -- sets the model on insert by role (feeds.allium: ReviewTaskModelIsSetByRole).
 enum TaskModel { haiku | sonnet | opus | fable }
@@ -589,7 +589,7 @@ entity Task {
     -- current Agent, not here.
     pr_learnings_gate_shown_at: Timestamp?  -- set once when the PrLearningsGate fires; null means the gate has never fired for this task
     wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
-    model: TaskModel?          -- the model the task's agent launches on; null means sonnet
+    model: TaskModel?          -- the model the task's agent launches on; null means opus
     auto_run_plan: Boolean = false  -- when true and plan_path is set, build_prompt's
                                     -- has-plan addendum skips asking the dispatched
                                     -- agent to confirm before implementing (see

@@ -308,7 +308,7 @@ usually the right answer.",
                 },
                 "model": {
                     "type": "string",
-                    "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on sonnet. Defaults to sonnet.",
+                    "description": "The model the task's agent launches on: 'haiku', 'sonnet', 'opus' or 'fable'. A task with no model runs on opus. Defaults to opus.",
                     "enum": crate::models::TaskModel::ALL.iter().map(|m| m.as_str()).collect::<Vec<_>>()
                 },
                 "auto_run_plan": {
