@@ -395,7 +395,7 @@ fn every_hook_write_refuses_a_viewer_who_does_not_own_the_tasks_host() {
     assert!(before.stop_pending);
     assert_eq!(before.live_subagents, 1);
 
-    let refused: [(&str, Result<(), String>); 6] = [
+    let refused: [(&str, Result<(), String>); 7] = [
         (
             "record_pre_tool_use",
             store.call("bob", |ctx| {
@@ -429,6 +429,11 @@ fn every_hook_write_refuses_a_viewer_who_does_not_own_the_tasks_host() {
             // An agent id with no entry: the call would delete nothing.
             "subagent_stop",
             store.call("bob", |ctx| subagent_stop(ctx, id, "b9".into(), "s1".into())),
+        ),
+        (
+            // The detach's draining clear: it would apply the deferred Stop.
+            "subagent_clear",
+            store.call("bob", |ctx| subagent_clear(ctx, id)),
         ),
         (
             "subagent_clear_and_void_pending_stop",

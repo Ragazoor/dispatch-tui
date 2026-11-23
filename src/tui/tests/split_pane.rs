@@ -1854,6 +1854,8 @@ fn detach_does_not_write_back_the_boards_other_fields() {
     task.sort_order = Some(7);
     task.completed_at = Some(chrono::Utc::now());
     let mut app = App::new(vec![task]);
+    // The detach is this board's own task: it owns host-a.
+    app.set_local_host_id("host-a".to_string());
     let cmds = app.detach_tmux_panels(vec![TaskId(3)]);
     let fields = persist_of(&cmds, 3);
     assert!(fields.release_tmux_window);

@@ -411,11 +411,12 @@ pub fn subagent_stop(
 
 /// Clear every `task_subagents` row for `task_id`, and apply any deferred
 /// `Stop` this drains. For `DetachTmux` (`docs/specs/split-pane.allium`), the
-/// one draining clear point that owns no status of its own.
+/// one draining clear point that owns no status of its own. Only the owner of
+/// the task's host may make it, as for every hook write: it applies a Stop.
 #[spacetimedb::reducer]
 pub fn subagent_clear(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
     // An unseen task is answered as a missing one (`UnseenIsAsMissing`).
-    if visible_task(ctx, task_id).is_none() {
+    if visible_hook_task(ctx, task_id)?.is_none() {
         return Ok(());
     }
     delete_all_subagents(ctx, task_id);

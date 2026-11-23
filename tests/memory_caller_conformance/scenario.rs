@@ -1573,6 +1573,8 @@ fn memory_caller_matches_the_real_reducers() {
                 caller.record_user_prompt_submit(id, later, later).await.unwrap(),
                 caller.subagent_clear_and_void_pending_stop(id).await.unwrap(),
             ];
+            // The detach's draining clear refuses too, as an error.
+            assert!(caller.subagent_clear(id).await.is_err());
             for outcome in &refused {
                 assert!(!outcome.won(), "a hook write on a host nobody owns: {outcome:?}");
             }

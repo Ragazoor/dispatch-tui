@@ -18,7 +18,7 @@
 /// **Hand-bumped, in the commit that moves a rule into the module, together with
 /// `RULES_VERSION` in the module crate** — see that constant for what does and
 /// does not warrant a bump.
-pub const BOARD_RULES_VERSION: i64 = 61;
+pub const BOARD_RULES_VERSION: i64 = 62;
 
 /// What the operator reads when the store and the board disagree.
 ///

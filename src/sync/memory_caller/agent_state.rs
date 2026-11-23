@@ -242,6 +242,8 @@ impl MemoryReducerCaller {
     pub(super) fn apply_subagent_clear(&self, task_id: TaskId) -> Result<DrainReadBack> {
         let task_id = task_id.0;
         let mut tables = self.lock();
+        self.acting_for_task_id_host(&tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
         Self::delete_all_subagents(&mut tables, task_id);
         self.sync_subagent_count(&mut tables, task_id)
             .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;

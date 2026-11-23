@@ -319,8 +319,12 @@ use super::*;
 /// did (`agent-health.allium`, "Hook-Based Status Transitions"). A board that
 /// let another viewer write them would disagree with the store.
 ///
+/// Bumped: `subagent_clear`, the detach's draining clear, now requires the
+/// caller to act for the task's host too (`split-pane.allium: DetachTmux`).
+/// A board that let another viewer detach a task would disagree with the store.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 61;
+pub const RULES_VERSION: i64 = 62;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

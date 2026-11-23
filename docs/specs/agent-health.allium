@@ -233,7 +233,7 @@ rule ForgetWindowOfStoppedAgent {
 -- DetectCrashedAgent and ClearSubagentsOnSessionStart raise, is the write
 -- the section header below guards: only the owner of the task's host makes
 -- it, and the crash path is that board by being locally owned. DetachTmux's
--- draining clear does not carry that check.
+-- draining clear carries the same check (split-pane.allium: DetachTmux).
 rule VoidSubagentsAndPendingStop {
     when: SubagentsVoided(task)
     let agent = current_agent(task)

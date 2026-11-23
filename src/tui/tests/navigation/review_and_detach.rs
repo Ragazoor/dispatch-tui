@@ -146,6 +146,46 @@ fn detach_tmux_noop_on_task_without_window() {
     assert!(cmds.is_empty(), "should produce no commands");
 }
 
+/// `DetachTmux` requires the task's host to be this board's: the window is
+/// another machine's, and the store refuses the draining clear anyway.
+#[test]
+fn detach_tmux_refuses_a_task_another_host_holds() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.host = Some("other-host".to_string());
+    let mut app = App::new(vec![task]);
+    app.set_local_host_id("this-host".to_string());
+
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DetachTmux(TaskId(1)),
+    ));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        cmds.is_empty(),
+        "a foreign task kills no window and writes nothing"
+    );
+}
+
+#[test]
+fn batch_detach_tmux_leaves_out_tasks_another_host_holds() {
+    let mut foreign = make_task(2, TaskStatus::Running);
+    foreign.host = Some("other-host".to_string());
+    let mut own = make_task(1, TaskStatus::Running);
+    own.host = Some("this-host".to_string());
+    let mut app = App::new(vec![own, foreign, make_task(3, TaskStatus::Running)]);
+    app.set_local_host_id("this-host".to_string());
+
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::BatchDetachTmux(vec![TaskId(1), TaskId(2), TaskId(3)]),
+    ));
+
+    assert!(
+        matches!(&app.input.mode, InputMode::ConfirmDetachTmux(ids) if ids == &[TaskId(1), TaskId(3)]),
+        "got {:?}",
+        app.input.mode
+    );
+}
+
 #[test]
 fn batch_detach_tmux() {
     let mut app = App::new(vec![

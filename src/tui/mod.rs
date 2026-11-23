@@ -936,9 +936,11 @@ impl App {
         let detachable: Vec<TaskId> = ids
             .iter()
             .filter(|&&id| {
-                self.board
-                    .find_task(id)
-                    .is_some_and(|t| t.tmux_window.is_some())
+                // Only the board that owns the task's host detaches it
+                // (`DetachTmux`, `docs/specs/split-pane.allium`).
+                self.board.find_task(id).is_some_and(|t| {
+                    t.tmux_window.is_some() && t.is_locally_owned(self.local_host_id())
+                })
             })
             .copied()
             .collect();
@@ -970,7 +972,17 @@ impl App {
 
     pub(in crate::tui) fn detach_tmux_panels(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
         let mut cmds = Vec::new();
+        let local_host_id = self.local_host_id.clone();
         for id in ids {
+            // A task another host holds is not this board's to detach, however
+            // the id got here (`DetachTmux`, `docs/specs/split-pane.allium`).
+            if self
+                .board
+                .find_task(id)
+                .is_some_and(|t| !t.is_locally_owned(local_host_id.as_deref()))
+            {
+                continue;
+            }
             self.clear_agent_tracking(id);
             if let Some(task) = self.find_task_mut(id) {
                 let mut released_window = false;
