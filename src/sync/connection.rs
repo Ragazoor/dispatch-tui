@@ -1,7 +1,7 @@
 //! The board's one connection to the shared store, as a state machine.
 //!
 //! Spec: `docs/specs/sync.allium` — the `BoardConnection` entity, its
-//! transition graph, and the five rules that drive it.
+//! transition graph, and the rules that drive it.
 //!
 //! **Disconnection is ordinary here, not exceptional.** A laptop lid, a VPN
 //! handover and a tunnel reconnect all produce a few seconds of outage several
@@ -84,7 +84,9 @@ impl ConnectionStatus {
 
 /// Something the outside world did to the connection.
 ///
-/// One variant per rule in `sync.allium`, so a reader can line the two up.
+/// Each variant names the `sync.allium` rule it drives, so a reader can line
+/// the two up. `Dropped` also carries a come-up that failed after acceptance
+/// (`ASubscriptionTheStoreRefusesIsAnOutage`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConnectionEvent {
     /// The store accepted the attempt (`ConnectionAccepted`).

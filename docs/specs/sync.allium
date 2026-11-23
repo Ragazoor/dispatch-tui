@@ -426,8 +426,9 @@ rule AnAppliedSubscriptionEndsTheOutage {
         -- THE OUTAGE ENDS WHEN THE BOARD IS ALL THE WAY UP, not when the store
         -- answers. Applied means accepted, identity settled and the initial
         -- subscription's rows arrived, so the board is drawing live rows again.
-        -- Every failure before that point — a refused attempt, a failed
-        -- adoption or host-id read, a refused subscription — counts towards
+        -- Every failure before that point — a refused attempt, a failed read
+        -- of the stored identity, a failed adoption or host-id read, a refused
+        -- subscription — counts towards
         -- the same outage and grows the same backoff.
         --
         -- The reset makes the backoff of a NEW outage start short. A counter
@@ -808,9 +809,12 @@ rule RegisterHostOnConnect {
         -- whose local write happens before any connection does, so sending it
         -- is a catch-up rather than a forwarding.
         --
-        -- FIRES ON EVERY CONNECTION THAT COMES UP, RECONNECTS INCLUDED
-        -- (src/runtime/tasks.rs::step_shared_store calls
-        -- src/store_connection/mod.rs::on_store_connected), for the same reason
+        -- FIRES ON EVERY CONNECTION THAT COMES UP, RECONNECTS INCLUDED: the
+        -- first through src/store_connection/mod.rs::connect_first, every
+        -- reconnect through src/runtime/tasks.rs::step_shared_store, both
+        -- calling src/store_connection/mod.rs::on_store_connected. It is the
+        -- board's: a one-shot CLI command connects without registering the
+        -- host. It re-sends on every connection for the same reason
         -- SubscribeOnceIdentityIsSettled re-asserts subscriptions
         -- unconditionally: a dropped connection does not tell this rule
         -- whether the store's copy of this row is still current — a rename
@@ -1348,7 +1352,10 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         -- connection that is `connected` with nothing asked for, so it is this
         -- same outage, with that step's error as last_error
         -- (src/sync/session.rs::SyncSession::attempt). A failed adopt stores
-        -- no identity, so the next attempt settles it afresh.
+        -- no identity, so the next attempt settles it afresh. The read of
+        -- this install's stored identity comes earlier still, before the
+        -- board records the acceptance, so its failure is
+        -- ConnectionAttemptFailed's; it grows the same backoff.
         --
         -- CLOSED, NOT MERELY MARKED DOWN. The connection the store accepted is
         -- closed and whatever it had already delivered is discarded, exactly

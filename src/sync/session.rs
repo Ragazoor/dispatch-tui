@@ -2,7 +2,8 @@
 //!
 //! Spec: `docs/specs/sync.allium`. This is where the rules in that file are
 //! sequenced — `OpenBoardConnection`, `ConnectionAccepted`,
-//! `SubscribeOnceIdentityIsSettled`, `ConnectionAttemptFailed`,
+//! `SubscribeOnceIdentityIsSettled`, `AnAppliedSubscriptionEndsTheOutage`,
+//! `ASubscriptionTheStoreRefusesIsAnOutage`, `ConnectionAttemptFailed`,
 //! `RetryAfterBackoff` and `StopOnAUserIdentityConflict` — around the state
 //! machine in [`super::connection`], which owns the edges but does no I/O.
 //!
@@ -169,7 +170,7 @@ pub enum StepOutcome {
     /// Nothing was due. The overwhelmingly common answer once connected.
     Idle,
     /// An attempt was made and accepted; the identity settled and the
-    /// subscriptions were asserted.
+    /// initial subscription was applied.
     Connected,
     /// An attempt was made and failed. The board is disconnected and saying
     /// why.

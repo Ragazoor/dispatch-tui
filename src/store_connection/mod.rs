@@ -291,7 +291,8 @@ pub(crate) async fn on_store_connected(
     let Some(user) = settle_from_store(store, settled_identity).await else {
         return;
     };
-    // Fires on every settle, reconnects included, for the same reason
+    // Fires on every connection whose initial subscription is applied,
+    // reconnects included, for the same reason
     // subscriptions are re-asserted unconditionally: a dropped connection does
     // not say whether the registry's copy of this row is still current.
     // Best-effort; a failure here must not stop the board from using the
