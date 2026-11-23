@@ -190,11 +190,19 @@ mcp_args! {
 }
 
 /// The `ready` argument's one wording, on `task_create` and `task_update`.
-pub(super) const READY_DESCRIPTION: &str = "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it.";
+macro_rules! ready_description {
+    () => {
+        "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it."
+    };
+}
 
-/// `task_create`'s wording of `ready`: the shared one, plus what leaving it
-/// out means there.
-pub(super) const READY_CREATE_DESCRIPTION: &str = "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it. Defaults to false: a new task is not ready.";
+pub(super) const READY_DESCRIPTION: &str = ready_description!();
+
+/// `task_create` adds what leaving it out means there.
+pub(super) const READY_CREATE_DESCRIPTION: &str = concat!(
+    ready_description!(),
+    " Defaults to false: a new task is not ready."
+);
 
 /// The `task_update` input schema: `UpdateTaskArgs`' fields, with `task_ids` in place
 /// of `task_id`, so the field set is declared once.
@@ -394,22 +402,15 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         state.db.ready_mark(task.id),
         super::orchestration::covering(state, task.epic_id)
     );
-    let mut text = format_task_detail(
+    format_task_detail(
         task,
         agent.as_ref(),
         &epic_titles,
         verify_command.as_deref(),
         dispatch_request.as_ref(),
         bookmarks.contains(&task.id),
-    );
-    // GetTaskViaMcp: [Ready] and [Orchestrated by] sit after [Bookmarked],
-    // before Created.
-    let created_at = text.rfind("\nCreated: ").unwrap_or(text.len());
-    text.insert_str(
-        created_at,
         &super::orchestration::task_lines(task.status, mark.as_ref(), covered_by.as_ref()),
-    );
-    text
+    )
 }
 
 /// `GetTaskViaMcp`'s `[Dispatch request]` line: the task's most recent
@@ -448,6 +449,7 @@ fn format_task_detail(
     verify_command: Option<&str>,
     dispatch_request: Option<&crate::models::DispatchRequest>,
     bookmarked: bool,
+    orchestration_lines: &str,
 ) -> String {
     let mut text = format!(
         "Task {id}: {title}\nStatus: {status}\nRepo: {repo}\nDescription: {desc}",
@@ -536,6 +538,7 @@ fn format_task_detail(
     if bookmarked {
         text.push_str("\nBookmarked: yes");
     }
+    text.push_str(orchestration_lines);
     text.push_str(&format!("\nCreated: {}", utc_stamp(task.created_at)));
     text.push_str(&format!("\nUpdated: {}", utc_stamp(task.updated_at)));
     text
@@ -727,6 +730,7 @@ mod tests {
             None,
             None,
             false,
+            "",
         );
         assert!(output.contains("\nAgent: ada (live)"), "{output}");
     }
@@ -741,6 +745,7 @@ mod tests {
             None,
             None,
             false,
+            "",
         );
         assert!(output.contains("\nAgent: ada (paused)"), "{output}");
     }
@@ -762,7 +767,7 @@ mod tests {
     #[test]
     fn format_task_detail_includes_base_branch() {
         let task = make_task("develop");
-        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false, "");
         assert!(
             output.contains("Base branch: develop"),
             "expected 'Base branch: develop' in output, got:\n{output}"
@@ -779,6 +784,7 @@ mod tests {
             Some("cargo test"),
             None,
             false,
+            "",
         );
         assert!(
             output.contains("Verify command: cargo test"),
@@ -803,6 +809,7 @@ mod tests {
             Some("cargo test"),
             None,
             false,
+            "",
         );
 
         let defs = crate::mcp::handlers::dispatch::tool_definitions();
@@ -834,7 +841,7 @@ mod tests {
     #[test]
     fn format_task_detail_omits_verify_command_when_unset() {
         let task = make_task("main");
-        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false);
+        let output = format_task_detail(&task, None, &HashMap::new(), None, None, false, "");
         assert!(
             !output.contains("Verify command"),
             "expected no 'Verify command' line in output, got:\n{output}"

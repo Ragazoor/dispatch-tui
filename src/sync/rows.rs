@@ -646,6 +646,11 @@ impl SharedRows {
         self.write(|rows| rows.ready_marks.remove(&task.0).is_some());
     }
 
+    /// The tasks with a ready mark (`core.allium: ReadyMark`), ascending.
+    pub fn ready_task_ids(&self) -> Vec<TaskId> {
+        self.read(|rows| rows.ready_marks.keys().map(|id| TaskId(*id)).collect())
+    }
+
     /// The ready mark on `task` (`core.allium: ReadyMark`).
     pub fn ready_mark(&self, task: TaskId) -> Option<bindings::ReadyMark> {
         self.read(|rows| rows.ready_marks.get(&task.0).cloned())

@@ -61,6 +61,10 @@ impl super::super::TaskRead for Store {
         self.rows.bookmarked_task_ids()
     }
 
+    async fn ready_task_ids(&self) -> Vec<TaskId> {
+        self.rows.ready_task_ids()
+    }
+
     async fn ready_mark(&self, id: TaskId) -> Option<crate::models::ReadyMark> {
         let row = self.rows.ready_mark(id)?;
         decode::ready_mark(&row)

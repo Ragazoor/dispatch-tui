@@ -126,6 +126,8 @@ pub trait TaskRead: Send + Sync {
     /// `core.allium: ReadyMark`: the ready mark on `id`, if it has one. A
     /// row that does not decode reads as none.
     async fn ready_mark(&self, id: TaskId) -> Option<crate::models::ReadyMark>;
+    /// The tasks with a ready mark, ascending: the list form's " ready".
+    async fn ready_task_ids(&self) -> Vec<TaskId>;
     /// One archived task (`core.allium: ArchivedTask`), asked of the STORE:
     /// the board holds no archived records. `Ok(None)` means never archived;
     /// `Err` means the store could not be asked.

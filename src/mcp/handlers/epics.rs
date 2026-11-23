@@ -376,9 +376,7 @@ pub(super) async fn handle_epic_update(
         return update_orchestration(state, id, parsed).await;
     }
     let moved = match parsed.parent_epic_id {
-        Some(new_parent) => {
-            Some(switches_a_move_turns_off(state, parsed.epic_id, new_parent).await)
-        }
+        Some(new_parent) => switches_a_move_turns_off(state, parsed.epic_id, new_parent).await,
         None => None,
     };
 
@@ -414,7 +412,7 @@ pub(super) async fn handle_epic_update(
     state.notify_epic_changed(epic_id);
     let epic_ref = super::types::epic_ref(state, epic_id).await;
     let mut text = format!("{epic_ref} updated ({})", field_names.join(", "));
-    if let Some((above, off)) = moved.and_then(|(above, off)| above.map(|a| (a, off))) {
+    if let Some((above, off)) = moved {
         for (off_id, off_title) in off {
             text.push_str(&format!(
                 "\nSwitched off the orchestrator of epic {} ({off_title}): epic {} above it has one.",
@@ -426,46 +424,25 @@ pub(super) async fn handle_epic_update(
 }
 
 /// `epics.allium: ReparentingKeepsOneOrchestratorOnAPath`, read before the
-/// move: the epic whose switch covers `new_parent`, and the switched-on epics
-/// of the moved subtree (`epic_id` included), which the move turns off when
-/// there is such an epic.
+/// move: the epic whose switch covers `new_parent`, with the switched-on
+/// epics of the moved subtree (`epic_id` included), which the move turns
+/// off. `None` when nothing covers `new_parent`.
 async fn switches_a_move_turns_off(
     state: &McpState,
     epic_id: EpicId,
     new_parent: Option<EpicId>,
-) -> (Option<EpicId>, Vec<(EpicId, String)>) {
-    let above = super::orchestration::covering(state, new_parent)
-        .await
-        .map(|(e, _)| e.id);
-    if above.is_none() {
-        return (None, Vec::new());
-    }
+) -> Option<(EpicId, Vec<(EpicId, String)>)> {
+    let (above, _) = super::orchestration::covering(state, new_parent).await?;
     let epics = state.db.list_epics().await;
-    let mut subtree = vec![epic_id];
-    let mut i = 0;
-    while i < subtree.len() {
-        let parent = subtree[i];
-        subtree.extend(
-            epics
-                .iter()
-                .filter(|e| e.parent_epic_id == Some(parent) && !subtree.contains(&e.id))
-                .map(|e| e.id)
-                .collect::<Vec<_>>(),
-        );
-        i += 1;
-    }
+    let subtree = crate::models::descendant_epic_ids(epic_id, &epics);
     let mut off = Vec::new();
-    for id in subtree {
-        if state.db.epic_orchestration(id).await.is_some() {
-            let title = epics
-                .iter()
-                .find(|e| e.id == id)
-                .map(|e| e.title.clone())
-                .unwrap_or_default();
-            off.push((id, title));
+    for e in epics.iter().filter(|e| subtree.contains(&e.id)) {
+        if state.db.epic_orchestration(e.id).await.is_some() {
+            off.push((e.id, e.title.clone()));
         }
     }
-    (above, off)
+    off.sort_unstable_by_key(|(id, _)| *id);
+    Some((above.id, off))
 }
 
 /// `UpdateEpicViaMcp`'s orchestrator arguments: switch on, switch off, or

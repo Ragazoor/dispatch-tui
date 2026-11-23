@@ -71,8 +71,8 @@ async fn handle_update_task(
     // `ready` is the task's ready mark, a second store write after the fields
     // (`UpdateTaskViaMcp`, "ready is a second write"). Everything it can be
     // refused for is checked here, before the first write.
-    let ready = parsed.ready.take();
-    let marker = match ready {
+    // `Some(Some(marker))` marks, `Some(None)` clears, `None` leaves the mark.
+    let ready_write = match parsed.ready.take() {
         Some(true) => {
             let status_after = match parsed.status {
                 Some(status) => status,
@@ -88,17 +88,18 @@ async fn handle_update_task(
                 );
             }
             match super::super::orchestration::ready_marker(state, identity).await {
-                Ok(marker) => Some(marker),
+                Ok(marker) => Some(Some(marker)),
                 Err(e) => return service_err_to_response(id, e),
             }
         }
-        _ => None,
+        Some(false) => Some(None),
+        None => None,
     };
     let mut params = parsed.apply_to_params(params);
     if let Some(bookmarked) = bookmarked {
         params = params.bookmarked(bookmarked);
     }
-    let fields: Vec<String> = params
+    let mut fields: Vec<String> = params
         .updated_field_names()
         .into_iter()
         .map(str::to_string)
@@ -111,28 +112,25 @@ async fn handle_update_task(
     // `updated_at` alone: a person's own mark is not an edit of the shared task
     // (`UpdateTaskViaMcp`). That is `SetBookmark` itself. A call that sets only
     // `ready` writes nothing here.
-    if fields.is_empty() && ready.is_some() {
-    } else if let (true, Some(bookmarked)) = (params.is_bookmark_only(), params.bookmarked) {
-        if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
-            return service_err_to_response(id, e);
-        }
-    } else {
-        let result = match state.task_svc.update_task(params).await {
-            Ok(result) => result,
-            Err(e) => return service_err_to_response(id, e),
-        };
-        if result.was_pr_finalisation {
-            nudge = super::reflection_nudge(&*state.db).await;
+    let ready_only = fields.is_empty() && ready_write.is_some();
+    if !ready_only {
+        if let (true, Some(bookmarked)) = (params.is_bookmark_only(), params.bookmarked) {
+            if let Err(e) = state.task_svc.set_bookmark(task_id, bookmarked).await {
+                return service_err_to_response(id, e);
+            }
+        } else {
+            let result = match state.task_svc.update_task(params).await {
+                Ok(result) => result,
+                Err(e) => return service_err_to_response(id, e),
+            };
+            if result.was_pr_finalisation {
+                nudge = super::reflection_nudge(&*state.db).await;
+            }
         }
     }
-    let mut fields = fields;
-    if let Some(ready) = ready {
-        let written = super::super::orchestration::write_ready(
-            state,
-            task_id,
-            if ready { marker.as_ref() } else { None },
-        )
-        .await;
+    if let Some(write) = ready_write {
+        let written =
+            super::super::orchestration::write_ready(state, task_id, write.as_ref()).await;
         if let Err(e) = written {
             if fields.is_empty() {
                 return service_err_to_response(id, e);
@@ -803,10 +801,11 @@ async fn list_tasks(
         "most recently updated first",
         "epic_id, status, query or the time filters",
     );
-    let (epic_titles, plan_goals, agents) = tokio::join!(
+    let (epic_titles, plan_goals, agents, ready) = tokio::join!(
         super::build_epic_titles(state),
         build_plan_goal_cache(&filtered),
-        state.db.list_agents()
+        state.db.list_agents(),
+        state.db.ready_task_ids()
     );
     // The display agent (agents.allium: A18): not ended, else the last to end.
     let mut by_task: HashMap<TaskId, Vec<&Agent>> = HashMap::new();
@@ -819,13 +818,6 @@ async fn list_tasks(
             crate::models::display_agent(of_task.iter().copied()).map(|a| (task, a))
         })
         .collect();
-    // ListTasksViaMcp: " ready" on a task with a ready mark.
-    let mut ready = std::collections::HashSet::new();
-    for t in &filtered {
-        if state.db.ready_mark(t.id).await.is_some() {
-            ready.insert(t.id);
-        }
-    }
     let mut lines: Vec<String> = filtered
         .iter()
         .map(|t| {
