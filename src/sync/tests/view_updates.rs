@@ -127,6 +127,32 @@ pins_view_updates!(
 );
 
 pins_view_updates!(
+    an_epic_orchestration_update_pair_keeps_the_new_row,
+    upsert_epic_orchestration,
+    retire_epic_orchestration,
+    |tag: &str| bindings::EpicOrchestration {
+        epic_id: 3,
+        start_rule: tag.into(),
+        max_parallel: 0,
+        switched_on_at: "2026-01-01 00:00:00.000".into(),
+    },
+    |rows: &SharedRows| rows.epic_orchestration(EpicId(3)).map(|o| o.start_rule)
+);
+
+pins_view_updates!(
+    a_ready_mark_update_pair_keeps_the_new_row,
+    upsert_ready_mark,
+    retire_ready_mark,
+    |tag: &str| bindings::ReadyMark {
+        task_id: 7,
+        marked_by: "agent".into(),
+        agent_name: tag.into(),
+        marked_at: "2026-01-01 00:00:00.000".into(),
+    },
+    |rows: &SharedRows| rows.ready_mark(TaskId(7)).map(|m| m.agent_name)
+);
+
+pins_view_updates!(
     a_work_package_update_pair_keeps_the_new_row,
     upsert_work_package,
     retire_work_package,
@@ -719,6 +745,8 @@ const IGNORED_COLUMN_CASES: &[(&str, fn())] = &[
 /// `IGNORED_COLUMN_CASES`.
 const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
     ("learning_verdict", "stored raw: no decoder"),
+    ("epic_orchestration", "stored raw: no decoder"),
+    ("ready_mark", "stored raw: no decoder"),
     ("setting", "stored raw: no decoder"),
 ];
 
