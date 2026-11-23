@@ -89,6 +89,9 @@ use "./store-split.allium" as split
 -- Enumerations
 ------------------------------------------------------------
 
+-- The trouble a log entry of kind acted_on_trouble is about.
+enum TroubleKind { stale | crashed | start_failed | conflict }
+
 -- Which backlog tasks an orchestrator may start (O6).
 enum StartRule { marked_only | everything }
 
@@ -167,6 +170,7 @@ entity OrchestratorLogEntry {
     task: core/Task?         -- the task it is about; an answer always names one
     text: String             -- one line: what was decided or done, and why
     question: String?        -- for answered and passed_on: what was asked
+    trouble: TroubleKind?    -- for acted_on_trouble: which trouble
 }
 
 -- Something the orchestrator keeps for the epic across its sessions: a
@@ -208,6 +212,13 @@ entity WaitingItem {
 -- counts_as_ready(task): the task has a ReadyMark, or covering(task) has
 -- start_rule = everything.
 -- wanted(orchestrator): its epic has open work.
+-- already_retried(task, trouble): the log holds an acted_on_trouble entry for
+-- this task and this trouble that is newer than every resolved WaitingItem of
+-- the task. So one retry is spent per trouble, and it comes back once the
+-- operator has dealt with the item the second failure raised (O10).
+-- waits_on_someone_else(task): the task reviews another author's PR and the
+-- operator has given their verdict (core.allium, "Derived review sections":
+-- changes requested by me, approved by me).
 -- orchestrator_state(orchestrator), what the operator sees of it:
 --   working: its session is live and a task of the epic runs here.
 --   idle:    its session is live and none does.
@@ -340,10 +351,12 @@ rule ClearReadyMark {
 }
 
 rule LeavingBacklogDropsTheReadyMark {
-    when: task: core/Task.status transitions_to running
+    when: TaskLeftBacklog(task)
 
-    -- The mark said "start this". Once started it has been used: a task that
-    -- comes back to backlog is not ready until it is marked again.
+    -- Every status write that takes a task out of backlog, the start's claim
+    -- and a hand move to review or done alike. The mark said "start this".
+    -- Once the task has left backlog it has been used: a task that comes back
+    -- is not ready until it is marked again.
     ensures: not exists ReadyMark{task: task}
 }
 
@@ -393,7 +406,7 @@ rule StartOrchestratorSession {
         if session_died(orchestrator): orchestrator.restarted_once = true
     ensures: OrchestratorLogEntry.created(
         epic: orchestrator.epic, host: orchestrator.host, at: now,
-        kind: session, task: null, question: null,
+        kind: session, task: null, question: null, trouble: null,
         text: session_start_text(orchestrator)
     )
 
@@ -446,7 +459,7 @@ rule EndOrchestratorSession {
         if orchestrator.epic.status = done:
             OrchestratorLogEntry.created(
                 epic: orchestrator.epic, host: orchestrator.host, at: now,
-                kind: summary, task: null, question: null,
+                kind: summary, task: null, question: null, trouble: null,
                 text: closing_summary(orchestrator)
             )
             EpicFinishedNotified(orchestrator.epic)
@@ -466,11 +479,11 @@ rule OrchestratorStartsATask {
 
     let orchestration = orchestrator.orchestration
 
+    -- Its own discipline, from its prompt: it starts tasks of its epic only.
     requires: covering(task) = orchestration
     requires: task.status = backlog
-    requires: counts_as_ready(task)
-    requires: running_here(orchestrator.epic, orchestrator.host).count < orchestration.limit
 
+    ensures: StartAsked(task: task, host: orchestrator.host)
     ensures: split/DispatchRequested(
         task: task,
         requester: orchestrator.host,
@@ -478,7 +491,7 @@ rule OrchestratorStartsATask {
     )
     ensures: OrchestratorLogEntry.created(
         epic: orchestrator.epic, host: orchestrator.host, at: now,
-        kind: started_task, task: task, question: null,
+        kind: started_task, task: task, question: null, trouble: null,
         text: start_reason(orchestrator, task)
     )
 
@@ -489,10 +502,9 @@ rule OrchestratorStartsATask {
         -- for its scheduled time. Two machines' orchestrators that pick the
         -- same task race on that request and the store accepts one.
         --
-        -- The requires above are the store's, not only the prompt's: a start
-        -- by an orchestrator is refused for a task that is not ready or not
-        -- in its subtree, with a message that says which. The limit is every
-        -- start's (StartsInAnOrchestratedEpicShareOneLimit).
+        -- Ready and the limit are every start's, whoever asks
+        -- (StartsInAnOrchestratedEpicShareOneRule). The store does not ask who
+        -- the caller is.
         --
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on
@@ -504,21 +516,24 @@ rule OrchestratorStartsATask {
         -- may tell the operator that one looks unblocked.
 }
 
-rule StartsInAnOrchestratedEpicShareOneLimit {
+rule StartsInAnOrchestratedEpicShareOneRule {
     when: StartAsked(task, host)
 
-    -- O7. Every way a task of an orchestrated epic starts on a machine, the
-    -- operator's own key included, is held to the one limit. A task no
-    -- orchestrator covers has none.
+    -- O5, O7. Every way a task of an orchestrated epic starts on a machine
+    -- is held to the same two conditions: the task is ready, and the epic is
+    -- under its limit. A task no orchestrator covers has neither.
+    requires: covering(task) = null or counts_as_ready(task)
     requires: covering(task) = null
         or running_here(covering(task).epic, host).count < covering(task).limit
 
     ensures: StartAllowed(task, host)
 
     @guidance
-        -- Once built this is a requires of RequestDispatch itself, with no
-        -- exception for who asks. The refusal reads "epic <id> already runs
-        -- <n> of <limit> tasks". A resume of a task that already runs is not
+        -- Once built these are requires of RequestDispatch itself, with no
+        -- exception for who asks. The refusals read "task <id> is not marked
+        -- ready" and "epic <id> already runs <n> of <limit> tasks". The
+        -- operator's start key on a backlog card marks the task ready and
+        -- starts it in one step: pressing it is the intent the mark records. A resume of a task that already runs is not
         -- a start and is not held to it. Because a task in review and a
         -- detached task take no slot, an agent that waits for a PR review
         -- does not hold up the next task.
@@ -533,7 +548,7 @@ rule OrchestratorAnswersAnAgent {
 
     ensures: OrchestratorLogEntry.created(
         epic: orchestrator.epic, host: orchestrator.host, at: now,
-        kind: answered, task: task, question: question,
+        kind: answered, task: task, question: question, trouble: null,
         text: answer_line(answer, reason)
     )
 
@@ -553,11 +568,11 @@ rule OrchestratorPassesOnToTheOperator {
     )
     ensures: OrchestratorLogEntry.created(
         epic: epic, host: host, at: now,
-        kind: passed_on, task: task, question: about,
+        kind: passed_on, task: task, question: about, trouble: null,
         text: recommendation
     )
     ensures:
-        if notifications_enabled:
+        if notifications_enabled():
             DesktopNotification(epic: epic, task: task, about: waits_for_operator)
 
     @guidance
@@ -661,6 +676,12 @@ rule AgentIsStale {
     requires: live_orchestrator_for(task) != null
 
     ensures: AgentPinged(live_orchestrator_for(task), task)
+    ensures: OrchestratorLogEntry.created(
+        epic: live_orchestrator_for(task).epic,
+        host: live_orchestrator_for(task).host, at: now,
+        kind: acted_on_trouble, task: task, question: null,
+        trouble: stale, text: "asked the agent for status"
+    )
 
     @guidance
         -- A message asking for status. An agent that works again within
@@ -688,8 +709,13 @@ rule AgentCrashed {
     let orchestrator = live_orchestrator_for(task)
 
     ensures:
-        if not already_retried(orchestrator, task):
+        if not already_retried(task, crashed):
             TaskResumeRequested(task)
+            OrchestratorLogEntry.created(
+                epic: orchestrator.epic, host: orchestrator.host, at: now,
+                kind: acted_on_trouble, task: task, question: null,
+                trouble: crashed, text: "resumed the agent after a crash"
+            )
         else:
             WaitingItemRaised(
                 epic: orchestrator.epic, host: orchestrator.host, task: task,
@@ -698,10 +724,6 @@ rule AgentCrashed {
                 recommendation: crash_recommendation(orchestrator, task)
             )
 
-    @guidance
-        -- already_retried: the log holds an acted_on_trouble entry for this
-        -- task and this kind of trouble since the task last entered running.
-        -- The resume writes that entry.
 }
 
 rule StartFailed {
@@ -713,7 +735,13 @@ rule StartFailed {
     let orchestrator = live_orchestrator_for(request.task)
 
     ensures:
-        if not already_retried(orchestrator, request.task):
+        if not already_retried(request.task, start_failed):
+            OrchestratorLogEntry.created(
+                epic: orchestrator.epic, host: orchestrator.host, at: now,
+                kind: acted_on_trouble, task: request.task, question: null,
+                trouble: start_failed, text: request.reason
+            )
+            TaskMarkedReady(task: request.task, marked_by: agent, agent_name: orchestrator.name)
             OrchestratorStartsTask(orchestrator, request.task)
         else:
             WaitingItemRaised(
@@ -727,6 +755,7 @@ rule StartFailed {
         -- The failed request has released the task to backlog already
         -- (store-split.allium: ReleaseClaimOfFailedRequest). Its ready mark
         -- went when it left backlog, so the retry marks it ready again first.
+        -- A second failure leaves it in backlog, not ready, with the item.
 }
 
 rule WrapUpConflict {
@@ -734,18 +763,37 @@ rule WrapUpConflict {
 
     requires: live_orchestrator_for(task) != null
 
-    ensures: AgentToldToResolveConflict(live_orchestrator_for(task), task)
+    let orchestrator = live_orchestrator_for(task)
+
+    ensures:
+        if not already_retried(task, conflict):
+            AgentToldToResolveConflict(orchestrator, task)
+            OrchestratorLogEntry.created(
+                epic: orchestrator.epic, host: orchestrator.host, at: now,
+                kind: acted_on_trouble, task: task, question: null,
+                trouble: conflict, text: "told the agent to resolve the conflict and wrap up again"
+            )
+        else:
+            WaitingItemRaised(
+                epic: orchestrator.epic, host: orchestrator.host, task: task,
+                about: "the wrap-up hit a conflict again",
+                tried: "told the agent to resolve it once",
+                recommendation: conflict_recommendation(orchestrator, task)
+            )
 
     @guidance
-        -- A message to the task agent: resolve the conflict and wrap up
-        -- again. The orchestrator resolves nothing itself (O2). A second
-        -- conflict on the same task is passed to the operator.
+        -- A message to the task agent. The orchestrator resolves nothing
+        -- itself (O2).
 }
 
 rule LongWaitInReview {
-    when: task: core/Task.status_changed_at + config.orchestrator_review_reminder_after <= now
+    when: ReviewReminderDue(task)
 
+    -- Due config.orchestrator_review_reminder_after after the task entered
+    -- review, when it has not left since.
     requires: task.status = review
+    -- A review the operator has already given waits on the other author.
+    requires: not waits_on_someone_else(task)
     requires: live_orchestrator_for(task) != null
     requires: not exists WaitingItem{task: task, resolved_at: null}
 
@@ -800,6 +848,40 @@ invariant OnlyBacklogTasksAreReady {
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
+
+-- What an orchestrator is to the rest of the system. It is a row of its own
+-- and not a task's agent: it has no task and no worktree, so nothing that
+-- holds for a task's agent is bent to fit it.
+surface OrchestratorIdentity {
+    facing _: core/McpClient
+
+    @guarantee ANameLikeAnAgents
+        -- Its name comes from the pool task agents draw from and is unique
+        -- across both (OrchestratorNamesAreUnique). Its session carries the
+        -- name, so ListAgents shows it and a message to the name reaches it.
+
+    @guarantee TheNameResolvesToItsEpic
+        -- Where a tool takes a task id or an agent name, an orchestrator's
+        -- name is not a task: the tool answers that the name is the
+        -- orchestrator of epic <id> (<title>). Epic tools take the name for
+        -- its epic.
+
+    @guarantee ItsOwnCallerIdentity
+        -- Its MCP calls carry a third caller identity beside a task's agent
+        -- and a plain session: the orchestrator of an epic on a host. Its
+        -- log entries, its items and its ready marks are stamped from it,
+        -- never from an argument.
+
+    @guarantee ItsHooksReportToItsOwnRow
+        -- Its session runs the same hooks as a task agent's. They keep its
+        -- row's window and its last completed turn, which is what live, down
+        -- and OrchestratorCompletedATurn read. They move no task: there is no
+        -- needs input, stale or review state for an orchestrator.
+
+    @guarantee NotATaskOfItsEpic
+        -- It is no card in a column and no child of its epic: the epic's
+        -- status and its counts are its tasks' alone.
+}
 
 -- What may be decided for the operator, and what may not (O9). This is the
 -- text of the orchestrator's prompt as much as it is a rule.
@@ -1084,9 +1166,8 @@ surface OrchestratorNotifications {
 
 -- Each of these is true once its build step lands, and moves to its owner
 -- then:
---   - core.allium: the entities above; an orchestrator is an agent that
---     belongs to an epic and has no task and no worktree, which the Agent
---     entity and agents.allium's invariants do not allow for today.
+--   - core.allium: the entities above. The Agent entity and agents.allium
+--     stay as they are, for task agents only (OrchestratorIdentity).
 --   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
 --     toggle key and header indicator, the chain that started the next
 --     subtask when a session closed, its failure report and the stalled-chain
