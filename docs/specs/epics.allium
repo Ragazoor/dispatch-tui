@@ -9,6 +9,7 @@ use "./store-split.allium" as split
 use "./tasks.allium" as tasks
 use "./settings.allium" as settings
 use "./pr-workflow.allium" as pr
+use "./orchestrators.allium" as orch
 
 ------------------------------------------------------------
 -- Contracts
@@ -381,6 +382,13 @@ rule DeleteEpic {
     -- The epics this delete removes: the epic itself and every descendant.
     -- A feed epic among them is being reset, not pruned.
     let doomed_epics = epic.subtree_epics + {epic}
+
+    -- Every doomed epic's orchestrator switch goes off with it
+    -- (core/EpicOrchestration), in the same transaction.
+    ensures:
+        for e in doomed_epics:
+            if exists core/EpicOrchestration{epic: e}:
+                orch/OrchestratorSwitchedOff(e)
 
     -- Deletes epic and all linked subtasks and sub-epics (recursively)
     ensures:
@@ -1084,6 +1092,27 @@ rule ReparentEpicFromTui {
         -- a repo-group sub-epic can be selected and only then rejected.
         -- updated_at is refreshed automatically by the database layer on
         -- any patch_epic call; the assertion above documents the intent.
+}
+
+-- EpicReparented(epic, new_parent): an epic's parent changed. Raised by every
+-- write that changes it, in the same transaction: ReparentEpicFromTui and
+-- UpdateEpicViaMcp's parent alike.
+rule ReparentingKeepsOneOrchestratorOnAPath {
+    when: EpicReparented(epic, new_parent)
+
+    -- The moved epic lands under an orchestrated epic: the orchestrator
+    -- above takes its subtree over, and every switch inside it goes off
+    -- (core: OneOrchestratorOnAPath).
+    ensures:
+        if new_parent != null
+           and ({new_parent} + ancestor_chain(new_parent)).any(a => exists core/EpicOrchestration{epic: a}):
+            for e in epic.subtree_epics + {epic}:
+                if exists core/EpicOrchestration{epic: e}:
+                    orch/OrchestratorSwitchedOff(e)
+
+    @guidance
+        -- In the same write as the move. A move to the root, or under an
+        -- epic nothing above orchestrates, switches nothing off.
 }
 
 rule ToggleAutoDispatch {

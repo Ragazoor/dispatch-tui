@@ -1718,6 +1718,66 @@ rule BookmarkEndsWithTheTaskFinishing {
         -- repo_path reroute) touches a Bookmark.
 }
 
+-- == The ready mark ==
+
+-- core/ReadyMark: a backlog task is ready while it has one. The mark is a
+-- signal to an epic's orchestrator and a condition on nothing else
+-- (orchestrators.allium, O5).
+
+rule MarkTaskReady {
+    when: TaskMarkedReady(task, marked_by, agent_name?)
+
+    requires: exists task
+    requires: task.status = backlog
+    -- An agent's mark names the agent; the operator's names none.
+    requires:
+        if marked_by = agent: agent_name != null
+        else: agent_name = null
+
+    ensures:
+        if not exists core/ReadyMark{task: task}:
+            core/ReadyMark.created(
+                task: task,
+                marked_by: marked_by,
+                agent_name: agent_name,
+                marked_at: now
+            )
+
+    @guidance
+        -- Marking a task that is already ready changes nothing and is not an
+        -- error; the first marker stays recorded. A task outside backlog is
+        -- refused with "only a backlog task can be marked ready", a missing
+        -- one with "task <id> not found", an agent's mark without a name with
+        -- "an agent's ready mark names the agent", and an operator's mark
+        -- with one with "the operator's ready mark names no agent". A task
+        -- may be marked whether or not an orchestrator covers it: the mark
+        -- waits. Anyone may mark any task: the mark locks nothing.
+}
+
+rule ClearReadyMark {
+    when: TaskReadyCleared(task)
+
+    requires: exists task
+
+    -- Clearing a task that is not ready changes nothing and is not an error.
+    ensures: not exists core/ReadyMark{task: task}
+}
+
+-- TaskLeftBacklog(task): a status write took the task out of backlog. Raised
+-- by every write that does, in the same transaction: the start's claim, a
+-- hand move to review or done, a feed's update, a session close alike.
+rule LeavingBacklogDropsTheReadyMark {
+    when: TaskLeftBacklog(task)
+
+    -- The mark said "start this". Once the task has left backlog it has been
+    -- used: a task that comes back is not ready until it is marked again.
+    ensures: not exists core/ReadyMark{task: task}
+
+    @guidance
+        -- Deleting the task removes its mark with it (TaskRowDeleted): a
+        -- ReadyMark cannot outlive the task it names.
+}
+
 -- == Delete ==
 
 -- TaskRowDeleted(task): the task row is gone, whichever route removed it.

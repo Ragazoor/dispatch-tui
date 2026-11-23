@@ -188,9 +188,17 @@ contract IdSequenceCounter {
 -- reason: a bookmark is a person's own "come back to this", cheap to set
 -- again, and a restore is a rare disaster path. Losing them on a restore is
 -- accepted; carrying them would need a seed reducer and a snapshot table of
--- their own, which can be added later without changing anything else. These
--- are the only exceptions to "every table it holds" below; the module's
--- views are not tables and hold nothing of their own.
+-- their own, which can be added later without changing anything else.
+--
+-- `epic_orchestrations` and `ready_marks` (core.allium: EpicOrchestration,
+-- ReadyMark) are left out too. A restore must not switch an orchestrator on
+-- by itself, and a ready mark is cheap to set again. Losing both on a
+-- restore is accepted; either can be added later, as bookmarks can.
+-- (Decided for task #99385 by the epic's acting orchestrator while the
+-- operator was away; the operator reviews it.)
+--
+-- These are the only exceptions to "every table it holds" below; the
+-- module's views are not tables and hold nothing of their own.
 --
 -- `user_profiles` (people.allium) IS here: a restore keeps display names.
 -- The identities it names are the store's own, as `hosts`, `subscriptions`

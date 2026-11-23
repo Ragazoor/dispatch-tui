@@ -182,6 +182,13 @@ enum EpicOrigin { manual | repo_group }
 -- A stored or typed "ready" reads as backlog.
 enum TaskStatus { backlog | running | review | done }
 
+-- Which backlog tasks an epic's orchestrator may start
+-- (orchestrators.allium, O6).
+enum StartRule { marked_only | everything }
+
+-- Who set a ready mark.
+enum ReadyMarker { operator | agent }
+
 -- SubStatus refines the parent status into a more precise state. The valid
 -- pairs are Task's SubStatusFitsStatus invariant. A status write that names no
 -- sub_status resets it to default_sub_status(new_status), whose table is the
@@ -535,6 +542,40 @@ entity Bookmark {
 
     invariant BookmarkedTaskIsNotDone {
         task.status != done
+    }
+}
+
+-- EpicOrchestration is the orchestrator switch on an epic
+-- (orchestrators.allium, O3): an epic is orchestrated while it has one. Off
+-- by default, allowed on any epic at any depth, feed epics included. It is
+-- switched on, changed and off by orchestrators.allium's
+-- SwitchOrchestratorOn, ChangeOrchestratorSettings and
+-- SwitchOrchestratorOff, and switched off by a re-parent under an
+-- orchestrated epic and by the epic's delete (epics.allium:
+-- ReparentingKeepsOneOrchestratorOnAPath, DeleteEpic).
+entity EpicOrchestration {
+    epic: Epic
+    start_rule: StartRule
+    max_parallel: Integer?   -- null follows config.orchestrator_max_parallel
+    switched_on_at: Timestamp
+
+    limit: if max_parallel != null: max_parallel else: config.orchestrator_max_parallel
+}
+
+-- ReadyMark: a backlog task is ready while it has one (orchestrators.allium,
+-- O5). It states intent and locks nothing: only an orchestrator reads it.
+-- Set and cleared by tasks.allium's MarkTaskReady and ClearReadyMark; it
+-- ends when the task leaves backlog (LeavingBacklogDropsTheReadyMark) and
+-- goes with the task's row. A snapshot does not carry it
+-- (spacetime-seed.allium).
+entity ReadyMark {
+    task: Task
+    marked_by: ReadyMarker
+    agent_name: String?      -- the marking agent's name when marked_by = agent
+    marked_at: Timestamp
+
+    invariant OnlyBacklogTasksAreReady {
+        task.status = backlog
     }
 }
 
@@ -1275,6 +1316,9 @@ entity ArchivedTask {
 
 config {
     tick_interval: Duration = 2.seconds
+    -- An orchestrated epic's limit on task agents at once
+    -- (orchestrators.allium, O7). An epic's own max_parallel replaces it.
+    orchestrator_max_parallel: Integer = 3
     gg_chord_timeout: Duration = 150.milliseconds   -- window for completing the vim-style `gg` chord (see board-layout.allium, "Board Columns", row navigation)
     -- How long a status-bar message stays up (src/tui/mod.rs::STATUS_MESSAGE_TTL).
     -- No rule reads it.
@@ -1610,6 +1654,27 @@ invariant UnseenTaskIsUniquePerSubscriberAndTask {
     for a in UnseenTasks:
         for b in UnseenTasks:
             a != b implies (a.subscriber != b.subscriber or a.task != b.task)
+}
+
+-- One switch per epic.
+invariant OneOrchestrationPerEpic {
+    for a in EpicOrchestrations:
+        for b in EpicOrchestrations:
+            a.epic = b.epic implies a = b
+}
+
+-- One orchestrator on any path from a root epic to a leaf
+-- (orchestrators.allium, O4).
+invariant OneOrchestratorOnAPath {
+    for a in EpicOrchestrations:
+        for b in EpicOrchestrations:
+            a != b implies (a.epic not in b.epic.subtree_epics)
+}
+
+invariant ReadyMarkIsUniquePerTask {
+    for a in ReadyMarks:
+        for b in ReadyMarks:
+            a.task = b.task implies a = b
 }
 
 invariant BookmarkIsUniquePerSubscriberAndTask {

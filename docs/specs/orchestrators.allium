@@ -23,11 +23,17 @@
 --               from core.allium; DispatchRequested and DispatchRequest from
 --               store-split.allium.
 --
--- STATUS: SPECIFIED AHEAD OF ITS CODE. This file states behaviour that is
--- decided and not yet built. Every other spec still describes the system as
--- it runs. Each build step moves the facts it implements into the specs that
--- own them (the list is under "What the build changes elsewhere", at the
--- end) in the same change as its code.
+-- STATUS: MOSTLY SPECIFIED AHEAD OF ITS CODE. Built (step 1): the switch and
+-- the ready mark in the store. The entities EpicOrchestration and ReadyMark
+-- and their invariants are in core.allium; the ready mark's rules are in
+-- tasks.allium; the re-parent and delete effects on the switch are in
+-- epics.allium; SwitchOrchestratorOn and ChangeOrchestratorSettings below
+-- are built, and SwitchOrchestratorOff is built for the switch itself (its
+-- Orchestrator rows and WaitingItems wait for their steps). Everything else
+-- here is decided and not yet built, and every other spec still describes
+-- the system as it runs. Each build step moves the facts it implements into
+-- the specs that own them (the list is under "What the build changes
+-- elsewhere", at the end) in the same change as its code.
 --
 -- Decisions taken with the user, recorded so they are not re-litigated:
 --   - O1, what orchestration is. The orchestrator starts tasks, watches the
@@ -93,12 +99,6 @@ use "./store-split.allium" as split
 -- The trouble a log entry of kind acted_on_trouble is about.
 enum TroubleKind { stale | crashed | start_failed | conflict }
 
--- Which backlog tasks an orchestrator may start (O6).
-enum StartRule { marked_only | everything }
-
--- Who set a ready mark.
-enum ReadyMarker { operator | agent }
-
 enum LogEntryKind {
     started_task     -- it asked for a task to be started
     answered         -- it answered a task agent's question
@@ -113,8 +113,6 @@ enum LogEntryKind {
 ------------------------------------------------------------
 
 config {
-    -- O7. An epic's own limit, when set, replaces it.
-    orchestrator_max_parallel: Integer = 3
     -- How long the orchestrator waits for a stale agent to answer its ping
     -- before it passes the task to the operator.
     orchestrator_ping_wait: Duration = 10.minutes
@@ -129,29 +127,14 @@ config {
 -- Entities
 ------------------------------------------------------------
 
--- The switch (O3). An epic is orchestrated while it has one of these.
-entity EpicOrchestration {
-    epic: core/Epic
-    start_rule: StartRule
-    max_parallel: Integer?   -- null follows config.orchestrator_max_parallel
-    switched_on_at: Timestamp
-
-    limit: if max_parallel != null: max_parallel else: config.orchestrator_max_parallel
-}
-
--- The ready mark (O5). A backlog task is ready while it has one.
-entity ReadyMark {
-    task: core/Task
-    marked_by: ReadyMarker
-    agent_name: String?      -- the marking agent's name when marked_by = agent
-    marked_at: Timestamp
-}
+-- The switch (O3) is core/EpicOrchestration and the ready mark (O5) is
+-- core/ReadyMark.
 
 -- An epic's orchestrator on one machine (O11). The row keeps the name and
 -- whatever is needed to resume the same conversation; the session is live
 -- while it holds a window.
 entity Orchestrator {
-    orchestration: EpicOrchestration
+    orchestration: core/EpicOrchestration
     host: core/Host
     name: String             -- an agent name, from the pool task agents use
     tmux_window: core/TmuxWindow?
@@ -201,7 +184,7 @@ entity WaitingItem {
 -- Derived facts
 ------------------------------------------------------------
 
--- orchestration_of(epic) is the EpicOrchestration of epic, or null.
+-- orchestration_of(epic) is the core/EpicOrchestration of epic, or null.
 -- covering(epic) is the orchestration of epic or of its nearest ancestor that
 -- has one, or null. covering(task) is covering(task.epic), null for a task
 -- with no epic. By OneOrchestratorOnAPath there is never a choice.
@@ -210,7 +193,7 @@ entity WaitingItem {
 -- running_here(epic, host): the tasks in the epic's subtree with status =
 -- running whose current agent is live on this host. A task in review, and a
 -- running task whose agent is detached (no window), are not among them (O7).
--- counts_as_ready(task): the task has a ReadyMark, or covering(task) has
+-- counts_as_ready(task): the task has a core/ReadyMark, or covering(task) has
 -- start_rule = everything.
 -- wanted(orchestrator): its epic has open work.
 -- already_retried(task, trouble): the log holds an acted_on_trouble entry for
@@ -243,7 +226,7 @@ rule SwitchOrchestratorOn {
     requires: covering(epic) = null
     requires: max_parallel = null or max_parallel >= 1
 
-    ensures: EpicOrchestration.created(
+    ensures: core/EpicOrchestration.created(
         epic: epic,
         start_rule: if start_rule != null: start_rule else: marked_only,
         max_parallel: max_parallel,
@@ -295,27 +278,12 @@ rule SwitchOrchestratorOff {
         -- window of the orchestrator it ran when it sees the row go.
 }
 
-rule ReparentingKeepsOneOrchestratorOnAPath {
-    when: EpicReparented(epic, new_parent)
-
-    -- The moved epic lands under an orchestrated epic: the orchestrator
-    -- above takes its subtree over, and every switch inside it goes off.
-    ensures:
-        if new_parent != null and covering(new_parent) != null:
-            for e in epic.subtree_epics + {epic}:
-                if orchestration_of(e) != null:
-                    OrchestratorSwitchedOff(e)
-
-    @guidance
-        -- In the same write as the move. The reply to the move says which
-        -- orchestrators were switched off.
-}
-
-rule DeletingAnEpicRemovesItsOrchestration {
+-- The switch's re-parent and delete effects are epics.allium's
+-- (ReparentingKeepsOneOrchestratorOnAPath, and DeleteEpic's switch-off).
+-- What goes with the epic beyond its switch:
+rule DeletingAnEpicRemovesItsOrchestratorMemory {
     when: EpicDeleted(epic)
 
-    ensures:
-        if orchestration_of(epic) != null: OrchestratorSwitchedOff(epic)
     ensures:
         for entry in OrchestratorLogEntries where epic = epic: not exists entry
     ensures:
@@ -324,44 +292,8 @@ rule DeletingAnEpicRemovesItsOrchestration {
         for item in WaitingItems where epic = epic: not exists item
 }
 
--- == The ready mark ==
-
-rule MarkTaskReady {
-    when: TaskMarkedReady(task, marked_by, agent_name?)
-
-    requires: task.status = backlog
-
-    ensures:
-        if not exists ReadyMark{task: task}:
-            ReadyMark.created(
-                task: task,
-                marked_by: marked_by,
-                agent_name: agent_name,
-                marked_at: now
-            )
-
-    @guidance
-        -- Marking a task that is already ready changes nothing and is not an
-        -- error; the first marker stays recorded. A task outside backlog is
-        -- refused with "only a backlog task can be marked ready". A task may
-        -- be marked whether or not an orchestrator covers it: the mark waits.
-}
-
-rule ClearReadyMark {
-    when: TaskReadyCleared(task)
-
-    ensures: not exists ReadyMark{task: task}
-}
-
-rule LeavingBacklogDropsTheReadyMark {
-    when: TaskLeftBacklog(task)
-
-    -- Every status write that takes a task out of backlog, the start's claim
-    -- and a hand move to review or done alike. The mark said "start this".
-    -- Once the task has left backlog it has been used: a task that comes back
-    -- is not ready until it is marked again.
-    ensures: not exists ReadyMark{task: task}
-}
+-- The ready mark's rules are tasks.allium's (MarkTaskReady, ClearReadyMark,
+-- LeavingBacklogDropsTheReadyMark).
 
 -- == The session ==
 
@@ -370,7 +302,7 @@ rule BoardRunsItsOrchestrators {
 
     -- Each running board, on its tick, for every orchestrated epic.
     ensures:
-        for orchestration in EpicOrchestrations:
+        for orchestration in core/EpicOrchestrations:
             if has_open_work(orchestration.epic)
                and not exists Orchestrator{orchestration: orchestration, host: host}:
                 Orchestrator.created(
@@ -842,16 +774,8 @@ rule LongWaitInReview {
 -- Invariants
 ------------------------------------------------------------
 
--- O4.
-invariant OneOrchestratorOnAPath {
-    for a in EpicOrchestrations: for b in EpicOrchestrations:
-        a != b implies (a.epic not in b.epic.subtree_epics)
-}
-
-invariant OneOrchestrationPerEpic {
-    for a in EpicOrchestrations: for b in EpicOrchestrations:
-        a.epic = b.epic implies a = b
-}
+-- O4 and the one switch per epic are core.allium's invariants
+-- (OneOrchestratorOnAPath, OneOrchestrationPerEpic).
 
 -- O11. One per epic and machine.
 invariant OneOrchestratorPerEpicAndHost {
@@ -865,12 +789,6 @@ invariant OrchestratorNamesAreUnique {
     for o in Orchestrators:
         not core/Agents.any(a => a.name = o.name)
         and not Orchestrators.any(p => p != o and p.name = o.name)
-}
-
--- O5. Only a backlog task is ready.
-invariant OnlyBacklogTasksAreReady {
-    for m in ReadyMarks:
-        m.task.status = backlog
 }
 
 ------------------------------------------------------------
