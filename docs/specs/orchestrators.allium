@@ -215,8 +215,10 @@ entity WaitingItem {
 -- wanted(orchestrator): its epic has open work.
 -- already_retried(task, trouble): the log holds an acted_on_trouble entry for
 -- this task and this trouble that is newer than every resolved WaitingItem of
--- the task. So one retry is spent per trouble, and it comes back once the
--- operator has dealt with the item the second failure raised (O10).
+-- the task, and since which the trouble has not ended by itself (the agent
+-- worked again, the start went through, the wrap-up landed). So one retry is
+-- spent per bout of trouble. It comes back when the retry worked, and when
+-- the operator has dealt with the item a second failure raised (O10).
 -- waits_on_someone_else(task): the task reviews another author's PR and the
 -- operator has given their verdict (core.allium, "Derived review sections":
 -- changes requested by me, approved by me).
@@ -441,6 +443,31 @@ rule OrchestratorThatKeepsDyingWaitsForTheOperator {
     @guidance
         -- It then shows as down. The operator starts it again with the
         -- orchestrator key (OrchestratorKey), which clears restarted_once.
+}
+
+rule OperatorRestartsADownOrchestrator {
+    when: OrchestratorRestartAsked(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: not orchestrator.is_live
+
+    -- The orchestrator key on a down orchestrator (OrchestratorKey). The
+    -- operator's ask is a fresh budget.
+    ensures: orchestrator.restarted_once = false
+    ensures: OrchestratorSessionWanted(orchestrator)
+}
+
+rule NotifyEpicFinished {
+    when: EpicFinishedNotified(epic)
+
+    ensures:
+        if notifications_enabled():
+            DesktopNotification(epic: epic, task: null, about: epic_finished)
+
+    @guidance
+        -- O16. Once per finish: a machine whose orchestrator ended on a done
+        -- epic raises it, and an epic that leaves done and finishes again
+        -- notifies again.
 }
 
 rule OrchestratorTurnClearsTheRestartFlag {
@@ -1122,6 +1149,8 @@ surface OrchestratorInEpicView {
         TaskReadyCleared(task)
         -- The resolve key on an open item.
         WaitingItemResolved(item)
+        -- The orchestrator key on a down orchestrator.
+        OrchestratorRestartAsked(orchestrator)
 
     @guarantee HeaderShowsTheOrchestrator
         -- In an orchestrated epic's view, and in the view of any epic below
@@ -1199,3 +1228,7 @@ open question "The limit counts running tasks per machine, since each machine ha
 open question "The knowledge base has weak feedback, almost no epic-scoped entries and nothing that expires an entry. With an orchestrator that owns its epic's notes and reads its learnings, should it also curate the epic's learnings, and how is a note promoted to a learning when an epic ends?"
 
 open question "Should a managed epic (Bot PRs) come with its orchestrator switched on when it is provisioned, or does the operator switch it on once by hand?"
+
+open question "The operator named detaching as something the orchestrator may also do: an agent that only waits, for a PR review say, should take no slot. Does the orchestrator get a detach action, and when may it use it? O2 gives it none today. And a detached task that is resumed takes a slot again without passing the limit: is that right?"
+
+open question "A task status typed or stored as ready already reads as backlog (core.allium, TaskStatus). A ready argument on the task tools sits beside that old word. Should the argument and the board's marker use another word?"
