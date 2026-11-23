@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
 use crate::tui::commands::{BudgetCommand, KeepAwakeCommand, LearningCommand, UsageCommand};
+use crate::tui::messages::KeyEditorMessage;
+use crate::tui::Message;
 
 /// Full `Command` match dispatch — one entry per variant, in `Command` enum order.
 ///
@@ -101,7 +103,25 @@ async fn dispatch_settings(
         PersistStringSetting { key, value } => {
             rt.exec_persist_string_setting(app, &key, &value).await
         }
+        ReadKeyOverrides { file } => read_key_overrides(app, &file),
+        SaveKeyOverrides { file, changes } => {
+            use crate::keybindings::KeySetError;
+            let result = crate::keybindings::set_key_overrides(&file, &changes)
+                .map(|outcome| outcome.written)
+                .map_err(|e| match e {
+                    KeySetError::Refused(problems) => problems,
+                    KeySetError::Write(message) => vec![message],
+                });
+            app.update(Message::KeyEditor(KeyEditorMessage::Saved(result)));
+            read_key_overrides(app, &file);
+        }
     }
+}
+
+/// Hand the key editor the override file as it is now.
+fn read_key_overrides(app: &mut super::App, file: &std::path::Path) {
+    let read = crate::keybindings::read_override_entries(file);
+    app.update(Message::KeyEditor(KeyEditorMessage::FileRead(read)));
 }
 
 fn dispatch_split(

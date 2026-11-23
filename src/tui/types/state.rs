@@ -290,6 +290,9 @@ pub struct InputState {
     pub caret: usize,
     pub task_draft: Option<TaskDraft>,
     pub epic_draft: Option<EpicDraft>,
+    /// The key editor; set while `mode` is `KeyEditor`, `KeyEditorSearch`,
+    /// `KeyCapture` or `ConfirmDiscardKeyEdits`.
+    pub key_editor: Option<Box<crate::tui::key_editor::KeyEditor>>,
     pub repo_cursor: usize,
     /// Tracks epic_id during quick-dispatch repo selection in epic view.
     pub pending_epic_id: Option<EpicId>,
@@ -315,6 +318,7 @@ impl Default for InputState {
             caret: 0,
             task_draft: None,
             epic_draft: None,
+            key_editor: None,
             repo_cursor: 0,
             pending_epic_id: None,
             copy_flow: false,

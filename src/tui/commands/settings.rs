@@ -33,4 +33,13 @@ pub enum SettingsCommand {
     PersistSetting { key: String, value: bool },
     /// Persist a string setting under `key`.
     PersistStringSetting { key: String, value: String },
+    /// Read the key override file for the key editor
+    /// (`keybindings.allium: OpenKeyEditor`).
+    ReadKeyOverrides { file: std::path::PathBuf },
+    /// Write the key editor's staged edits to the override file, as one
+    /// keybinding_set call would (`SaveKeyEdits`), then read it again.
+    SaveKeyOverrides {
+        file: std::path::PathBuf,
+        changes: Vec<crate::keybindings::KeyChange>,
+    },
 }

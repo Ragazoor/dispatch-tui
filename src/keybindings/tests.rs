@@ -157,7 +157,7 @@ fn namespace_names_are_unique_and_round_trip() {
 #[test]
 fn family_names_select_every_namespace_of_the_family() {
     let confirm = namespaces_matching("board.confirm").unwrap();
-    assert_eq!(confirm.len(), 14);
+    assert_eq!(confirm.len(), 15);
     assert!(confirm
         .iter()
         .all(|n| n.name().starts_with("board.confirm.")));
@@ -470,7 +470,7 @@ fn confirm_dialogs_with_a_yes_row_catch_every_other_key_as_no() {
         assert!(yes.keys.contains(&"Y"), "{}: y and Y are one row", n.name());
         assert!(yes.action.ends_with("_yes"), "{}: {}", n.name(), yes.action);
     }
-    assert_eq!(checked, 11, "eleven confirm dialogs answer y/Y");
+    assert_eq!(checked, 12, "twelve confirm dialogs answer y/Y");
 }
 
 #[test]
@@ -704,9 +704,9 @@ fn pane_modified_keys_have_rows() {
 fn the_help_overlay_title_names_its_own_keys() {
     assert_eq!(
         help_overlay_title(KEY_BINDINGS),
-        " Help \u{2014} j/Down/k/Up scroll, ? or Esc close "
+        " Help \u{2014} j/Down/k/Up scroll, e edit keys, ? or Esc close "
     );
-    static REBOUND: [KeyBinding; 3] = [
+    static REBOUND: [KeyBinding; 4] = [
         row(
             KeyNamespace::BoardHelp,
             &["x"],
@@ -725,6 +725,14 @@ fn the_help_overlay_title_names_its_own_keys() {
         ),
         row(
             KeyNamespace::BoardHelp,
+            &["E"],
+            None,
+            "open_key_editor",
+            "d",
+            None,
+        ),
+        row(
+            KeyNamespace::BoardHelp,
             &["w", "Q"],
             None,
             "close_help",
@@ -734,7 +742,7 @@ fn the_help_overlay_title_names_its_own_keys() {
     ];
     assert_eq!(
         help_overlay_title(&REBOUND),
-        " Help \u{2014} x/y scroll, w or Q close "
+        " Help \u{2014} x/y scroll, E edit keys, w or Q close "
     );
 }
 

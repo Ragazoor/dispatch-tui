@@ -82,7 +82,7 @@ fn every_text_namespace_binds_no_typed_key() {
         .into_iter()
         .filter(|n| namespace_takes_text(*n))
         .collect();
-    assert_eq!(text.len(), 6, "the spec names six text namespaces");
+    assert_eq!(text.len(), 8, "the spec names eight text namespaces");
     for b in KEY_BINDINGS
         .iter()
         .filter(|b| namespace_takes_text(b.namespace))

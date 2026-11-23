@@ -535,6 +535,10 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),
+        N::BoardKeyEditor => one(key_editor_app(InputMode::KeyEditor)),
+        N::BoardKeyEditorSearch => one(key_editor_app(InputMode::KeyEditorSearch)),
+        N::BoardKeyCapture => one(key_editor_app(InputMode::KeyCapture)),
+        N::BoardConfirmDiscardKeyEdits => one(key_editor_app(InputMode::ConfirmDiscardKeyEdits)),
         N::AgentTreeTree
         | N::AgentTreeCommits
         | N::AgentTreeAgents
@@ -543,6 +547,37 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
             panic!("{} is not received by the board", ns.name())
         }
     }
+}
+
+/// The key editor in `mode`, its cursor on a row in the middle of the
+/// table with four staged keys, the second picked: every motion, removal,
+/// restore and save has something to act on.
+pub(super) fn key_editor_app(mode: InputMode) -> App {
+    let mut app = make_app();
+    app.key_override_file = Some(std::path::PathBuf::from("/nonexistent/keybindings.json"));
+    let mut editor = crate::tui::key_editor::KeyEditor::default();
+    let row = KEY_BINDINGS
+        .iter()
+        .position(|b| b.namespace == KeyNamespace::BoardText && b.action == "text_cursor_word_left")
+        .unwrap();
+    editor.cursor = editor
+        .visible(KEY_BINDINGS)
+        .iter()
+        .position(|&r| r == row)
+        .unwrap();
+    editor.stage(
+        row,
+        ["Ctrl+Left", "Alt+Left", "Alt+B", "F5"]
+            .map(String::from)
+            .to_vec(),
+    );
+    editor.picked = 1;
+    if mode == InputMode::KeyCapture {
+        editor.capture = Some(crate::tui::key_editor::CaptureKind::AddKey);
+    }
+    app.input.key_editor = Some(Box::new(editor));
+    app.input.mode = mode;
+    app
 }
 
 fn board_namespaces() -> Vec<KeyNamespace> {
@@ -651,6 +686,13 @@ fn effect_of(app: &mut App, cmds: &[Command]) -> String {
         app.input.repo_cursor,
         app.input.task_draft,
         app.interaction.help_scroll,
+    );
+    let state = format!(
+        "{state}\n{:?}",
+        app.input
+            .key_editor
+            .as_ref()
+            .map(|e| (e.cursor, e.picked, &e.staged, &e.query, e.capture))
     );
     let table = app.key_table;
     app.set_key_table(KEY_BINDINGS);
@@ -918,6 +960,9 @@ fn a_key_with_no_row_runs_nothing_and_records_nothing() {
         N::BoardPickerRepoPath,
         N::BoardPickerBaseBranch,
         N::BoardPickerQuickDispatch,
+        N::BoardKeyEditorSearch,
+        // CaptureTakesThePress: a key with no row there is the key captured.
+        N::BoardKeyCapture,
     ];
     let mut checked = 0;
     for ns in board_namespaces() {
@@ -1953,7 +1998,11 @@ fn a_modified_press_is_not_answered_by_a_catch_all() {
 fn a_modified_bare_key_with_no_row_does_nothing() {
     let mut seen = std::collections::HashSet::new();
     let mut failures = Vec::new();
-    for ns in board_namespaces() {
+    // CaptureTakesThePress: there a modified press is the key captured.
+    for ns in board_namespaces()
+        .into_iter()
+        .filter(|ns| *ns != KeyNamespace::BoardKeyCapture)
+    {
         for binding in default_bindings_in(ns) {
             for key in binding.keys {
                 if *key == ANY_OTHER_KEY || *key == "gg" || key.contains('+') {
@@ -2047,8 +2096,9 @@ fn text_editing_keys_edit_the_field_and_record_nothing() {
 /// UnrecordedRowsRecordNothing, for every records_usage false row of every
 /// board namespace: each key of the row, pressed with "ab cd ef" in the field
 /// and the caret between `c` and `d`, edits the text or moves the caret as
-/// the row's action says, and records nothing. board.search and
-/// board.filter_search have no caret; their Backspace drops the last char.
+/// the row's action says, and records nothing. board.search,
+/// board.filter_search and board.key_editor_search have no caret; their
+/// Backspace drops the last char.
 #[test]
 fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
     use KeyNamespace as N;
@@ -2072,6 +2122,13 @@ fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
                             let cmds = press(&mut app, key);
                             (app.filter_overlay.epic_query.clone(), None, cmds)
                         }
+                        N::BoardKeyEditorSearch => {
+                            let query =
+                                |app: &App| app.input.key_editor.as_ref().unwrap().query.clone();
+                            app.input.key_editor.as_mut().unwrap().query = SEED.to_string();
+                            let cmds = press(&mut app, key);
+                            (query(&app), None, cmds)
+                        }
                         _ => {
                             app.input.set_buffer(SEED.to_string());
                             app.input.caret = 4;
@@ -2080,9 +2137,10 @@ fn every_unrecorded_row_takes_its_effect_and_records_nothing() {
                         }
                     };
                     let want: (&str, Option<usize>) = match (ns, binding.action) {
-                        (N::BoardSearch | N::BoardFilterSearch, "text_backspace") => {
-                            ("ab cd e", None)
-                        }
+                        (
+                            N::BoardSearch | N::BoardFilterSearch | N::BoardKeyEditorSearch,
+                            "text_backspace",
+                        ) => ("ab cd e", None),
                         (_, "text_backspace") => ("ab d ef", Some(3)),
                         (_, "text_delete_forward") => ("ab c ef", Some(4)),
                         (_, "text_cursor_left") => (SEED, Some(3)),

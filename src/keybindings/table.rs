@@ -495,6 +495,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "scroll_help_up",
         "Scroll the overlay up",
     ),
+    r(
+        N::BoardHelp,
+        &["e"],
+        "open_key_editor",
+        "Open the key editor, where you change the keys of any row",
+    ),
     // ---- board.error ----
     r(
         N::BoardError,
@@ -1364,6 +1370,118 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &[ANY_OTHER_KEY],
         "confirm_delete_work_package_no",
         "Keep the work package",
+    ),
+    // ---- board.key_editor ----
+    r(
+        N::BoardKeyEditor,
+        &["j", "Down"],
+        "key_editor_row_down",
+        "Move to the next row",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["k", "Up"],
+        "key_editor_row_up",
+        "Move to the previous row",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["l", "Right"],
+        "key_editor_next_key",
+        "Pick the row's next key",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["h", "Left"],
+        "key_editor_previous_key",
+        "Pick the row's previous key",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["a"],
+        "key_editor_add_key",
+        "Add a key to the row: the next key you press",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["c"],
+        "key_editor_add_chord",
+        "Add a chord to the row: the next two characters you press",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["Enter"],
+        "key_editor_replace_key",
+        "Replace the picked key with the next key you press",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["x"],
+        "key_editor_remove_key",
+        "Remove the picked key; a row keeps at least one",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["r"],
+        "key_editor_restore_default",
+        "Give the row its default keys back",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["w"],
+        "key_editor_save",
+        "Save the staged changes; they apply when the board next starts",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["/"],
+        "key_editor_search",
+        "Search the rows by namespace, action, description or key",
+    ),
+    r(
+        N::BoardKeyEditor,
+        &["Esc", "q"],
+        "key_editor_close",
+        "Close the key editor and go back to the help overlay",
+    ),
+    // ---- board.key_editor_search ----
+    r(
+        N::BoardKeyEditorSearch,
+        &["Esc"],
+        "key_editor_search_cancel",
+        "Leave the search and clear it",
+    ),
+    r(
+        N::BoardKeyEditorSearch,
+        &["Enter"],
+        "key_editor_search_commit",
+        "Leave the search and keep it",
+    ),
+    unrecorded(
+        N::BoardKeyEditorSearch,
+        &["Backspace"],
+        "text_backspace",
+        "Delete the last character of the search",
+    ),
+    // ---- board.key_capture ----
+    r(
+        N::BoardKeyCapture,
+        &["Esc"],
+        "cancel_key_capture",
+        "Stop waiting for a key and change nothing; any other key is the key captured",
+    ),
+    // ---- board.confirm.discard_key_edits ----
+    r(
+        N::BoardConfirmDiscardKeyEdits,
+        &["y", "Y"],
+        "confirm_discard_key_edits_yes",
+        "Drop the staged key changes and close the key editor",
+    ),
+    r(
+        N::BoardConfirmDiscardKeyEdits,
+        &[ANY_OTHER_KEY],
+        "confirm_discard_key_edits_no",
+        "Keep the staged key changes and stay in the key editor",
     ),
     row(
         N::AgentTreeTree,

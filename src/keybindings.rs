@@ -112,6 +112,10 @@ pub enum KeyNamespace {
     BoardConfirmTrustRepo,
     BoardConfirmTrustRepoQuickDispatch,
     BoardConfirmDeleteWorkPackage,
+    BoardKeyEditor,
+    BoardKeyEditorSearch,
+    BoardKeyCapture,
+    BoardConfirmDiscardKeyEdits,
     AgentTreeTree,
     AgentTreeCommits,
     AgentTreeAgents,
@@ -122,7 +126,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `keybinding_search` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 37] = [
+    pub const ALL: [KeyNamespace; 41] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -155,6 +159,10 @@ impl KeyNamespace {
         Self::BoardConfirmTrustRepo,
         Self::BoardConfirmTrustRepoQuickDispatch,
         Self::BoardConfirmDeleteWorkPackage,
+        Self::BoardKeyEditor,
+        Self::BoardKeyEditorSearch,
+        Self::BoardKeyCapture,
+        Self::BoardConfirmDiscardKeyEdits,
         Self::AgentTreeTree,
         Self::AgentTreeCommits,
         Self::AgentTreeAgents,
@@ -197,6 +205,10 @@ impl KeyNamespace {
             Self::BoardConfirmTrustRepo => "board.confirm.trust_repo",
             Self::BoardConfirmTrustRepoQuickDispatch => "board.confirm.trust_repo_quick_dispatch",
             Self::BoardConfirmDeleteWorkPackage => "board.confirm.delete_work_package",
+            Self::BoardKeyEditor => "board.key_editor",
+            Self::BoardKeyEditorSearch => "board.key_editor_search",
+            Self::BoardKeyCapture => "board.key_capture",
+            Self::BoardConfirmDiscardKeyEdits => "board.confirm.discard_key_edits",
             Self::AgentTreeTree => "agent_tree.tree",
             Self::AgentTreeCommits => "agent_tree.commits",
             Self::AgentTreeAgents => "agent_tree.agents",
@@ -533,9 +545,10 @@ impl KeyBinding {
 mod overrides;
 mod table;
 pub use overrides::{
-    check_overrides, is_key_name, load_key_table, read_override_entries, set_key_overrides,
-    tmux_key_name, KeyChange, KeyLoadError, KeyOverrideProblem, KeySetError, KeySetOutcome,
-    KeyTableLoad, KeyTableReader, KEY_OVERRIDE_FILE_NAME, NAMED_KEYS,
+    check_overrides, is_key_name, load_key_table, plan_key_overrides, read_override_entries,
+    set_key_overrides, tmux_key_name, unreadable_file_refusal, ChangeProblem, KeyChange,
+    KeyLoadError, KeyOverrideProblem, KeySetError, KeySetOutcome, KeyTableLoad, KeyTableReader,
+    KEY_OVERRIDE_FILE_NAME, NAMED_KEYS, TMUX_PREFIX,
 };
 pub use table::KEY_BINDINGS;
 
@@ -632,7 +645,7 @@ pub fn resolve_chord(
 }
 
 /// The `?` overlay's border title, built from `board.help`'s
-/// `scroll_help_down`, `scroll_help_up` and `close_help` rows so rebinding
+/// `scroll_help_down`, `scroll_help_up`, `open_key_editor` and `close_help` rows so rebinding
 /// any of them changes it (`OverlayTitleNamesItsOwnKeys` in
 /// `docs/specs/keybindings.allium`).
 pub fn help_overlay_title(table: &[KeyBinding]) -> String {
@@ -649,8 +662,9 @@ pub fn help_overlay_title(table: &[KeyBinding]) -> String {
             .join(sep)
     };
     format!(
-        " Help \u{2014} {} scroll, {} close ",
+        " Help \u{2014} {} scroll, {} edit keys, {} close ",
         keys(&["scroll_help_down", "scroll_help_up"], "/"),
+        keys(&["open_key_editor"], " or "),
         keys(&["close_help"], " or ")
     )
 }

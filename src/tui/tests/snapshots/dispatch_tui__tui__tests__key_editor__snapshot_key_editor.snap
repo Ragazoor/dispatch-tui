@@ -1,0 +1,34 @@
+---
+source: src/tui/tests/key_editor.rs
+expression: buffer_text(&buf)
+---
+                                                                                              🔕  [N]
+     ▸ BACKLOG 2 [ ]            ◦ RUNNING 1             ◦ REVIEW 0                 ◦ DONE 1         
+─────╔ Keys — changes apply when the board next starts ═══════════════════════════════════════╗─────
+ ╭───║== board.normal ==                                                                      ║───╮ 
+ │  ▎║  h, Left navigate_column_left: Move to the previous column                             ║   │ 
+ │   ║  l, Right navigate_column_right: Move to the next column                               ║   │ 
+ ╰───║  j, Down navigate_row_down: Move to the next card in the column                        ║───╯ 
+ ╭───║  k, Up navigate_row_up: Move to the previous card in the column                        ║     
+ │  ▎║  [, gg navigate_row_first: Jump to the first row of the column                         ║     
+ │   ║▸ ], G navigate_row_last: Jump to the last row of the column                            ║     
+ ╰───║      editing: ], O, j                                                                  ║     
+     ║      after restart: ], O staged: ], O, j                                               ║     
+     ║      "j" would be a key of both board.normal navigate_row_down and board.normal        ║     
+     ║      navigate_row_last, which can apply at once; pick a key the other row does not list║     
+     ║  Esc clear_search (with a search active): Clear the active search query                ║     
+     ║  q exit_epic (inside an epic or work package view): Leave the epic or work package     ║     
+     ║    view, one level                                                                     ║     
+     ║  Esc exit_epic (inside an epic or work package view, no search active): Leave the      ║     
+     ║    epic or work package view, one level                                                ║     
+     ║  Q exit_all_epics (inside an epic or work package view): Leave every epic and work     ║     
+     ║    package view and return to the board                                                ║     
+     ║  q quit (on the top-level board): Quit dispatch                                        ║     
+     ║  Esc clear_selection (on the top-level board, no search active, with cards selected    ║     
+     ║    or the cursor on a select-all row): Clear the current selection                     ║     
+     ║1 staged, 1 problems [j/k] move [h/l] pick [a] add [c] chord [Enter] replace [x] remove ║     
+     ║[r] default [w] save [/] search [Esc] close                                             ║     
+     ╚════════════════════════════════════════════════════════════════════════════════════════╝     
+                         │                      │                         │                         
+                         │                      │                         │                         
+Key editor: its keys are listed at the foot of the editor

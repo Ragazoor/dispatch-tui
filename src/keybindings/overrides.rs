@@ -61,7 +61,7 @@ const TERMINAL_ALIASES: [(&str, &str); 3] =
 const MODIFIERS: [&str; 3] = ["Ctrl+Alt+", "Ctrl+", "Alt+"];
 
 /// The tmux prefix a tmux.global key starts with.
-const TMUX_PREFIX: &str = "Prefix+";
+pub const TMUX_PREFIX: &str = "Prefix+";
 
 fn is_named_key(k: &str) -> bool {
     NAMED_KEYS.contains(&k)
@@ -133,7 +133,7 @@ pub fn is_typed_key(k: &str) -> bool {
     is_character(k) || k == "Space"
 }
 
-/// The six namespaces that take typed text (`namespace_takes_text`).
+/// The eight namespaces that take typed text (`namespace_takes_text`).
 pub fn namespace_takes_text(ns: KeyNamespace) -> bool {
     matches!(
         ns,
@@ -143,6 +143,8 @@ pub fn namespace_takes_text(ns: KeyNamespace) -> bool {
             | KeyNamespace::BoardPickerRepoPath
             | KeyNamespace::BoardPickerBaseBranch
             | KeyNamespace::BoardPickerQuickDispatch
+            | KeyNamespace::BoardKeyEditorSearch
+            | KeyNamespace::BoardKeyCapture
     )
 }
 
@@ -1022,7 +1024,10 @@ fn clashes_in(rows: &[RowKeys<'_>]) -> Vec<Clash> {
 }
 
 mod set;
-pub use set::{set_key_overrides, KeyChange, KeySetError, KeySetOutcome};
+pub use set::{
+    plan_key_overrides, set_key_overrides, unreadable_file_refusal, ChangeProblem, KeyChange,
+    KeySetError, KeySetOutcome,
+};
 
 #[cfg(test)]
 mod tests;

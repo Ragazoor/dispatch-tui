@@ -18,6 +18,11 @@ it. There is no key list in this document to drift out of date:
 - **Changing keys from an agent**: call `keybinding_set`. It writes the user's `keybindings.json` in
   the data directory with the loader's own checks, refuses a change the board would refuse, and an
   empty key list restores a row's default. The running board keeps its keys until it restarts.
+- **From the board**: press `?`, then `e`, to open the key editor. It lists every row with its
+  current, default and pending keys. `a` adds a key, `c` a chord, `Enter` replaces the picked
+  key, `x` removes it and `r` restores the row's defaults; each takes the next key you press
+  (`Esc` cancels). Edits are staged and checked as you make them, a clash shows under its row,
+  and `w` saves them all through `keybinding_set`'s checks. They apply when the board next starts.
 - **By hand**: edit the same file. See [Changing keys](#changing-keys).
 
 A Ctrl or Alt press matches only a row that lists the modified form (`Ctrl+D`), never
@@ -28,7 +33,7 @@ the bare key's row. See `docs/specs/keybindings.allium`.
 Every key in the table is a default. To change a key, give its row new keys in
 `keybindings.json` in the data directory (`~/.local/share/dispatch/keybindings.json`
 by default; `--data-dir` moves it; `src/keybindings/overrides.rs::KEY_OVERRIDE_FILE_NAME`).
-Dispatch never creates the file itself; only `keybinding_set` writes it. With no file,
+Dispatch never creates the file itself; only `keybinding_set` and the board's key editor write it. With no file,
 every row keeps its default keys.
 
 The file is a JSON list with one entry per row:

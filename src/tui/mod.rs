@@ -2,6 +2,7 @@ mod columns;
 pub mod commands;
 mod dispatcher;
 pub mod input;
+pub(crate) mod key_editor;
 pub mod messages;
 mod search;
 mod selection;
@@ -334,6 +335,9 @@ pub struct App {
     /// ([`App::install_key_table`]). [`crate::keybindings::KEY_BINDINGS`]
     /// until then, and in tests that do not set one.
     pub(in crate::tui) key_table: &'static [crate::keybindings::KeyBinding],
+    /// The override file the table was loaded from, which the key editor
+    /// reads and writes. `None` until [`App::install_key_table`].
+    pub(in crate::tui) key_override_file: Option<std::path::PathBuf>,
     /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
     /// Recomputed once in `handle_repo_paths_updated` so the render path is
     /// never blocked by filesystem syscalls on every frame.
@@ -431,6 +435,7 @@ impl App {
             ticks_since_last_refresh: 0,
             interaction: InteractionState::default(),
             key_table: crate::keybindings::KEY_BINDINGS,
+            key_override_file: None,
             broken_repo_paths: HashSet::new(),
             last_stale_cleanup_at: None,
             build_output_cleared: HashSet::new(),

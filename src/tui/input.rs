@@ -1,5 +1,6 @@
 mod board_filter;
 mod confirm;
+mod key_editor;
 mod normal;
 mod table;
 

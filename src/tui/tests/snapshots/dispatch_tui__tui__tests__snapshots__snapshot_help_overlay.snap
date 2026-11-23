@@ -6,7 +6,7 @@ expression: rendered
         ▸ BACKLOG 2 [ ]                ◦ RUNNING 1                   ◦ REVIEW 0                      ◦ DONE 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
  ╭──────────────────────────╮ │  ── active                │                              │ ╭──────────────────────────╮
- │  ▎ Task 1            ╔ Help — j/Down/k/Up scroll, ? or Esc close ═══════════════════════════╗Task 4                │
+ │  ▎ Task 1            ╔ Help — j/Down/k/Up scroll, e edit keys, ? or Esc close ══════════════╗Task 4                │
  │   ◦ <1h              ║  == board.normal ==                                                  ║ <1h                  │
  ╰──────────────────────║  h, Left                                                             ║──────────────────────╯
  ╭──────────────────────║    Move to the previous column                                       ║

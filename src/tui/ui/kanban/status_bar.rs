@@ -255,6 +255,48 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             ),
             CYAN,
         ),
+        InputMode::KeyEditor => hint(
+            "Key editor: its keys are listed at the foot of the editor".to_string(),
+            CYAN,
+        ),
+        InputMode::KeyEditorSearch => hint(
+            format!(
+                "Search keys: {}_   [{}] keep  [{}] clear",
+                app.input
+                    .key_editor
+                    .as_ref()
+                    .map_or("", |e| e.query.as_str()),
+                key(N::BoardKeyEditorSearch, "key_editor_search_commit", "Enter"),
+                key(N::BoardKeyEditorSearch, "key_editor_search_cancel", "Esc"),
+            ),
+            CYAN,
+        ),
+        InputMode::KeyCapture => {
+            let chord =
+                app.input.key_editor.as_ref().is_some_and(|e| {
+                    e.capture == Some(crate::tui::key_editor::CaptureKind::AddChord)
+                });
+            let what = if chord {
+                "Press the two characters of the chord"
+            } else {
+                "Press the key"
+            };
+            hint(
+                format!(
+                    "{what}  [{}] cancel",
+                    key(N::BoardKeyCapture, "cancel_key_capture", "Esc")
+                ),
+                YELLOW,
+            )
+        }
+        InputMode::ConfirmDiscardKeyEdits => hint_text(
+            app,
+            &format!(
+                "Drop the staged key changes? {}",
+                yes_no(N::BoardConfirmDiscardKeyEdits)
+            ),
+            YELLOW,
+        ),
         InputMode::InputDisplayName => hint(
             format!("Display name: type a name  {}", text_keys("save")),
             CYAN,

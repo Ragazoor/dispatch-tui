@@ -39,8 +39,9 @@ use ratatui::{
 
 use columns::{compute_columns_data, render_columns};
 use popups::{
-    render_board_filter_overlay, render_error_popup, render_help_overlay, render_move_task_overlay,
-    render_reparent_epic_overlay, render_task_detail_overlay, render_work_package_picker_overlay,
+    render_board_filter_overlay, render_error_popup, render_help_overlay,
+    render_key_editor_overlay, render_move_task_overlay, render_reparent_epic_overlay,
+    render_task_detail_overlay, render_work_package_picker_overlay,
     render_work_package_rename_overlay,
 };
 #[cfg(test)]
@@ -293,6 +294,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_move_task_overlay(frame, app, area);
     render_work_package_picker_overlay(frame, app, area);
     render_work_package_rename_overlay(frame, app, area);
+    render_key_editor_overlay(frame, app, area);
     // Last, so a refusal is never hidden under an overlay.
     render_error_popup(frame, app, area);
 }

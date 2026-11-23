@@ -44,6 +44,10 @@ impl App {
             | InputMode::RenameWorkPackage(_)
             | InputMode::InputDisplayName => N::BoardText,
             InputMode::LinkWorkPackage { .. } => N::BoardPickerWorkPackage,
+            InputMode::KeyEditor => N::BoardKeyEditor,
+            InputMode::KeyEditorSearch => N::BoardKeyEditorSearch,
+            InputMode::KeyCapture => N::BoardKeyCapture,
+            InputMode::ConfirmDiscardKeyEdits => N::BoardConfirmDiscardKeyEdits,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
@@ -198,6 +202,7 @@ impl App {
     /// popup's one row is a catch-all, so any key dismisses it.
     pub fn install_key_table(&mut self, load: &crate::keybindings::KeyTableLoad) {
         self.key_table = load.table;
+        self.key_override_file = Some(load.file.clone());
         if let Some(summary) = load.error_summary() {
             self.status.key_load_notice = Some(summary);
             self.dirty = true;
@@ -259,6 +264,16 @@ impl App {
                 self.sync_board_selection();
                 vec![]
             }
+            N::BoardKeyCapture => self.capture_key_press(key),
+            N::BoardKeyEditorSearch => {
+                // Typing is not an action; nothing is recorded.
+                if let KeyCode::Char(c) = key.code {
+                    if !key_has_ctrl_or_alt(key) {
+                        self.edit_key_editor_query(Some(c));
+                    }
+                }
+                vec![]
+            }
             N::BoardFilterSearch => match key.code {
                 // Typing is not an action; nothing is recorded.
                 KeyCode::Char(c) if !key_has_ctrl_or_alt(key) => self.update(Message::BoardFilter(
@@ -288,6 +303,12 @@ impl App {
                 return self.update(Message::BoardFilter(
                     crate::tui::messages::BoardFilterMessage::EpicQueryBackspace,
                 ));
+            }
+            return vec![];
+        }
+        if ns == KeyNamespace::BoardKeyEditorSearch {
+            if action == "text_backspace" {
+                self.edit_key_editor_query(None);
             }
             return vec![];
         }
@@ -365,6 +386,12 @@ impl App {
             N::BoardPickerMoveToEpic => self.run_move_to_epic_picker(action, label),
             N::BoardPickerReparentEpic => self.run_reparent_picker(action, label),
             N::BoardPickerWorkPackage => self.run_work_package_picker(action, label),
+            N::BoardKeyEditor => self.run_key_editor(action, label),
+            N::BoardKeyEditorSearch => self.run_key_editor_search(action, label),
+            N::BoardKeyCapture => self.run_key_capture(action, label),
+            N::BoardConfirmDiscardKeyEdits => {
+                self.run_confirm_discard_key_edits(action.ends_with("_yes"), label)
+            }
             N::BoardConfirmMoveToEpic => {
                 use crate::tui::messages::TaskMessage::*;
                 let msg = match action {
@@ -460,6 +487,7 @@ impl App {
                 self.interaction.help_scroll = self.interaction.help_scroll.saturating_sub(1);
                 vec![key_event(action, label)]
             }
+            "open_key_editor" => self.open_key_editor(action, label),
             _ => vec![],
         }
     }

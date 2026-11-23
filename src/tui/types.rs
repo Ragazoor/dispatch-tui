@@ -192,6 +192,8 @@ pub enum Message {
     /// Work-package messages — see
     /// [`crate::tui::messages::WorkPackageMessage`].
     WorkPackage(crate::tui::messages::WorkPackageMessage),
+    /// Key-editor messages — see [`crate::tui::messages::KeyEditorMessage`].
+    KeyEditor(crate::tui::messages::KeyEditorMessage),
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +358,16 @@ pub enum InputMode {
     InputDisplayName,
     /// `x` on a package card: delete the package (its links only).
     ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
+    /// The key editor (`keybindings.allium: KeyEditor`). Its state is
+    /// `InputState::key_editor`, which the next three modes keep too.
+    KeyEditor,
+    /// Typing the key editor's row search.
+    KeyEditorSearch,
+    /// The key editor waiting for the press to stage
+    /// (`CaptureTakesThePress`).
+    KeyCapture,
+    /// Closing the key editor with edits staged: drop them?
+    ConfirmDiscardKeyEdits,
 }
 
 impl InputMode {

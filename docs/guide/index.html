@@ -387,7 +387,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 
     <h3>One board for all your work</h3>
     <p>Dispatch is a kanban board in your terminal. Every piece of work is a task card in one of four columns: <b>Backlog</b>, <b>Running</b>, <b>Review</b> and <b>Done</b>. You move with <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd> or the arrow keys. <kbd>Enter</kbd> opens a task's details. <kbd>?</kbd> lists every key.</p>
-    <p>The keys in this guide are the defaults. You can change any of them in a <code>keybindings.json</code> file in dispatch's data directory, and <kbd>?</kbd> on the board always shows the keys you have. The <a href="https://github.com/Ragazoor/dispatch-tui/blob/main/docs/reference.md#changing-keys">reference</a> says how.</p>
+    <p>The keys in this guide are the defaults. You can change any of them from the board: <kbd>?</kbd>, then <kbd>e</kbd>, opens the key editor. They are kept in a <code>keybindings.json</code> file in dispatch's data directory, and <kbd>?</kbd> on the board always shows the keys you have. The <a href="https://github.com/Ragazoor/dispatch-tui/blob/main/docs/reference.md#changing-keys">reference</a> says how.</p>
 
     <h3>Agents do the work</h3>
     <p>Press <kbd>Space</kbd> on a Backlog task and dispatch sends a Claude Code agent to do it. The agent gets its own git worktree (<code>&lt;repo&gt;/.worktrees/&lt;id&gt;-&lt;slug&gt;</code>) and its own tmux window, so your checkout stays clean and many agents can run side by side. <kbd>Space</kbd> on a running task jumps to its window. Your tmux prefix then <kbd>Space</kbd> jumps back to the board.</p>

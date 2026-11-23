@@ -15,7 +15,7 @@ use crate::tui::{App, InputMode};
 
 /// Break `text` at spaces into lines of at most `width` characters. A word
 /// longer than the width stands on a line of its own.
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut line = String::new();
     for word in text.split_whitespace() {

@@ -723,3 +723,55 @@ async fn setting_a_display_name_saves_it_and_reports_it() {
     assert_eq!(db.shown_name_of(crate::store::MEMORY_USER_ID), "Alice");
     assert_eq!(app.status_message(), Some("Display name set to Alice"));
 }
+
+/// SaveKeyEdits: the editor's staged edits are written as keybinding_set
+/// writes them, and the editor's staging is cleared.
+#[tokio::test]
+async fn dispatch_save_key_overrides_writes_the_file_and_clears_the_staging() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let press = |app: &mut crate::tui::App, code: KeyCode| {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+    };
+    let (rt, mut app) = test_runtime().await;
+    let dir = tempfile::tempdir().unwrap();
+    app.install_key_table(&crate::keybindings::load_key_table(
+        dir.path(),
+        crate::keybindings::KeyTableReader::Board,
+    ));
+    app.update(crate::tui::Message::System(
+        crate::tui::messages::SystemMessage::ToggleHelp,
+    ));
+    press(&mut app, KeyCode::Char('e'));
+    press(&mut app, KeyCode::Char('/'));
+    for c in "navigate_row_last".chars() {
+        press(&mut app, KeyCode::Char(c));
+    }
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Enter);
+    app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT));
+    let save = press(&mut app, KeyCode::Char('w'))
+        .into_iter()
+        .find(|c| {
+            matches!(
+                c,
+                Command::Settings(SettingsCommand::SaveKeyOverrides { .. })
+            )
+        })
+        .expect("w saves the staged edit");
+
+    dispatch_one(&rt, &mut app, save).await;
+
+    let file = dir.path().join(crate::keybindings::KEY_OVERRIDE_FILE_NAME);
+    let written: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(
+        written,
+        serde_json::json!([{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O", "G"]}])
+    );
+    assert!(
+        !press(&mut app, KeyCode::Char('w'))
+            .iter()
+            .any(|c| matches!(c, Command::Settings(_))),
+        "nothing is staged after the save"
+    );
+}
