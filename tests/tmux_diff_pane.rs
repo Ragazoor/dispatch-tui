@@ -121,6 +121,7 @@ impl Fixture {
             self.dir.path(),
             Path::new("a.rs"),
             &editor,
+            "Space",
             &self.server.runner(),
         )
     }
