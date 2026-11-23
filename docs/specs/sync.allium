@@ -36,8 +36,7 @@
 -- Why this exists as its own file. host.allium answers "who am I?" and
 -- core.allium answers "what is a task?"; neither is the right home for a thing
 -- that is up or down. A connection has a lifecycle, a failure mode that repeats,
--- and a visible state — which is to say it is a domain entity, and it did not
--- have one before.
+-- and a visible state — which is to say it is a domain entity of its own.
 --
 -- THE HONEST SHAPE OF THE PROBLEM. A shared store reachable over a network is
 -- down sometimes. Not as an exception: as a matter of course, for a few seconds,
@@ -770,10 +769,10 @@ rule AViewUpdateNeverErasesTheRow {
         -- the delete half of that update erases the row and every read of
         -- the task answers "not found" until it is next written.
         --
-        -- EVERY TABLE THAT MOVES BEHIND A VIEW takes this path, not just
-        -- tasks and epics. This rule is built for those two first; each
-        -- later table adds its own retire method, and a view table is wired
-        -- with on_insert and on_delete only (no on_update exists for it).
+        -- EVERY TABLE BEHIND A VIEW takes this path, not just tasks and
+        -- epics. Each such table has its own retire method, and a view
+        -- table is wired with on_insert and on_delete only (no on_update
+        -- exists for it).
         -- `wire_view!` (sdk_connector/wiring.rs) is that wiring: a view's
         -- delete goes to the table's retire method, never to its remove.
         --
@@ -1925,8 +1924,8 @@ surface EpicSubscriptionToggle {
 
 open question "What is a board supposed to do with a change whose fate is unknown? EveryMutationIsAtomicAndAnswered admits acceptance and rejection, and a transport has a third outcome: the change was SENT and then the connection went, or the store never answered within config.mutation_timeout. It may or may not have been applied, and nothing here says who is told what. Re-sending is the one answer that is definitely wrong — it is the queue NoWriteIsEverQueued refuses, with the added hazard that the original may have landed."
 
-open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
+open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 
 open question "Is a periodic refresh still worth keeping now that rows arrive unasked? It is a backstop against a delivery that never comes — a callback the SDK drops, a subscription that silently stops — and it costs nothing when nothing has changed. But a backstop nobody can observe failing is also a backstop nobody knows has failed, and the board would be quietly polling its way through a broken subscription rather than reporting one."
 
-open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."
+open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."
