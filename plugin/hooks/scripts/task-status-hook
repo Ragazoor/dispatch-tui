@@ -14,6 +14,17 @@ INPUT=$(cat)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 
+# DISPATCH_ORCHESTRATOR names an epic orchestrator's session, which is no
+# task: its Stop is its completed turn, and nothing else is reported
+# (OrchestratorHooks in docs/specs/agent-health.allium). Checked before any
+# task lookup, so its cwd's branch can never reach a task.
+if [ -n "${DISPATCH_ORCHESTRATOR:-}" ]; then
+    if [ "$EVENT" = "Stop" ]; then
+        dispatch hook-orchestrator "$DISPATCH_ORCHESTRATOR" stop
+    fi
+    exit 0
+fi
+
 # DISPATCH_TASK_ID names the task this window was launched for; an agent that
 # checks out another task's branch must not act on that task. Otherwise
 # extract the ID from the git branch name ({id}-{slug}). Branch lookup is

@@ -757,6 +757,9 @@ struct TuiRuntime {
     /// runtime's own drop releases it on exit (ReleaseKeepAwakeOnExit).
     keep_awake: std::sync::Mutex<Option<crate::keep_awake::Hold>>,
     feed_runner: Option<crate::feed::FeedRunner>,
+    /// The orchestrator runner (`orchestrators.allium:
+    /// BoardRunsItsOrchestrators`), started beside the feed runner.
+    orchestrator_host: Option<orchestrator_host::OrchestratorHost>,
     /// Fires the `FeedRunner`'s feed-command cache invalidation. Cloned from
     /// `feed_runner.epic_invalidate_tx()` at construction so both mutation-
     /// carrying MCP events (`Refresh` and `EpicChanged`) can reset the cache
@@ -835,6 +838,7 @@ mod epics;
 mod event_loop;
 mod keep_awake;
 mod learnings;
+mod orchestrator_host;
 mod people;
 mod pr;
 mod session_host;
@@ -1087,6 +1091,12 @@ impl TuiRuntime {
             people_svc: services.people,
             learning_svc: services.learnings,
             feed_runner: Some(feed_runner),
+            orchestrator_host: Some(orchestrator_host::OrchestratorHost::new(
+                database.clone(),
+                runner.clone(),
+                inputs.data_dir.to_path_buf(),
+                inputs.paths.claude_json_path.clone(),
+            )),
             feed_invalidate_tx,
             feed_sync_guard,
             feed_db: database.clone(),

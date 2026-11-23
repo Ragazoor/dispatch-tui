@@ -268,3 +268,89 @@ fn scripts_do_not_need_gnu_grep() {
         + &std::fs::read_to_string(script("pr-learnings-hook")).unwrap();
     assert!(!src.contains("grep -oP"), "grep -P is GNU-only");
 }
+
+/// Run `name` as an orchestrator's session would: `DISPATCH_ORCHESTRATOR`
+/// set, no `DISPATCH_TASK_ID`, in a repo whose branch names a task.
+fn run_as_orchestrator(name: &str, input: &str, repo: &Path, dir: &Path) -> (Option<i32>, String) {
+    let (bin, log) = fake_dispatch(dir, 0);
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let mut cmd = script_command::plugin_script_command(&script(name), &path);
+    cmd.current_dir(repo)
+        .env("DISPATCH_ORCHESTRATOR", "zlata")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = cmd.spawn().unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(input.as_bytes())
+        .unwrap();
+    let status = child.wait().unwrap();
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+    (status.code(), calls)
+}
+
+/// `OrchestratorHooks` in `docs/specs/agent-health.allium`: an orchestrator's
+/// Stop is its completed turn, reported to its own row.
+#[test]
+fn an_orchestrators_stop_reports_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let (code, calls) = run_as_orchestrator(
+        "task-status-hook",
+        &payload(&repo, "Stop", ""),
+        &repo,
+        dir.path(),
+    );
+    assert_eq!(code, Some(0));
+    assert_eq!(calls.trim(), "hook-orchestrator zlata stop");
+}
+
+/// `OnlyAStopIsReported`: nothing else of an orchestrator's session reaches
+/// the board, and none of it reaches a task, whatever branch its cwd is on.
+#[test]
+fn an_orchestrators_other_events_report_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    for (event, extra) in [
+        ("PreToolUse", r#","tool_name":"Read""#),
+        ("PreToolUse", r#","tool_name":"AskUserQuestion""#),
+        (
+            "PostToolUse",
+            r#","tool_name":"SendMessage","tool_input":{"to":"x","message":"m"}"#,
+        ),
+        (
+            "Notification",
+            r#","notification_type":"permission_prompt""#,
+        ),
+        ("UserPromptSubmit", r#","prompt":"hi""#),
+        ("SubagentStart", r#","agent_id":"a","session_id":"s""#),
+        ("SessionStart", ""),
+    ] {
+        let (code, calls) = run_as_orchestrator(
+            "task-status-hook",
+            &payload(&repo, event, extra),
+            &repo,
+            dir.path(),
+        );
+        assert_eq!(code, Some(0), "{event}");
+        assert_eq!(calls.trim(), "", "{event} reported something");
+    }
+}
+
+/// The PR gate does not apply to an orchestrator (`OnlyAStopIsReported`).
+#[test]
+fn the_pr_gate_ignores_an_orchestrator() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let input = payload(
+        &repo,
+        "PreToolUse",
+        r#","tool_name":"Bash","tool_input":{"command":"gh pr create"}"#,
+    );
+    let (code, calls) = run_as_orchestrator("pr-learnings-hook", &input, &repo, dir.path());
+    assert_eq!(code, Some(0));
+    assert_eq!(calls.trim(), "");
+}

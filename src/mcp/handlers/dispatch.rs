@@ -1049,7 +1049,8 @@ async fn handle_tools_call(
     // names one.
     let resolution = if super::task_refs::holds_name(&args) {
         let agents = state.db.list_agents().await;
-        super::task_refs::resolve_task_refs(&mut args, &agents)
+        let orchestrators = super::task_refs::orchestrator_refs(state).await;
+        super::task_refs::resolve_task_refs(&mut args, &agents, &orchestrators)
     } else {
         Ok(())
     };
@@ -1091,7 +1092,9 @@ async fn handle_tools_call(
     // resolved (e.g. malformed request) to avoid recording empty rows.
     if !tool_name.is_empty() {
         let actor = match identity {
-            CallerIdentity::Task(_) => crate::models::UsageActor::Agent,
+            CallerIdentity::Task(_) | CallerIdentity::Orchestrator(_) => {
+                crate::models::UsageActor::Agent
+            }
             CallerIdentity::Session => crate::models::UsageActor::Human,
         };
         let db = Arc::clone(&state.db);

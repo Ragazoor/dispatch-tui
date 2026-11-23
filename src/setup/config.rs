@@ -44,13 +44,33 @@ pub(crate) fn dispatch_entry_identifying(
     claude_json: &std::path::Path,
     task_id: TaskId,
 ) -> Option<Value> {
+    dispatch_entry_with_header(
+        claude_json,
+        crate::mcp::identity::HEADER_TASK_ID,
+        &task_id.to_string(),
+    )
+}
+
+/// [`dispatch_entry_identifying`] for an epic's orchestrator: the same entry,
+/// identifying it by its name (`orchestrators.allium: ItsOwnCallerIdentity`).
+pub(crate) fn dispatch_entry_identifying_orchestrator(
+    claude_json: &std::path::Path,
+    name: &str,
+) -> Option<Value> {
+    dispatch_entry_with_header(claude_json, crate::mcp::identity::HEADER_ORCHESTRATOR, name)
+}
+
+fn dispatch_entry_with_header(
+    claude_json: &std::path::Path,
+    header: &str,
+    value: &str,
+) -> Option<Value> {
     let json = read_json_file(claude_json).ok().flatten()?;
     let mut entry = dispatch_entry(&json)?.as_object().cloned()?;
     entry.remove("headersHelper");
-    entry.insert(
-        "headers".to_string(),
-        json!({ crate::mcp::identity::HEADER_TASK_ID: task_id.to_string() }),
-    );
+    let mut headers = Map::new();
+    headers.insert(header.to_string(), Value::from(value));
+    entry.insert("headers".to_string(), Value::Object(headers));
     Some(json!({ "mcpServers": { SERVER_NAME: Value::Object(entry) } }))
 }
 

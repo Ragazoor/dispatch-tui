@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use crate::tmux;
 
-pub(crate) use config::dispatch_entry_identifying;
+pub(crate) use config::{dispatch_entry_identifying, dispatch_entry_identifying_orchestrator};
 pub use config::{has_dispatch_entry, merge_mcp_config, remove_mcp_config, MergeResult};
 pub use config_update::*;
 pub use confirm::*;

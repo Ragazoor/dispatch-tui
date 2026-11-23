@@ -11,6 +11,11 @@
 set -euo pipefail
 
 INPUT=$(cat)
+
+# An epic orchestrator's session opens no PR and has no task to gate
+# (OrchestratorHooks in docs/specs/agent-health.allium).
+[ -z "${DISPATCH_ORCHESTRATOR:-}" ] || exit 0
+
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 

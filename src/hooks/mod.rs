@@ -16,7 +16,10 @@ use http_body_util::BodyExt;
 use hyper_util::rt::TokioIo;
 
 use crate::models::{BackgroundWork, HookEventKind, NotificationKind, TaskId};
-use wire::{Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, Question, HOOK_PATH};
+use wire::{
+    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, OrchestratorEvent, Question,
+    HOOK_PATH,
+};
 
 /// How long a hook waits on the board before giving up on it.
 ///
@@ -63,6 +66,27 @@ pub async fn deliver(port: u16, event: ObservedEvent) -> Result<()> {
             eprintln!("Task {task_id} not found, skipping");
             Ok(())
         }
+        HookResponse::Observed(ObserveOutcome::Failed { reason }) => Err(anyhow::anyhow!(
+            "the dispatch board rejected the hook: {reason}"
+        )),
+        other => Err(unexpected_answer(other)),
+    }
+}
+
+/// `dispatch hook-orchestrator <name> <event>`'s event, parsed by clap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum OrchestratorHookEvent {
+    /// Stop: the session completed a turn.
+    Stop,
+}
+
+/// `dispatch hook-orchestrator <name> stop` (`OrchestratorHooks` in
+/// `docs/specs/agent-health.allium`): an orchestrator's session completed a
+/// turn. Delivered and judged as an observed event is.
+pub async fn run_orchestrator_stop(port: u16, name: String) -> Result<()> {
+    let request = HookRequest::ObserveOrchestrator(OrchestratorEvent::Stop { name });
+    match send(port, &request).await? {
+        HookResponse::Observed(ObserveOutcome::Applied | ObserveOutcome::TaskNotFound) => Ok(()),
         HookResponse::Observed(ObserveOutcome::Failed { reason }) => Err(anyhow::anyhow!(
             "the dispatch board rejected the hook: {reason}"
         )),

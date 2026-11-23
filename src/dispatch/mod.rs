@@ -80,6 +80,7 @@ pub(crate) mod git_output;
 /// module's own, and three other test suites drive it.
 #[cfg(test)]
 pub(crate) mod mock_sequence;
+mod orchestrator;
 mod prompts;
 mod request_host;
 mod split_panes;
@@ -95,6 +96,10 @@ pub use agents::{
 pub(crate) use build_jobs::cargo_config_sets_jobs;
 pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGNATURE};
 pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};
+pub use orchestrator::{
+    build_orchestrator_prompt, end_orchestrator, launch_orchestrator, orchestrator_dir,
+    OrchestratorLaunch, OrchestratorPromptTask,
+};
 // Test-only re-export: `prompts` is private, and the routing tests in
 // `src/runtime/tests/` and `src/service/tasks/tests/` assert on this marker to
 // prove `DispatchMode::Research` reached `build_research_prompt`.

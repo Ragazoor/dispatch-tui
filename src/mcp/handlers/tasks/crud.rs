@@ -475,7 +475,7 @@ pub(crate) async fn handle_create_task(
                 Err(resp) => return resp,
             }
         }
-        CallerIdentity::Session => None,
+        CallerIdentity::Session | CallerIdentity::Orchestrator(_) => None,
     };
 
     let Some(epic_id) = parsed.epic_id else {

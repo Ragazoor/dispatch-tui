@@ -198,3 +198,51 @@ async fn non_json_hook_post_is_refused() {
         );
     }
 }
+
+// -- An orchestrator's hooks (agent-health.allium: OrchestratorHooks) --------
+
+async fn orchestrated_state() -> (Arc<McpState>, crate::models::Orchestrator) {
+    let (state, _db) =
+        test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![])), None, None).await;
+    let epic = state.db_write().create_epic("E", "", None).await.unwrap();
+    state
+        .db_write()
+        .switch_orchestrator_on(epic.id, None, None)
+        .await
+        .unwrap();
+    let host = state.db.host_id().to_string();
+    state.db.ensure_orchestrator(epic.id, &host).await.unwrap();
+    let row = state.db.list_orchestrators().await.remove(0);
+    (state, row)
+}
+
+/// OrchestratorTurnClearsTheRestartFlag: the Stop of an orchestrator's
+/// session is its completed turn.
+#[tokio::test]
+async fn an_orchestrators_stop_records_its_turn() {
+    use crate::hooks::wire::{HookResponse, ObserveOutcome, OrchestratorEvent};
+    let (state, row) = orchestrated_state().await;
+
+    let request = HookRequest::ObserveOrchestrator(OrchestratorEvent::Stop {
+        name: row.name.clone(),
+    });
+    let Json(answer) = handle_hook(State(state.clone()), Json(request)).await;
+
+    assert_eq!(answer, HookResponse::Observed(ObserveOutcome::Applied));
+    let after = state.db.list_orchestrators().await.remove(0);
+    assert!(after.last_turn_at.is_some());
+}
+
+/// DeliveredAsATaskHookIs: a name no orchestrator holds succeeds quietly.
+#[tokio::test]
+async fn a_stop_for_an_unknown_orchestrator_succeeds() {
+    use crate::hooks::wire::{HookResponse, ObserveOutcome, OrchestratorEvent};
+    let (state, _row) = orchestrated_state().await;
+
+    let request = HookRequest::ObserveOrchestrator(OrchestratorEvent::Stop {
+        name: "nobody".into(),
+    });
+    let Json(answer) = handle_hook(State(state), Json(request)).await;
+
+    assert_eq!(answer, HookResponse::Observed(ObserveOutcome::Applied));
+}

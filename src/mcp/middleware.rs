@@ -6,7 +6,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::mcp::identity::{CallerIdentity, IdentityError, HEADER_KIND, HEADER_TASK_ID};
+use crate::mcp::identity::{
+    CallerIdentity, IdentityError, HEADER_KIND, HEADER_ORCHESTRATOR, HEADER_TASK_ID,
+};
 
 /// Parse the two caller-identity headers and attach the result to the
 /// request extensions as `Result<CallerIdentity, IdentityError>`.
@@ -28,8 +30,12 @@ pub async fn extract_caller_identity(
 ) -> Response {
     let task_id = headers.get(HEADER_TASK_ID).and_then(|v| v.to_str().ok());
     let kind = headers.get(HEADER_KIND).and_then(|v| v.to_str().ok());
+    let orchestrator = headers
+        .get(HEADER_ORCHESTRATOR)
+        .and_then(|v| v.to_str().ok());
 
-    let result: Result<CallerIdentity, IdentityError> = CallerIdentity::from_headers(task_id, kind);
+    let result: Result<CallerIdentity, IdentityError> =
+        CallerIdentity::from_headers(task_id, kind, orchestrator);
     req.extensions_mut().insert(result);
     next.run(req).await
 }

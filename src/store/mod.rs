@@ -623,6 +623,28 @@ pub trait PollOwnershipStore: Send + Sync {
     async fn override_poll_owner(&self, target: PollScopeId) -> Result<()>;
 }
 
+/// An orchestrated epic's orchestrator on each machine (`core.allium:
+/// Orchestrator`). Its rows touch no task or epic, so, like
+/// [`PollOwnershipStore`], the reads and the writes sit together on the
+/// handle the board's orchestrator runner, the hook endpoint and the MCP name
+/// resolver already hold. Every rule is the store's (`orchestrator.rs` in the
+/// module); a refusal comes back as an error.
+#[async_trait::async_trait]
+pub trait OrchestratorStore: Send + Sync {
+    /// Every orchestrator this board's subscription holds, every machine's.
+    /// A row that does not decode is left out.
+    async fn list_orchestrators(&self) -> Vec<crate::models::Orchestrator>;
+    /// `BoardRunsItsOrchestrators`'s create, once per epic and host.
+    async fn ensure_orchestrator(&self, epic: EpicId, host: &str) -> Result<()>;
+    /// `StartOrchestratorSession`.
+    async fn start_orchestrator_session(&self, id: i64, host: &str) -> Result<()>;
+    /// `EndOrchestratorSession` (`died` false) and `OrchestratorWindowGone`
+    /// (`died` true).
+    async fn end_orchestrator_session(&self, id: i64, host: &str, died: bool) -> Result<()>;
+    /// `OrchestratorTurnClearsTheRestartFlag`.
+    async fn orchestrator_turn_completed(&self, name: &str) -> Result<()>;
+}
+
 /// Read-only epic queries. Held (via [`TaskReadStore`]) by non-service consumers.
 #[async_trait::async_trait]
 pub trait EpicRead: Send + Sync {
@@ -1189,6 +1211,7 @@ pub trait TaskReadStore:
     + DispatchRequestRead
     + SessionRequestRead
     + AgentRead
+    + OrchestratorStore
 {
 }
 
@@ -1206,7 +1229,8 @@ impl<
             + UsageStore
             + DispatchRequestRead
             + SessionRequestRead
-            + AgentRead,
+            + AgentRead
+            + OrchestratorStore,
     > TaskReadStore for T
 {
 }

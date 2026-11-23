@@ -264,6 +264,7 @@ pub(super) fn editor_runtime_on_host(
         work_package_svc: Arc::new(crate::service::WorkPackageService::new(db.clone())),
         people_svc: Arc::new(crate::service::PeopleService::new(db.clone())),
         feed_runner: Some(feed_runner),
+        orchestrator_host: None,
         // Never started by these fixtures — see the field's doc comment.
         feed_sync_guard,
         feed_invalidate_tx: None,

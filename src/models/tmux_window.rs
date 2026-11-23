@@ -19,6 +19,9 @@ use super::TaskId;
 
 /// The `task-` prefix every dispatched agent's window name carries.
 const TASK_WINDOW_PREFIX: &str = "task-";
+/// An epic orchestrator's window, `orch-<epic id>` (`orchestrators.allium:
+/// StartOrchestratorSession`). The store records the same name.
+const ORCHESTRATOR_WINDOW_PREFIX: &str = "orch-";
 
 /// The prefix the board's own popped-out editor windows carry.
 const EDITOR_WINDOW_PREFIX: &str = "dispatch-edit-";
@@ -151,6 +154,20 @@ impl TmuxWindow {
             "a tmux pane ID is not a window name — see TmuxWindow::parse"
         );
         Self(Cow::Borrowed(name))
+    }
+
+    /// The window name of epic `epic_id`'s orchestrator.
+    pub fn for_orchestrator(epic_id: super::EpicId) -> Self {
+        Self(Cow::Owned(format!(
+            "{ORCHESTRATOR_WINDOW_PREFIX}{}",
+            epic_id.0
+        )))
+    }
+
+    /// Whether `name` is an orchestrator's window name.
+    pub fn is_orchestrator_window(name: &str) -> bool {
+        name.strip_prefix(ORCHESTRATOR_WINDOW_PREFIX)
+            .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
     }
 
     /// The window name for a popped-out editor, disambiguated by `nanos`.

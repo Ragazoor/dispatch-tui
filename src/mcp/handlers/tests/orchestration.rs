@@ -624,3 +624,85 @@ async fn a_refused_mark_after_creation_names_the_created_task() {
     );
     assert_eq!(state.db.list_all().await.len(), 1);
 }
+
+// -- the orchestrator's name and identity (OrchestratorIdentity) ---------------
+
+async fn orchestrator_of(state: &Arc<McpState>, epic: EpicId) -> String {
+    state
+        .db_write()
+        .switch_orchestrator_on(epic, None, None)
+        .await
+        .unwrap();
+    let host = state.db.host_id().to_string();
+    state.db.ensure_orchestrator(epic, &host).await.unwrap();
+    state
+        .db
+        .list_orchestrators()
+        .await
+        .into_iter()
+        .find(|o| o.epic_id == epic)
+        .unwrap()
+        .name
+}
+
+/// agents.allium: OrchestratorNameIsNotATask.
+#[tokio::test]
+async fn an_orchestrators_name_given_as_a_task_says_what_it_is() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+
+    let resp = tool(&state, "task_search", json!({ "task_id": name })).await;
+
+    assert!(is_error(&resp));
+    assert_eq!(
+        extract_response_text(&resp),
+        format!(
+            "'{name}' is the orchestrator of epic {} (Orchestrated), not a task",
+            e.0
+        )
+    );
+}
+
+/// agents.allium: OrchestratorNameResolvesToItsEpic.
+#[tokio::test]
+async fn an_orchestrators_name_given_as_an_epic_reads_its_epic() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+
+    let text = ok_text(&tool(&state, "epic_search", json!({ "epic_id": name })).await);
+
+    assert!(
+        text.contains(&format!("Epic {}: Orchestrated", e.0)),
+        "{text}"
+    );
+}
+
+/// mcp-task-tools.allium, UpdateTaskViaMcp's "Who marked it": an orchestrator
+/// marks as an agent, under its own name.
+#[tokio::test]
+async fn an_orchestrators_ready_mark_names_it() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    ok_text(
+        &tool_as(
+            &state,
+            "task_update",
+            json!({ "task_ids": [task.0], "ready": true }),
+            CallerIdentity::Orchestrator(name.clone()),
+        )
+        .await,
+    );
+
+    assert!(
+        detail(&state, task)
+            .await
+            .contains(&format!("Ready: yes (marked by agent {name})")),
+        "{}",
+        detail(&state, task).await
+    );
+}

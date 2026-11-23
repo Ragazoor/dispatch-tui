@@ -16,8 +16,8 @@ use axum::{
 };
 
 use crate::hooks::wire::{
-    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, PaneAgent, PaneEpic,
-    PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView, PaneViewRequest, Question,
+    Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, OrchestratorEvent, PaneAgent,
+    PaneEpic, PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView, PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
 use crate::models::{HookEventKind, TaskId, TaskStatus};
@@ -91,7 +91,33 @@ pub async fn handle_hook(
     Json(match request {
         HookRequest::Observe(event) => HookResponse::Observed(observe(&state, event).await),
         HookRequest::Ask(question) => HookResponse::Answer(answer(&state, question).await),
+        HookRequest::ObserveOrchestrator(event) => {
+            HookResponse::Observed(observe_orchestrator(&state, event).await)
+        }
     })
+}
+
+/// `OrchestratorHooks` (`docs/specs/agent-health.allium`): a Stop is
+/// `OrchestratorCompletedATurn`. A name no orchestrator holds any more (its
+/// switch went off) succeeds quietly, as a missing task does.
+async fn observe_orchestrator(state: &McpState, event: OrchestratorEvent) -> ObserveOutcome {
+    let OrchestratorEvent::Stop { name } = event;
+    let known = state
+        .db
+        .list_orchestrators()
+        .await
+        .into_iter()
+        .any(|o| o.name == name);
+    if !known {
+        tracing::debug!(orchestrator = %name, "turn of an orchestrator this board does not hold");
+        return ObserveOutcome::Applied;
+    }
+    match state.db.orchestrator_turn_completed(&name).await {
+        Ok(()) => ObserveOutcome::Applied,
+        Err(e) => ObserveOutcome::Failed {
+            reason: format!("{e:#}"),
+        },
+    }
 }
 
 /// `BoardPaneView` (`docs/specs/agent-tree.allium`): the companion panes' read.

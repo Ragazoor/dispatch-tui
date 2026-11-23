@@ -7,6 +7,7 @@ mod dispatch_requests;
 mod epics;
 mod feed_requests;
 mod learnings;
+mod orchestrators;
 mod people;
 mod pr_status;
 mod session_requests;

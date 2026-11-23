@@ -163,6 +163,10 @@ pub(super) async fn run_loop<B: Backend>(
     if let Some(feed_runner) = rt.feed_runner.take() {
         feed_runner.start();
     }
+    if let Some(orchestrators) = rt.orchestrator_host.take() {
+        let handle = orchestrators.start(super::TICK_INTERVAL);
+        rt.abort_on_drop(&handle);
+    }
 
     execute_commands(app, startup_commands(), rt, terminal, key_rx).await?;
 

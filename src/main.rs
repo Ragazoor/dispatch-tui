@@ -155,6 +155,18 @@ enum Commands {
         #[command(flatten)]
         board: hooks::BoardAddress,
     },
+    /// Record a Claude Code hook event of an epic orchestrator's session (see
+    /// `OrchestratorHooks` in docs/specs/agent-health.allium). Only a Stop is
+    /// reported: it is the session's completed turn.
+    HookOrchestrator {
+        /// The orchestrator's name (`DISPATCH_ORCHESTRATOR`)
+        name: String,
+        /// What happened in its session
+        #[arg(value_enum)]
+        event: hooks::OrchestratorHookEvent,
+        #[command(flatten)]
+        board: hooks::BoardAddress,
+    },
     /// Render a standalone companion file-tree pane for one task's agent,
     /// showing what git reports as changed in its worktree (see
     /// docs/specs/agent-tree.allium). A small ratatui loop — deliberately not
@@ -947,6 +959,7 @@ fn is_hook(command: &Commands) -> bool {
         Commands::Hook { .. }
             | Commands::HookSubagent { .. }
             | Commands::HookPeerMessage { .. }
+            | Commands::HookOrchestrator { .. }
             | Commands::PrGate { .. }
     )
 }
@@ -1002,6 +1015,11 @@ async fn run_async(
                 println!("{}", hooks::post_tool_use_context(&hint));
             }
         }
+        Commands::HookOrchestrator { name, event, board } => match event {
+            hooks::OrchestratorHookEvent::Stop => {
+                hooks::run_orchestrator_stop(board.port, name).await?
+            }
+        },
         Commands::AgentTree { task_id, board } => {
             cmd_agent_tree(data_dir, board.port, task_id).await?
         }

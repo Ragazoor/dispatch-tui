@@ -30,13 +30,15 @@ pub(super) async fn covering(
 }
 
 /// Who a ready mark set by `identity` names (`UpdateTaskViaMcp`, "Who marked
-/// it"): the operator for a session, else the agent of the caller's task.
+/// it"): the operator for a session, an orchestrator by its own name, else
+/// the agent of the caller's task.
 pub(super) async fn ready_marker(
     state: &McpState,
     identity: &CallerIdentity,
 ) -> Result<(ReadyMarker, Option<String>), ServiceError> {
     match identity {
         CallerIdentity::Session => Ok((ReadyMarker::Operator, None)),
+        CallerIdentity::Orchestrator(name) => Ok((ReadyMarker::Agent, Some(name.clone()))),
         CallerIdentity::Task(task) => {
             let agents = state.db.list_agents().await;
             match crate::models::display_agent(agents.iter().filter(|a| a.task_id == *task)) {

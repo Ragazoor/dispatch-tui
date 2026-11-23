@@ -30,6 +30,20 @@ pub enum HookRequest {
     Observe(ObservedEvent),
     /// Something needs deciding before the tool call may proceed.
     Ask(Question),
+    /// Something happened in an orchestrator's session (`OrchestratorHooks`
+    /// in `docs/specs/agent-health.allium`). Kept apart from [`Observe`]
+    /// because an orchestrator is no task: every [`ObservedEvent`] names one.
+    ///
+    /// [`Observe`]: HookRequest::Observe
+    ObserveOrchestrator(OrchestratorEvent),
+}
+
+/// An orchestrator session's hook event. Answered as an observation is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum OrchestratorEvent {
+    /// `dispatch hook-orchestrator <name> stop`: its session completed a turn.
+    Stop { name: String },
 }
 
 /// A hook event the board records. Nothing the agent does depends on the
