@@ -442,7 +442,7 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
             return (
                 KEY_BINDINGS,
                 vec![file_unreadable(format!(
-                    "{KEY_OVERRIDE_FILE_NAME} is not a JSON list; no override applies. Write a list of entries: [{{\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"E\"]}}]"
+                    "{KEY_OVERRIDE_FILE_NAME} is not a JSON list; no override applies. Write a list of entries: [{{\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"O\"]}}]"
                 ))],
             )
         }
@@ -475,7 +475,7 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
     (table, errors)
 }
 
-const ENTRY_SHAPE: &str = "an entry is {\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"E\"]}, with an optional \"context\"";
+const ENTRY_SHAPE: &str = "an entry is {\"namespace\": \"board.normal\", \"action\": \"navigate_row_last\", \"keys\": [\"O\"]}, with an optional \"context\"";
 
 /// The longest piece of the file a message repeats.
 const ECHO_CHARS: usize = 40;

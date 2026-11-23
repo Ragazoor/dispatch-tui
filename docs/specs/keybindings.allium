@@ -787,7 +787,7 @@ enum KeyOverrideProblem {
 -- The user's override file: config.key_override_file_name in the data
 -- directory (storage.allium: DataDirectory), the one --data-dir names. It is
 -- a JSON list, one object per override:
---   [{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["E"]},
+--   [{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]},
 --    {"namespace": "board.normal", "action": "select_all",
 --     "context": "on_column_select_all", "keys": ["Enter"]}]
 -- It is not a store setting (settings.allium): keys belong to this machine's
