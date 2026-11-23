@@ -401,17 +401,24 @@ impl KeyRig {
     /// the tests built on it draw detached rows or flip to `running`
     /// themselves. `with_agents_fresh` keeps the fresh pane's default.
     fn with_agents(changes: &[GitFileChange], agents: Vec<AgentRow>) -> Self {
-        let mut rig = Self::new(changes);
-        rig.state.agents.set_filter(AgentFilter::All);
-        rig.state.adopt_agent_list(Ok(agents));
-        rig.draw();
-        rig
+        Self::listing(changes, agents, Some(AgentFilter::All))
     }
 
     /// A rig with `agents` listed and the agents filter left where a fresh
     /// pane starts it (ShowAgentTreePane).
     fn with_agents_fresh(changes: &[GitFileChange], agents: Vec<AgentRow>) -> Self {
+        Self::listing(changes, agents, None)
+    }
+
+    fn listing(
+        changes: &[GitFileChange],
+        agents: Vec<AgentRow>,
+        filter: Option<AgentFilter>,
+    ) -> Self {
         let mut rig = Self::new(changes);
+        if let Some(filter) = filter {
+            rig.state.agents.set_filter(filter);
+        }
         rig.state.adopt_agent_list(Ok(agents));
         rig.draw();
         rig

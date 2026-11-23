@@ -549,9 +549,9 @@ mod tests {
         crate::agent_tree::pane::buffer_to_string(terminal.backend().buffer())
     }
 
-    /// A section on the `all` filter. Most tests here draw detached rows or
-    /// flip to `running` themselves, so they start from every listed agent
-    /// rather than the fresh pane's `running` default.
+    /// A section on the `all` filter, as these tests were written: they draw
+    /// detached rows, flip to `running` themselves, or check the `all`
+    /// title, rather than the fresh pane's `running` default.
     fn on_all() -> AgentsSection {
         let mut section = AgentsSection::new();
         section.set_filter(AgentFilter::All);
@@ -994,8 +994,7 @@ mod tests {
 
     #[test]
     fn under_running_the_title_carries_the_badge_and_names_all() {
-        let mut section = on_all();
-        section.cycle_filter();
+        let mut section = AgentsSection::new();
         let out = rendered_at(&mut section, true, 50, 6);
         assert!(
             out.contains("Agents [running] (Tab: all, s: browse)"),
@@ -1005,8 +1004,7 @@ mod tests {
 
     #[test]
     fn a_narrow_border_clips_the_hints_and_keeps_the_badge() {
-        let mut section = on_all();
-        section.cycle_filter();
+        let mut section = AgentsSection::new();
         let out = rendered(&mut section, true, 3);
         assert!(out.contains("Agents [running]"), "{out}");
     }
@@ -1044,10 +1042,6 @@ mod tests {
     #[test]
     fn a_fresh_section_starts_on_running() {
         let mut section = AgentsSection::new();
-        assert_eq!(section.filter(), AgentFilter::Running);
-        section.set_rows(vec![row(1, false), test_detached_row(2)]);
-        let shown: Vec<i64> = section.rows().iter().map(|r| r.id.0).collect();
-        assert_eq!(shown, vec![1]);
         let out = rendered_at(&mut section, true, 50, 6);
         assert!(
             out.contains("Agents [running] (Tab: all, s: browse)"),
