@@ -62,6 +62,7 @@ mod feed_requests;
 mod grouping;
 mod identity;
 mod learnings;
+mod orchestration;
 mod pr_status;
 mod session_requests;
 mod tasks_epics;
@@ -118,6 +119,8 @@ struct Tables {
     subscriptions: BTreeMap<String, module::Subscription>,
     unseen_tasks: BTreeMap<String, module::UnseenTask>,
     bookmarks: BTreeMap<String, module::Bookmark>,
+    epic_orchestrations: BTreeMap<i64, module::EpicOrchestration>,
+    ready_marks: BTreeMap<i64, module::ReadyMark>,
     user_profiles: BTreeMap<String, module::UserProfile>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
@@ -411,6 +414,41 @@ impl ReducerCaller for MemoryReducerCaller {
         bookmarked: bool,
     ) -> Result<ReducerOutcome> {
         self.apply_set_bookmark(subscriber, task_id, bookmarked)
+    }
+
+    async fn switch_orchestrator_on(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_switch_orchestrator_on(epic, start_rule, max_parallel)
+    }
+
+    async fn change_orchestrator_settings(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_change_orchestrator_settings(epic, start_rule, max_parallel)
+    }
+
+    async fn switch_orchestrator_off(&self, epic: EpicId) -> Result<ReducerOutcome> {
+        self.apply_switch_orchestrator_off(epic)
+    }
+
+    async fn mark_task_ready(
+        &self,
+        task: TaskId,
+        marked_by: String,
+        agent_name: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_mark_task_ready(task, marked_by, agent_name)
+    }
+
+    async fn clear_ready_mark(&self, task: TaskId) -> Result<ReducerOutcome> {
+        self.apply_clear_ready_mark(task)
     }
 
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome> {

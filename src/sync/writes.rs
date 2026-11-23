@@ -144,6 +144,33 @@ pub trait ReducerCaller: Send + Sync {
         task_id: TaskId,
         bookmarked: bool,
     ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: SwitchOrchestratorOn`. `None` takes the default
+    /// start rule, or the default limit.
+    async fn switch_orchestrator_on(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: ChangeOrchestratorSettings`. `None` leaves it.
+    async fn change_orchestrator_settings(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: SwitchOrchestratorOff`.
+    async fn switch_orchestrator_off(&self, epic: EpicId) -> Result<ReducerOutcome>;
+    /// `tasks.allium: MarkTaskReady`. `agent_name` is empty for the operator's
+    /// mark.
+    async fn mark_task_ready(
+        &self,
+        task: TaskId,
+        marked_by: String,
+        agent_name: String,
+    ) -> Result<ReducerOutcome>;
+    /// `tasks.allium: ClearReadyMark`.
+    async fn clear_ready_mark(&self, task: TaskId) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `tasks.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.

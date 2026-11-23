@@ -51,6 +51,11 @@ enum Sent {
     CreateTaskSignalled(Box<bindings::Task>),
     MarkTaskSeen(String, TaskId),
     SetBookmark(String, TaskId, bool),
+    SwitchOrchestratorOn(EpicId, Option<String>, Option<i64>),
+    ChangeOrchestratorSettings(EpicId, Option<String>, Option<i64>),
+    SwitchOrchestratorOff(EpicId),
+    MarkTaskReady(TaskId, String, String),
+    ClearReadyMark(TaskId),
     SetDisplayName(String),
     /// A call recorded by name only.
     Named(&'static str),
@@ -310,6 +315,45 @@ impl ReducerCaller for RecordingCaller {
         bookmarked: bool,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::SetBookmark(subscriber, task_id, bookmarked))
+    }
+
+    async fn switch_orchestrator_on(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SwitchOrchestratorOn(epic, start_rule, max_parallel))
+    }
+
+    async fn change_orchestrator_settings(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ChangeOrchestratorSettings(
+            epic,
+            start_rule,
+            max_parallel,
+        ))
+    }
+
+    async fn switch_orchestrator_off(&self, epic: EpicId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SwitchOrchestratorOff(epic))
+    }
+
+    async fn mark_task_ready(
+        &self,
+        task: TaskId,
+        marked_by: String,
+        agent_name: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::MarkTaskReady(task, marked_by, agent_name))
+    }
+
+    async fn clear_ready_mark(&self, task: TaskId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ClearReadyMark(task))
     }
 
     async fn patch_task(

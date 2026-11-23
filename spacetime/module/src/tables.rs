@@ -854,3 +854,28 @@ pub struct Membership {
     pub role: String,
     pub created_at: String,
 }
+
+/// The orchestrator switch on an epic (`core.allium: EpicOrchestration`).
+/// Not in the snapshot (`spacetime-seed.allium`).
+#[spacetimedb::table(accessor = epic_orchestrations)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EpicOrchestration {
+    #[primary_key]
+    pub epic_id: i64,
+    pub start_rule: String,
+    /// 0 follows the default limit.
+    pub max_parallel: i64,
+    pub switched_on_at: String,
+}
+
+/// The ready mark on a backlog task (`core.allium: ReadyMark`). Not in the
+/// snapshot (`spacetime-seed.allium`).
+#[spacetimedb::table(accessor = ready_marks)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReadyMark {
+    #[primary_key]
+    pub task_id: i64,
+    pub marked_by: String,
+    pub agent_name: String,
+    pub marked_at: String,
+}

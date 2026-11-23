@@ -71,6 +71,7 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     };
     if let Some(prior) = prior.as_ref() {
         end_marks_on_finish(ctx, prior, &row);
+        drop_ready_mark_on_leaving_backlog(ctx, prior, &row);
     }
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
@@ -635,6 +636,7 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
     clear_task_marks(ctx, task_id);
+    ctx.db.ready_marks().task_id().delete(task_id);
     // agents.allium: AgentsGoWithTheirTask. That frees their names (A4).
     delete_agents_of(&mut AgentTables(ctx), task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
@@ -931,6 +933,9 @@ fn patch_epic_row(ctx: &ReducerContext, mut row: Epic, patch: EpicPatch) -> Resu
     validate_status("epic", row.id, &row.status)?;
     let child_of = row.parent_epic_id;
     ctx.db.epics().id().update(row);
+    if was_child_of != child_of {
+        switch_off_on_reparent(ctx, id, child_of);
+    }
     if command_changed {
         // Only the setter's own host may run the command now.
         let setter = caller_identity(ctx);
@@ -1213,6 +1218,7 @@ pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
         delete_task_side_effects(ctx, task.id);
     }
     ctx.db.epics().id().delete(id);
+    ctx.db.epic_orchestrations().epic_id().delete(id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_EPIC, id);
 }
 

@@ -46,6 +46,8 @@ pub trait StoreReads {
     fn feed_requests_on_host(&self, host: &str) -> Vec<FeedRequest>;
     fn unseen_of(&self, subscriber: &str) -> Vec<UnseenTask>;
     fn bookmarks_of(&self, subscriber: &str) -> Vec<Bookmark>;
+    fn orchestration_of(&self, epic_id: i64) -> Option<EpicOrchestration>;
+    fn ready_mark_of(&self, task_id: i64) -> Option<ReadyMark>;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
     fn watchers_of(&self, task_id: i64) -> Vec<TaskWatcher>;
@@ -174,6 +176,12 @@ macro_rules! impl_store_reads {
                     .subscriber()
                     .filter(&subscriber.to_string())
                     .collect()
+            }
+            fn orchestration_of(&self, epic_id: i64) -> Option<EpicOrchestration> {
+                self.db.epic_orchestrations().epic_id().find(epic_id)
+            }
+            fn ready_mark_of(&self, task_id: i64) -> Option<ReadyMark> {
+                self.db.ready_marks().task_id().find(task_id)
             }
             fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent> {
                 self.db
@@ -739,6 +747,16 @@ fn covered_epics(ctx: &ViewContext) -> Vec<Epic> {
 #[spacetimedb::view(accessor = covered_tasks, public)]
 fn covered_tasks(ctx: &ViewContext) -> Vec<Task> {
     covered_tasks_of(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_epic_orchestrations, public)]
+fn visible_epic_orchestrations(ctx: &ViewContext) -> Vec<EpicOrchestration> {
+    orchestrations_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_ready_marks, public)]
+fn visible_ready_marks(ctx: &ViewContext) -> Vec<ReadyMark> {
+    ready_marks_of_held(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_agents, public)]

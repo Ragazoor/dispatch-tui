@@ -127,6 +127,10 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 /// rare disaster path and a bookmark is cheap to set again
 /// (`spacetime-seed.allium`).
 ///
+/// `epic_orchestrations` and `ready_marks` (`core.allium: EpicOrchestration`,
+/// `ReadyMark`) are excluded too: a restore must not switch an orchestrator
+/// on by itself (`spacetime-seed.allium`).
+///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
 /// `session_request_timeouts` (`store-split.allium` W10) are excluded too: they
 /// are in-flight state, not domain, and no snapshot carries them
@@ -156,6 +160,8 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "feed_requests"
                     | "unseen_tasks"
                     | "bookmarks"
+                    | "epic_orchestrations"
+                    | "ready_marks"
             )
         })
         .collect();

@@ -10,9 +10,10 @@ use crate::spacetime::bindings::{
     OwnPackagesTableAccess as _, OwnSettingsTableAccess as _, OwnSubscriptionsTableAccess as _,
     OwnTasksTableAccess as _, OwnUnseenTasksTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, UserProfilesTableAccess as _, VisibleAgentsTableAccess as _,
-    VisibleDispatchRequestsTableAccess as _, VisibleFeedRequestsTableAccess as _,
-    VisibleLearningRetrievalsTableAccess as _, VisibleLearningVerdictsTableAccess as _,
-    VisibleLearningsTableAccess as _, VisiblePollOwnersTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleEpicOrchestrationsTableAccess as _,
+    VisibleFeedRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
+    VisibleLearningVerdictsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisiblePollOwnersTableAccess as _, VisibleReadyMarksTableAccess as _,
     VisibleSessionRequestsTableAccess as _, VisibleWorkPackageLinksTableAccess as _,
 };
 
@@ -195,6 +196,20 @@ impl SpacetimeSdkConnector {
             retire_unseen_task
         );
         wire_view!(self, db, own_bookmarks, upsert_bookmark, retire_bookmark);
+        wire_view!(
+            self,
+            db,
+            visible_epic_orchestrations,
+            upsert_epic_orchestration,
+            retire_epic_orchestration
+        );
+        wire_view!(
+            self,
+            db,
+            visible_ready_marks,
+            upsert_ready_mark,
+            retire_ready_mark
+        );
         wire_view!(
             self,
             db,

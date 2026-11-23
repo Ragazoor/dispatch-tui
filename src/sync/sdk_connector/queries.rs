@@ -93,6 +93,11 @@ pub(in crate::sync) fn subscription_queries(
         // This person's own bookmarks (core.allium: Bookmark). Never another
         // person's.
         "SELECT * FROM own_bookmarks".to_string(),
+        // The orchestrator switches of the epics the caller holds and the
+        // ready marks of the tasks they hold (core.allium:
+        // EpicOrchestration, ReadyMark).
+        "SELECT * FROM visible_epic_orchestrations".to_string(),
+        "SELECT * FROM visible_ready_marks".to_string(),
         // Settings (`docs/specs/settings.allium`). The view serves the
         // settings of every host this person owns; a setting is this
         // machine's own, so the ask narrows it by host.

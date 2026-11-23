@@ -115,6 +115,7 @@ impl IngestStore for ReducerStore<'_> {
             if prior.epic_id != row.epic_id {
                 clear_unseen_for_task(self.0, row.id);
             }
+            drop_ready_mark_on_leaving_backlog(self.0, &prior, &row);
         }
         self.0.db.tasks().id().update(row);
     }

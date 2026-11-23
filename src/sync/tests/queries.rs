@@ -25,7 +25,7 @@ fn queries() -> Vec<String> {
 /// directly would be refused by the store. They are private as schema left
 /// from the multi-user store: one person uses it now, but the board still
 /// reads them through the views.
-const PRIVATE_TABLES: [&str; 20] = [
+const PRIVATE_TABLES: [&str; 22] = [
     "tasks",
     "epics",
     "work_packages",
@@ -46,6 +46,8 @@ const PRIVATE_TABLES: [&str; 20] = [
     "task_shells",
     "retired_feed_items",
     "filter_presets",
+    "epic_orchestrations",
+    "ready_marks",
 ];
 
 fn asks_for(queries: &[String], source: &str) -> bool {
@@ -92,6 +94,8 @@ fn every_source_the_board_reads_is_asked_for() {
         "visible_poll_owners",
         "own_unseen_tasks",
         "own_bookmarks",
+        "visible_epic_orchestrations",
+        "visible_ready_marks",
         "own_subscriptions",
         "own_settings",
         "visible_learnings",

@@ -335,8 +335,13 @@ use super::*;
 /// `visible_packages` views, and the views narrow by follows and ownership
 /// only.
 ///
+/// Bumped: the orchestrator switch on an epic and the ready mark on a backlog
+/// task (`orchestration.rs`): their reducers, their views, and the rules that
+/// end them (a task leaving backlog, a re-parent under an orchestrated epic,
+/// a delete). A board on an older build lacks the reducers.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 64;
+pub const RULES_VERSION: i64 = 65;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

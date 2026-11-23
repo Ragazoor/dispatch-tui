@@ -21,21 +21,21 @@ use crate::models::{
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     adopt_repo_path as _, apply_learning_verdicts as _, archive_stale_learnings as _,
-    batch_delete as _, batch_patch_sub_status as _, check_deletable as _,
-    claim_dispatch_request as _, claim_feed_request as _, claim_poll_owner as _,
-    claim_session_request as _, clear_setting as _, close_task as _, create_epic as _,
-    create_learning as _, create_task as _, create_task_signalled as _, create_work_package as _,
-    create_work_package_with_links as _, delete_epic as _, delete_learning as _,
-    delete_repo_path as _, delete_task as _, delete_work_package as _, ensure_managed_epics as _,
-    expire_background_wait as _, fail_interrupted_dispatch_requests as _,
-    fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
-    link_work_package_item as _, list_archived_tasks as _, mark_pr_learnings_gate_shown as _,
-    mark_task_seen as _, override_poll_owner as _, own_usage_summary as _, patch_epic as _,
-    patch_learning as _, patch_task as _, patch_work_package as _, read_archived_task as _,
-    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
-    register_host as _, regroup_epic as _, report_dispatch_failed as _,
-    report_dispatch_provisioned as _, report_feed_request_done as _,
+    batch_delete as _, batch_patch_sub_status as _, change_orchestrator_settings as _,
+    check_deletable as _, claim_dispatch_request as _, claim_feed_request as _,
+    claim_poll_owner as _, claim_session_request as _, clear_ready_mark as _, clear_setting as _,
+    close_task as _, create_epic as _, create_learning as _, create_task as _,
+    create_task_signalled as _, create_work_package as _, create_work_package_with_links as _,
+    delete_epic as _, delete_learning as _, delete_repo_path as _, delete_task as _,
+    delete_work_package as _, ensure_managed_epics as _, expire_background_wait as _,
+    fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
+    flatten_epic as _, ingest_feed as _, link_work_package_item as _, list_archived_tasks as _,
+    mark_pr_learnings_gate_shown as _, mark_task_ready as _, mark_task_seen as _,
+    override_poll_owner as _, own_usage_summary as _, patch_epic as _, patch_learning as _,
+    patch_task as _, patch_work_package as _, read_archived_task as _, record_base_branch as _,
+    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
+    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
+    report_dispatch_failed as _, report_dispatch_provisioned as _, report_feed_request_done as _,
     report_feed_request_failed as _, report_pr_status as _, report_pr_unreadable as _,
     report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
     request_exit_session as _, request_feed_refresh as _, request_wrap_up as _,
@@ -43,11 +43,12 @@ use crate::spacetime::bindings::{
     set_display_name as _, set_epic_group_by_repo as _, set_managed_feed_settings as _,
     set_task_epic as _, set_verify_command as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unlink_work_package_item as _,
-    unsubscribe_from_epic as _, update_epic as _, update_task as _,
-    update_work_package_with_links as _, DbConnection, OwnEpicsTableAccess as _,
-    OwnPackagesTableAccess as _, OwnTasksTableAccess as _, VisibleDispatchRequestsTableAccess as _,
-    VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
+    subscribe_to_epic as _, switch_orchestrator_off as _, switch_orchestrator_on as _,
+    try_record_stop as _, unlink_work_package_item as _, unsubscribe_from_epic as _,
+    update_epic as _, update_task as _, update_work_package_with_links as _, DbConnection,
+    OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisibleSessionRequestsTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -239,6 +240,61 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "setting the bookmark",
             set_bookmark_then(subscriber, task_id.0, bookmarked)
+        )
+    }
+
+    async fn switch_orchestrator_on(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "switching the orchestrator on",
+            switch_orchestrator_on_then(epic.0, start_rule, max_parallel)
+        )
+    }
+
+    async fn change_orchestrator_settings(
+        &self,
+        epic: EpicId,
+        start_rule: Option<String>,
+        max_parallel: Option<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the orchestrator settings",
+            change_orchestrator_settings_then(epic.0, start_rule, max_parallel)
+        )
+    }
+
+    async fn switch_orchestrator_off(&self, epic: EpicId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "switching the orchestrator off",
+            switch_orchestrator_off_then(epic.0)
+        )
+    }
+
+    async fn mark_task_ready(
+        &self,
+        task: TaskId,
+        marked_by: String,
+        agent_name: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the ready mark",
+            mark_task_ready_then(task.0, marked_by, agent_name)
+        )
+    }
+
+    async fn clear_ready_mark(&self, task: TaskId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "clearing the ready mark",
+            clear_ready_mark_then(task.0)
         )
     }
 

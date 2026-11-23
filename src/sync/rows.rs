@@ -153,6 +153,12 @@ struct Rows {
     /// `core.allium: Bookmark`. Arrive scoped to this person by the
     /// `own_bookmarks` view, so nothing here filters by subscriber.
     bookmarks: BTreeMap<String, bindings::Bookmark>,
+    /// `core.allium: EpicOrchestration`, keyed by epic. Arrive scoped to the
+    /// epics this person holds by the `visible_epic_orchestrations` view.
+    epic_orchestrations: BTreeMap<i64, bindings::EpicOrchestration>,
+    /// `core.allium: ReadyMark`, keyed by task. Arrive scoped to the tasks
+    /// this person holds by the `visible_ready_marks` view.
+    ready_marks: BTreeMap<i64, bindings::ReadyMark>,
     /// `people.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
@@ -271,6 +277,8 @@ impl Rows {
             && self.subscriptions.is_empty()
             && self.unseen_tasks.is_empty()
             && self.bookmarks.is_empty()
+            && self.epic_orchestrations.is_empty()
+            && self.ready_marks.is_empty()
             && self.user_profiles.is_empty()
             && self.settings.is_empty()
             && self.work_packages.is_empty()
@@ -609,6 +617,38 @@ impl SharedRows {
 
     pub fn remove_bookmark(&self, id: String) {
         self.write(|rows| rows.bookmarks.remove(&id).is_some());
+    }
+
+    pub fn upsert_epic_orchestration(&self, row: &bindings::EpicOrchestration) {
+        self.write(|rows| {
+            rows.epic_orchestrations.insert(row.epic_id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_epic_orchestration(&self, epic: EpicId) {
+        self.write(|rows| rows.epic_orchestrations.remove(&epic.0).is_some());
+    }
+
+    /// The orchestrator switch on `epic` (`core.allium: EpicOrchestration`).
+    pub fn epic_orchestration(&self, epic: EpicId) -> Option<bindings::EpicOrchestration> {
+        self.read(|rows| rows.epic_orchestrations.get(&epic.0).cloned())
+    }
+
+    pub fn upsert_ready_mark(&self, row: &bindings::ReadyMark) {
+        self.write(|rows| {
+            rows.ready_marks.insert(row.task_id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_ready_mark(&self, task: TaskId) {
+        self.write(|rows| rows.ready_marks.remove(&task.0).is_some());
+    }
+
+    /// The ready mark on `task` (`core.allium: ReadyMark`).
+    pub fn ready_mark(&self, task: TaskId) -> Option<bindings::ReadyMark> {
+        self.read(|rows| rows.ready_marks.get(&task.0).cloned())
     }
 
     /// The tasks this person has bookmarked, ascending (`core.allium:
@@ -990,6 +1030,14 @@ impl SharedRows {
 
     pub fn retire_bookmark(&self, old: &bindings::Bookmark) {
         self.write(|rows| remove_if_held(&mut rows.bookmarks, &old.id, old));
+    }
+
+    pub fn retire_epic_orchestration(&self, old: &bindings::EpicOrchestration) {
+        self.write(|rows| remove_if_held(&mut rows.epic_orchestrations, &old.epic_id, old));
+    }
+
+    pub fn retire_ready_mark(&self, old: &bindings::ReadyMark) {
+        self.write(|rows| remove_if_held(&mut rows.ready_marks, &old.task_id, old));
     }
 
     pub fn retire_setting(&self, old: &bindings::Setting) {

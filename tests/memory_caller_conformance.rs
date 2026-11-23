@@ -484,6 +484,8 @@ mod identity_stamping;
 mod learning_scope_refs;
 #[path = "memory_caller_conformance/move_paths.rs"]
 mod move_paths;
+#[path = "memory_caller_conformance/orchestrators.rs"]
+mod orchestrators;
 #[path = "memory_caller_conformance/pr_state.rs"]
 mod pr_state;
 #[path = "memory_caller_conformance/repo_group_origin.rs"]

@@ -40,6 +40,7 @@ impl MemoryReducerCaller {
         // Mirrors the module's `store_task`.
         if let Some(prior) = prior.as_ref() {
             self.end_marks_on_finish(tables, prior, &row);
+            self.drop_ready_mark_on_leaving_backlog(tables, prior, &row);
         }
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).
@@ -241,6 +242,7 @@ impl MemoryReducerCaller {
             self.delete_task_side_effects(tables, task_id);
         }
         self.delete_epic_row(tables, id);
+        self.delete_orchestration(tables, id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_EPIC, id);
     }
 
@@ -761,6 +763,9 @@ impl MemoryReducerCaller {
         }
         let child_of = row.parent_epic_id;
         self.write_epic(&mut tables, row);
+        if was_child_of != child_of {
+            self.switch_off_on_reparent(&mut tables, id, child_of);
+        }
         if command_changed {
             // Only the setter's own host may run the command now.
             let setter = self.sender.clone();

@@ -229,6 +229,26 @@ mirror!(
 );
 
 mirror!(
+    module::EpicOrchestration,
+    bindings::EpicOrchestration {
+        epic_id,
+        start_rule,
+        max_parallel,
+        switched_on_at
+    }
+);
+
+mirror!(
+    module::ReadyMark,
+    bindings::ReadyMark {
+        task_id,
+        marked_by,
+        agent_name,
+        marked_at
+    }
+);
+
+mirror!(
     module::UnseenTask,
     bindings::UnseenTask {
         id,

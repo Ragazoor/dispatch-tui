@@ -78,6 +78,12 @@ impl StoreReads for Tables {
             s.task_id == task_id
         })
     }
+    fn orchestration_of(&self, epic_id: i64) -> Option<module::EpicOrchestration> {
+        self.epic_orchestrations.get(&epic_id).cloned()
+    }
+    fn ready_mark_of(&self, task_id: i64) -> Option<module::ReadyMark> {
+        self.ready_marks.get(&task_id).cloned()
+    }
     fn bookmarks_of(&self, subscriber: &str) -> Vec<module::Bookmark> {
         keep(self.bookmarks.values().cloned(), |b| {
             b.subscriber == subscriber
@@ -174,6 +180,14 @@ impl MemoryReducerCaller {
                 .into_iter()
                 .map(|u| u.id)
                 .collect(),
+            "visible_epic_orchestrations" => ids(module::orchestrations_of_held(t, who)
+                .iter()
+                .map(|o| o.epic_id)
+                .collect()),
+            "visible_ready_marks" => ids(module::ready_marks_of_held(t, who)
+                .iter()
+                .map(|m| m.task_id)
+                .collect()),
             "own_bookmarks" => module::own_bookmarks_of(t, who)
                 .into_iter()
                 .map(|b| b.id)
