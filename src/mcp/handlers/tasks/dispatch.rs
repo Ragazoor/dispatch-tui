@@ -137,7 +137,8 @@ async fn wait_for_request(
 /// The error for a refused request. "Not in backlog" when the task holds
 /// another status now — the same error a task that was already running
 /// gets — and the module's own reason otherwise (its worktree
-/// is on another machine, or an open request already exists).
+/// is on another machine, an open request already exists, or the epic runs
+/// its limit).
 async fn refused_response(
     state: &McpState,
     id: Option<Value>,

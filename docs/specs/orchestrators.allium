@@ -49,7 +49,8 @@
 -- requires of store-split.allium's RequestDispatch, which every start in an
 -- orchestrated epic passes through, and running_here below is what it
 -- counts. OrchestratorStartsATask is built but for its log entry (step 5):
--- the orchestrator starts a task with task_dispatch, as its prompt says.
+-- the orchestrator starts a task with task_dispatch (mcp-task-tools.allium:
+-- DispatchTaskViaMcp), one of the dispatch tools its prompt names.
 -- Left by step 3 for the steps that own them, so none is missed:
 --   - step 5: the session log entry of StartOrchestratorSession; the
 --     WaitingItem of OrchestratorThatKeepsDyingWaitsForTheOperator (until

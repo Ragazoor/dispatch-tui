@@ -82,7 +82,8 @@ pub enum TaskMessage {
     },
     /// A dispatch ask ended without writing a request: the module refused it
     /// (another entry point claimed the task first, its worktree is on another
-    /// machine, an open request already exists), the store could not be
+    /// machine, an open request already exists, the epic runs its limit), the
+    /// store could not be
     /// reached, or the ask gave up before requesting (a failed repo-trust
     /// grant). Drains the pending entry and nothing else
     /// (`dispatch.allium: LostClaimReported`): a refused request holds

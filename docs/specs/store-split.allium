@@ -855,9 +855,10 @@ rule RequestDispatch {
         -- schedule-origin request for a task that is not due, an epic at its
         -- limit), and nothing was written. The limit's refusal reads "epic
         -- <id> already runs <n> of <limit> tasks", naming the orchestrated
-        -- epic. A refused schedule-origin request is asked again by the
-        -- board's next schedule pass (schedules.allium: FireDueTask), so a
-        -- due task starts once a slot frees. A resume of a task that already
+        -- epic. A refused schedule-origin request is asked again after
+        -- config.schedule_refire_after while the task is still due
+        -- (schedules.allium: FireDueTask), so a due task starts once a slot
+        -- frees. A resume of a task that already
         -- runs is not a start and is not held to the limit.
         --
         -- Of two requests for one task, from two machines or two entry

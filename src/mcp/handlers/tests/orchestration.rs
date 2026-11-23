@@ -729,3 +729,50 @@ async fn a_ready_mark_from_an_unknown_orchestrator_is_refused() {
         extract_response_text(&resp)
     );
 }
+
+/// orchestrators.allium: OrchestratorStartsATask; store-split.allium:
+/// RequestDispatch's limit. The orchestrator starts a task with
+/// task_dispatch, and a start past its epic's limit is refused with the
+/// store's reason.
+#[tokio::test]
+async fn an_orchestrator_starts_tasks_up_to_its_limit() {
+    let mut state = test_state().await;
+    Arc::get_mut(&mut state)
+        .expect("the fixture's state is not shared yet")
+        .dispatch_task_wait_cap = std::time::Duration::ZERO;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    state
+        .db_write()
+        .change_orchestrator_settings(e, None, Some(1))
+        .await
+        .unwrap();
+    let first = task_in(&state, e, json!({})).await;
+    let second = task_in(&state, e, json!({})).await;
+    let start = |task: TaskId| {
+        tool_as(
+            &state,
+            "task_dispatch",
+            json!({ "task_id": task.0 }),
+            CallerIdentity::Orchestrator(name.clone()),
+        )
+    };
+
+    ok_text(&start(first).await);
+    let request = state
+        .db
+        .dispatch_requests()
+        .await
+        .into_iter()
+        .find(|r| r.task_id == first)
+        .expect("the request");
+    assert_eq!(request.origin, crate::models::DispatchOrigin::Mcp);
+
+    let refused = start(second).await;
+    assert!(is_error(&refused));
+    assert!(
+        error_message(&refused).contains(&format!("epic {} already runs 1 of 1 tasks", e.0)),
+        "{}",
+        error_message(&refused)
+    );
+}

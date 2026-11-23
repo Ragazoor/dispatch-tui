@@ -383,8 +383,9 @@ pub trait TaskCrud: TaskRead {
 /// What [`DispatchRequestStore::request_dispatch`] answered. A refusal is an
 /// ORDINARY answer, not an error (`store-split.allium: RequestDispatch`): it
 /// is how a caller learns another entry point claimed the task first, that
-/// its worktree is on another machine, or that an open request already
-/// exists, and it wrote nothing. A store that could not be reached is the
+/// its worktree is on another machine, that an open request already
+/// exists, or that the task's orchestrated epic runs its limit, and it wrote
+/// nothing. A store that could not be reached is the
 /// `Err` of the enclosing `Result` instead.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequestDispatchAnswer {

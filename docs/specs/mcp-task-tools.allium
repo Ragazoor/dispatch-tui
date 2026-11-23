@@ -1461,8 +1461,11 @@ rule DispatchTaskViaMcp {
         -- (DispatchClaimExclusive in dispatch.allium). A refused request is
         -- reported as the same "not in backlog" error a task that was already
         -- running would produce, naming the status the task actually holds
-        -- now; a task whose worktree is on another machine, or that still has
-        -- an open request, is refused with that reason instead.
+        -- now; a task whose worktree is on another machine, that still has
+        -- an open request, or whose orchestrated epic already runs its limit
+        -- on this machine, is refused with that reason instead. An
+        -- orchestrator starts its epic's tasks with this tool, held to the
+        -- same limit (orchestrators.allium: OrchestratorStartsATask).
         --
         -- The call then waits on the request row, for at most
         -- config.dispatch_task_wait_cap, and answers by the row's state:
