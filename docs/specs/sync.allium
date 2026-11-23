@@ -104,9 +104,11 @@ entity BoardConnection {
 
     status: connecting | connected | disconnected | failed
 
-    -- Consecutive failed attempts since the last success. Reset on connect,
-    -- not decayed: this counts the current outage, and an outage that ends is
-    -- over rather than partly over. Its only consumer is the backoff.
+    -- Consecutive failed attempts since the connection last came all the way
+    -- up: accepted, identity settled and initial subscription applied
+    -- (AnAppliedSubscriptionEndsTheOutage). Reset then, not decayed: this
+    -- counts the current outage, and an outage that ends is over rather than
+    -- partly over. Its only consumer is the backoff.
     attempts: Integer
 
     -- What went wrong, in terms an operator can act on. Present exactly while
@@ -464,6 +466,26 @@ rule IdentityConflictAtStartupAbortsIt {
         -- The message is the same composed one the indicator would show.
 }
 
+rule AnAppliedSubscriptionEndsTheOutage {
+    when: InitialSubscriptionApplied(connection)
+
+    requires: connection.status = connected
+
+    ensures: connection.attempts = 0
+
+    @guidance
+        -- THE OUTAGE ENDS WHEN THE BOARD IS ALL THE WAY UP, not when the store
+        -- answers. Applied means accepted, identity settled and the initial
+        -- subscription's rows arrived, so the board is drawing live rows again.
+        -- Every failure before that point — a refused attempt, a failed
+        -- adoption or host-id read, a refused subscription — counts towards
+        -- the same outage and grows the same backoff.
+        --
+        -- The reset makes the backoff of a NEW outage start short. A counter
+        -- that survived a working connection would punish a board for an
+        -- outage that is over.
+}
+
 rule ConnectionAccepted {
     when: ConnectionAccepted(connection, identity)
 
@@ -471,7 +493,6 @@ rule ConnectionAccepted {
 
     ensures:
         connection.status = connected
-        connection.attempts = 0
         UserIdentityOffered(identity: identity)
 
     @guidance
@@ -484,9 +505,13 @@ rule ConnectionAccepted {
         -- person?" is a question about identity, and answering it beside the
         -- socket is how a retry loop ends up with an opinion about who you are.
         --
-        -- `attempts` resets here rather than on the next failure, so the backoff
-        -- of a NEW outage starts short. A counter that survived a successful
-        -- connection would punish a board for an outage that is over.
+        -- `attempts` is NOT reset here. An accepted connection is not yet a
+        -- working one: the stored identity may fail to adopt, this host's id
+        -- may fail to read, and the store may refuse the initial subscription.
+        -- Each of those drops the connection again, and a counter reset on
+        -- acceptance would retry that cycle every config.reconnect_backoff_base
+        -- for as long as it lasts — the hot loop the backoff exists to prevent.
+        -- The reset waits for AnAppliedSubscriptionEndsTheOutage.
         --
         -- The identity ARRIVES WITH THE ACCEPTANCE rather than being fetched
         -- afterwards. A store that accepted a connection without saying who it
@@ -1291,8 +1316,10 @@ rule ConnectionAttemptFailed {
         -- the launch instead (FirstConnectionFailureAbortsStartup); this rule
         -- is every later one.
         --
-        -- The counter increments here and nowhere else, which keeps the backoff
-        -- reading one number that means one thing.
+        -- The counter increments on every way an attempt fails to come up (here,
+        -- ConnectionDropped and ASubscriptionTheStoreRefusesIsAnOutage) and
+        -- resets in one place (AnAppliedSubscriptionEndsTheOutage), which keeps
+        -- the backoff reading one number that means one thing.
 }
 
 rule ConnectionDropped {
@@ -1669,7 +1696,8 @@ surface StoreBoundary {
         InitialSubscriptionRefused(connection, reason)
             when connection.status = connected
         -- The store applied that ask: its rows have arrived. For
-        -- FirstConnectionLetsTheBoardDraw.
+        -- FirstConnectionLetsTheBoardDraw, AnAppliedSubscriptionEndsTheOutage
+        -- and RegisterHostOnConnect.
         InitialSubscriptionApplied(connection)
             when connection.status = connected
         -- An update of a row served through a per-caller view, which reaches
@@ -1874,8 +1902,6 @@ surface EpicSubscriptionToggle {
 ------------------------------------------------------------
 
 open question "What is a board supposed to do with a change whose fate is unknown? EveryMutationIsAtomicAndAnswered admits acceptance and rejection, and a transport has a third outcome: the change was SENT and then the connection went, or the store never answered within config.mutation_timeout. It may or may not have been applied, and nothing here says who is told what. Re-sending is the one answer that is definitely wrong — it is the queue NoWriteIsEverQueued refuses, with the added hazard that the original may have landed."
-
-open question "Does a store that keeps accepting the connection and refusing its initial subscription ever get backed off? ConnectionAccepted resets `attempts` to 0 on acceptance, and ASubscriptionTheStoreRefusesIsAnOutage then adds one, so every cycle of that failure waits config.reconnect_backoff_base and the wait never grows towards config.reconnect_backoff_max — a refusal that lasts an hour is retried roughly every second for an hour, which is the hot loop the ceiling's own comment says the backoff exists to prevent. Should `attempts` reset only once the initial subscription is applied, rather than on acceptance?"
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 
