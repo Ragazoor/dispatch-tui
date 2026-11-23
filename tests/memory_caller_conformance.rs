@@ -568,3 +568,13 @@ fn background_wait_cap_matches_the_module() {
         dispatch_spacetime_module::BACKGROUND_WAIT_CAP
     );
 }
+
+/// The board spells `DEFAULT_ORCHESTRATOR_LIMIT` itself too, for the
+/// orchestrator's prompt; the store's copy is the one that refuses a start.
+#[test]
+fn default_orchestrator_limit_matches_the_module() {
+    assert_eq!(
+        dispatch_tui::models::DEFAULT_ORCHESTRATOR_LIMIT,
+        dispatch_spacetime_module::DEFAULT_ORCHESTRATOR_LIMIT
+    );
+}
