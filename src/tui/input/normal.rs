@@ -342,7 +342,12 @@ impl App {
         }
         let count = self.select.tasks.len() + self.select.epics.len();
         self.input.mode = InputMode::ConfirmBatchDelete;
-        self.status.set(format!("Delete {} items? [y/n]", count));
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmBatchDelete,
+            "n",
+        );
+        self.status.set(format!("Delete {count} items? {keys}"));
         vec![]
     }
 
@@ -372,7 +377,12 @@ impl App {
             return vec![];
         }
         self.input.mode = InputMode::ConfirmDeleteTask(id);
-        self.status.set(format!("Delete {title}? [y/n]"));
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmDeleteTask,
+            "n",
+        );
+        self.status.set(format!("Delete {title}? {keys}"));
         vec![]
     }
 

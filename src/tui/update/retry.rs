@@ -17,8 +17,8 @@ impl App {
         // stale nor crashed. See RetryReachableInPlace in
         // docs/specs/dispatch.allium.
         if task.is_some_and(|t| t.is_unprovisioned()) {
-            self.status
-                .set("Agent never started - [f] Fresh start  [Esc] Cancel".to_string());
+            let keys = crate::tui::ui::retry_keys(self.key_table, false);
+            self.status.set(format!("Agent never started - {keys}"));
             return vec![];
         }
 
@@ -27,9 +27,8 @@ impl App {
         } else {
             "stale"
         };
-        self.status.set(format!(
-            "Agent {state} - [r] Resume  [f] Fresh start  [Esc] Cancel"
-        ));
+        let keys = crate::tui::ui::retry_keys(self.key_table, true);
+        self.status.set(format!("Agent {state} - {keys}"));
         vec![]
     }
 

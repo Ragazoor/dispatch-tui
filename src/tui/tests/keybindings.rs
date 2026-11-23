@@ -1528,20 +1528,47 @@ fn every_family_namespace_can_be_set_up() {
 // Mode-bar hints
 // ---------------------------------------------------------------------------
 
-/// The keys inside every `[...]` of `text`, split on `/`: `[q/Esc]` gives
-/// `q` and `Esc`.
-fn tokens(text: &str) -> Vec<String> {
+/// The hint keys inside every `[...]` of `line`, split on `/`: `[q/Esc]`
+/// gives `q` and `Esc`, `[/]` gives `/`. Checkbox and tree marks (`[x]`, `[ ]`,
+/// `[-]`, `[~]`; `[x]` only where x is not a key of the mode) and the board's badges (`[flat]`, `[active]`, `[/query]`,
+/// `[hidden: …]`, `[2/9 repos]`) are not hints. An empty `[]` is kept as the
+/// key `[]`: a hint built from a row that is not there, which must fail.
+fn bracketed_keys(line: &str, is_key: impl Fn(&str) -> bool) -> Vec<String> {
     let mut out = Vec::new();
-    let mut rest = text;
+    let mut rest = line;
     while let Some(open) = rest.find('[') {
         let Some(close) = rest[open..].find(']') else {
             break;
         };
         let inner = &rest[open + 1..open + close];
-        out.extend(inner.split('/').map(|k| k.trim().to_string()));
         rest = &rest[open + close + 1..];
+        let badge = matches!(inner, "flat" | "active")
+            || inner.starts_with("hidden:")
+            || inner.ends_with(" repos")
+            || (inner.starts_with('/') && inner.len() > 1);
+        let mark = matches!(inner.trim(), "x" | "-" | "~") && !is_key(inner);
+        if badge || mark || inner == " " {
+            continue;
+        }
+        match inner {
+            "" => out.push("[]".to_string()),
+            "/" => out.push("/".to_string()),
+            _ => out.extend(inner.split('/').map(|k| k.trim().to_string())),
+        }
     }
     out
+}
+
+/// The keys a line names without brackets ("Enter to select", "j/k scroll ·
+/// q/Esc/Enter close", "q/Esc:cancel"): each word, split on `/` and `:`,
+/// that `is_key` accepts.
+fn bare_keys(line: &str, is_key: impl Fn(&str) -> bool) -> Vec<String> {
+    line.split_whitespace()
+        .flat_map(|w| w.split([':', '/']))
+        .map(|w| w.trim_matches(|c: char| ",.;?·()".contains(c)))
+        .filter(|k| !k.is_empty() && is_key(k))
+        .map(str::to_string)
+        .collect()
 }
 
 /// A row-less binding standing for "the mode `ns` with nothing else set up".
@@ -1557,102 +1584,278 @@ fn probe(ns: KeyNamespace) -> KeyBinding {
     }
 }
 
-/// HintsNameOnlyTableKeys: every bracketed key hint anywhere in the frame a
-/// board mode draws (its popup, form prompt or overlay footer, not just the
-/// status bar) names a key of that mode's namespace. `[x]` and `[ ]` are
-/// checkbox marks, not hints; `Del`, `↑` and `↓` are the hints' short forms
-/// of Delete, Up and Down.
-#[test]
-fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
-    fn table_form(hint: &str) -> &str {
-        match hint {
-            "Del" => "Delete",
-            "↑" => "Up",
-            "↓" => "Down",
-            other => other,
-        }
+/// The table form of a key as a hint draws it: `Del`, `↑` and `↓` are the
+/// hints' short forms of Delete, Up and Down.
+fn table_form(hint: &str) -> &str {
+    match hint {
+        "Del" => "Delete",
+        "↑" => "Up",
+        "↓" => "Down",
+        "←" => "Left",
+        "→" => "Right",
+        other => other,
     }
+}
 
-    let mut checked = 0;
-    let mut failures = Vec::new();
-    let mut hintless = Vec::new();
+/// The modes whose hints name their keys without brackets.
+const BARE_HINT_NAMESPACES: [KeyNamespace; 3] = [
+    KeyNamespace::BoardPickerMoveToEpic,
+    KeyNamespace::BoardPickerReparentEpic,
+    KeyNamespace::BoardConfirmDeleteRepoPath,
+];
+
+/// One line of hints a mode drew: the namespace, which of its boards, the
+/// row of the screen, the line and the keys read from it.
+struct HintLine {
+    ns: KeyNamespace,
+    board: usize,
+    y: u16,
+    line: String,
+    keys: Vec<String>,
+}
+
+/// Every board each mode of HintsNameOnlyTableKeys is read on.
+fn hint_boards(ns: KeyNamespace) -> Vec<App> {
+    match ns {
+        // One board per row's context, so every status bar the cursor's
+        // card can draw is read.
+        KeyNamespace::BoardNormal | KeyNamespace::BoardDetail => default_bindings_in(ns)
+            .flat_map(|b| match ns {
+                KeyNamespace::BoardNormal => vec![app_for(b)],
+                _ => apps_in(b),
+            })
+            .collect(),
+        KeyNamespace::BoardAdmin => admin_apps_on_every_pane(),
+        KeyNamespace::BoardFilter => [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages]
+            .into_iter()
+            .flat_map(|tab| {
+                apps_in(&probe(ns)).into_iter().map(move |mut app| {
+                    app.filter_overlay.tab = tab;
+                    app
+                })
+            })
+            .collect(),
+        _ => apps_in(&probe(ns)),
+    }
+}
+
+/// HintsNameOnlyTableKeys: the hint lines every board mode draws under
+/// `table`. board.normal's are its status bar and the indicator row above
+/// the board; board.detail's are its status bar and the detail's footer;
+/// every other mode's are the lines it draws over the plain board (its popup,
+/// form prompt, overlay footer and status bar).
+fn read_hints(table: &'static [KeyBinding]) -> Vec<HintLine> {
+    // Wide enough that no status bar is cut off, so a longer user key
+    // cannot push a hint out of the frame.
+    const W: u16 = 300;
+    const H: u16 = 50;
+    let mut out = Vec::new();
     for ns in board_namespaces() {
-        if matches!(
-            ns,
-            KeyNamespace::BoardNormal
-                | KeyNamespace::BoardDetail
-                | KeyNamespace::BoardHelp
-                | KeyNamespace::BoardError
-        ) {
+        if matches!(ns, KeyNamespace::BoardHelp | KeyNamespace::BoardError) {
             continue;
         }
-        let rows: Vec<&KeyBinding> = KEY_BINDINGS.iter().filter(|b| b.namespace == ns).collect();
-        let probe = probe(ns);
-        let apps = match ns {
-            KeyNamespace::BoardAdmin => admin_apps_on_every_pane(),
-            KeyNamespace::BoardFilter => [FilterTab::Repos, FilterTab::Epics, FilterTab::Packages]
-                .into_iter()
-                .flat_map(|tab| {
-                    apps_in(&probe).into_iter().map(move |mut app| {
-                        app.filter_overlay.tab = tab;
-                        app
-                    })
-                })
-                .collect(),
-            _ => apps_in(&probe),
+        let is_key = |k: &str| {
+            let k = table_form(k);
+            [KEY_BINDINGS, table]
+                .iter()
+                .any(|t| t.iter().any(|b| b.namespace == ns && b.keys.contains(&k)))
         };
-        let before = checked;
-        for mut app in apps {
-            let buf = render_to_buffer(&mut app, 160, 50);
-            // The board drawn under the mode (its header's `[N]` bell, its
-            // cards) is board.normal's, not the mode's: a line the mode
-            // leaves as the plain board draws it is not the mode's hint.
-            app.input.mode = InputMode::Normal;
-            let board = render_to_buffer(&mut app, 160, 50);
-            let area = buf.area();
-            for y in area.top()..area.bottom() {
-                let line = buffer_line(&buf, y);
-                if line == buffer_line(&board, y) {
-                    continue;
+        for (board, mut app) in hint_boards(ns).into_iter().enumerate() {
+            app.set_key_table(table);
+            let buf = render_to_buffer(&mut app, W, H);
+            let line = |y: u16| buffer_line(&buf, y);
+            let mut push = |y: u16, keys: Vec<String>| {
+                out.push(HintLine {
+                    ns,
+                    board,
+                    y,
+                    line: line(y).trim().to_string(),
+                    keys,
+                });
+            };
+            match ns {
+                KeyNamespace::BoardNormal => {
+                    push(0, bracketed_keys(&line(0), is_key));
+                    push(H - 1, bracketed_keys(&line(H - 1), is_key));
                 }
-                for hint in tokens(&line) {
-                    // Checkbox and tree marks, not hints.
-                    if matches!(hint.as_str(), "" | "x" | "-" | "~") {
-                        continue;
-                    }
-                    checked += 1;
-                    let key = table_form(&hint);
-                    let known = rows
-                        .iter()
-                        .any(|b| b.keys.contains(&key) || b.keys.contains(&ANY_OTHER_KEY));
-                    if !known {
-                        failures.push(format!("{}: `{hint}` in {:?}", ns.name(), line.trim()));
+                KeyNamespace::BoardDetail => {
+                    // The footer is the detail's bottom border: the last line
+                    // the detail draws over the board it was opened from.
+                    app.board.view_mode = ViewMode::Board(Default::default());
+                    let board_buf = render_to_buffer(&mut app, W, H);
+                    let footer = (0..H - 1)
+                        .rev()
+                        .find(|&y| line(y) != buffer_line(&board_buf, y))
+                        .expect("the detail draws over the board");
+                    push(footer, bare_keys(&line(footer), is_key));
+                    push(H - 1, bracketed_keys(&line(H - 1), is_key));
+                }
+                _ => {
+                    // The board drawn under the mode (its header's `[N]` bell,
+                    // its cards) is board.normal's, not the mode's: a line the
+                    // mode leaves as the plain board draws it is not its hint.
+                    app.input.mode = InputMode::Normal;
+                    let board_buf = render_to_buffer(&mut app, W, H);
+                    for y in 0..H {
+                        let text = line(y);
+                        if text == buffer_line(&board_buf, y) {
+                            continue;
+                        }
+                        let keys = if BARE_HINT_NAMESPACES.contains(&ns) {
+                            bare_keys(&text, is_key)
+                        } else {
+                            bracketed_keys(&text, is_key)
+                        };
+                        if !keys.is_empty() {
+                            push(y, keys);
+                        }
                     }
                 }
             }
         }
-        if checked == before {
-            hintless.push(ns.name());
+    }
+    out
+}
+
+/// Every key read is a key of its mode's namespace in `table` (or stands for
+/// its catch-all row), and every mode read names at least one key.
+fn hint_failures(table: &'static [KeyBinding], read: &[HintLine]) -> Vec<String> {
+    let mut failures = Vec::new();
+    for ns in board_namespaces() {
+        if matches!(ns, KeyNamespace::BoardHelp | KeyNamespace::BoardError) {
+            continue;
+        }
+        if !read.iter().any(|h| h.ns == ns && !h.keys.is_empty()) {
+            failures.push(format!("{}: the mode drew no hint", ns.name()));
         }
     }
-    assert!(checked > 20, "the test read no hints ({checked})");
-    // These write their keys without brackets ("navigate tree above, Enter
-    // to select", "y: yes  n/Esc: cancel"), so this test reads nothing from
-    // them. Any other mode reading zero means the test stopped seeing it.
-    assert_eq!(
-        hintless,
-        [
-            "board.picker.move_to_epic",
-            "board.picker.reparent_epic",
-            "board.confirm.delete_repo_path"
-        ],
-        "modes that drew no bracketed hint"
-    );
+    for h in read {
+        let rows: Vec<&KeyBinding> = table.iter().filter(|b| b.namespace == h.ns).collect();
+        for hint in &h.keys {
+            let key = table_form(hint);
+            let known = rows
+                .iter()
+                .any(|b| b.keys.contains(&key) || b.keys.contains(&ANY_OTHER_KEY));
+            if hint == "[]" || !known {
+                failures.push(format!("{}: `{hint}` in {:?}", h.ns.name(), h.line));
+            }
+        }
+    }
+    failures
+}
+
+/// HintsNameOnlyTableKeys under the default table: every key hint anywhere
+/// in the frame a board mode draws names a key of that mode's namespace.
+#[test]
+fn every_bracketed_hint_a_mode_draws_is_a_key_of_that_mode() {
+    let read = read_hints(KEY_BINDINGS);
+    let checked: usize = read.iter().map(|h| h.keys.len()).sum();
+    assert!(checked > 100, "the test read too few hints ({checked})");
+    let failures = hint_failures(KEY_BINDINGS, &read);
     assert!(
         failures.is_empty(),
         "hints naming a key the mode does not have:\n{}",
         failures.join("\n")
     );
+}
+
+/// HintsNameOnlyTableKeys under the remapped table of
+/// RemappedTableDrivesDispatch: every hint names a key its mode answers now,
+/// and each key stands where its row's default key stood, so `[j/k] move`
+/// reads `[k/j] move` once the two rows trade keys. A hint written by hand
+/// passes the first check whenever the remap only swaps keys; the second
+/// catches it.
+#[test]
+fn under_the_remapped_table_every_hint_names_the_users_key() {
+    let remapped = crate::keybindings::remapped_table();
+    let by_default = read_hints(KEY_BINDINGS);
+    let by_remap = read_hints(remapped);
+    let mut failures = hint_failures(remapped, &by_remap);
+    assert_eq!(
+        by_default.len(),
+        by_remap.len(),
+        "the two reads drew different boards"
+    );
+    let mut moved = 0;
+    for (d, r) in by_default.iter().zip(&by_remap) {
+        assert_eq!((d.ns, d.board, d.y), (r.ns, r.board, r.y));
+        if d.keys.len() != r.keys.len() {
+            failures.push(format!("{}: {:?} became {:?}", d.ns.name(), d.line, r.line));
+            continue;
+        }
+        for (dk, rk) in d.keys.iter().zip(&r.keys) {
+            let (dk, rk) = (table_form(dk), table_form(rk));
+            // The rows whose default keys list the key drawn by default; a
+            // catch-all's stand-in (`n` of `[y/n]`) has none.
+            let rows: Vec<usize> = (0..KEY_BINDINGS.len())
+                .filter(|&i| {
+                    KEY_BINDINGS[i].namespace == d.ns && KEY_BINDINGS[i].keys.contains(&dk)
+                })
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            if dk != rk {
+                moved += 1;
+            }
+            if !rows.iter().any(|&i| remapped[i].keys.contains(&rk)) {
+                failures.push(format!(
+                    "{}: `{dk}` of {:?} became `{rk}` in {:?}, not a key of its row",
+                    d.ns.name(),
+                    d.line,
+                    r.line
+                ));
+            }
+        }
+    }
+    assert!(moved > 20, "the remap moved too few drawn keys ({moved})");
+    assert!(
+        failures.is_empty(),
+        "hints that do not follow the remap:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// HintsNameOnlyTableKeys for the prompts a handler sets as the status
+/// message on opening a mode (the drawn frames above read the status bar's
+/// fallback): under the remapped table they name the user's keys.
+#[test]
+fn prompts_set_on_opening_a_mode_name_the_users_keys() {
+    use crate::keybindings::keys_of;
+    let remapped = crate::keybindings::remapped_table();
+    let first = |ns, action| keys_of(remapped, ns, action)[0];
+    let delete = first(KeyNamespace::BoardNormal, "delete_task");
+
+    let mut done_card = app_for(&in_context(C::TaskWithoutWorktree));
+    done_card.set_key_table(remapped);
+    press(&mut done_card, delete);
+    assert!(matches!(
+        done_card.input.mode,
+        InputMode::ConfirmDeleteTask(_)
+    ));
+    let yes = first(KeyNamespace::BoardConfirmDeleteTask, "confirm_delete_yes");
+    assert_ne!(yes, "y", "the remap must move the yes key");
+    let message = done_card.status_message().unwrap_or_default().to_string();
+    assert!(message.ends_with(&format!("[{yes}/n]")), "{message}");
+
+    let mut running = on_running_card(make_app());
+    running.set_key_table(remapped);
+    press(&mut running, delete);
+    assert_eq!(running.input.mode, InputMode::ConfirmDone);
+    let yes = first(KeyNamespace::BoardConfirmDone, "confirm_done_yes");
+    let message = running.status_message().unwrap_or_default().to_string();
+    assert!(message.ends_with(&format!("[{yes}/n]")), "{message}");
+
+    let mut stale = app_with_running_task(|t| {
+        t.tmux_window = None;
+        t.sub_status = SubStatus::Stale;
+    });
+    stale.set_key_table(remapped);
+    stale.handle_kill_and_retry(TaskId(7));
+    let resume = first(KeyNamespace::BoardConfirmRetry, "confirm_retry_resume");
+    assert_ne!(resume, "r", "the remap must move the resume key");
+    let message = stale.status_message().unwrap_or_default().to_string();
+    assert!(message.contains(&format!("[{resume}] Resume")), "{message}");
 }
 
 // ---------------------------------------------------------------------------

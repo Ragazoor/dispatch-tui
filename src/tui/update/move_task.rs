@@ -82,11 +82,16 @@ impl App {
             .as_ref()
             .map_or(0, |p| p.batch.len());
 
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmMoveToEpic,
+            "n",
+        );
         let msg = match new_epic {
             None if batch_len > 0 => {
-                format!("Detach {batch_len} tasks from their epics? [y/n]")
+                format!("Detach {batch_len} tasks from their epics? {keys}")
             }
-            None => format!("Detach {moving_title} from its epic? [y/n]"),
+            None => format!("Detach {moving_title} from its epic? {keys}"),
             Some(eid) => {
                 let epic_label = self
                     .board
@@ -96,9 +101,9 @@ impl App {
                     .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
                     .unwrap_or_else(|| "the epic".to_string());
                 if batch_len > 0 {
-                    format!("Move {batch_len} tasks to {epic_label}? [y/n]")
+                    format!("Move {batch_len} tasks to {epic_label}? {keys}")
                 } else {
-                    format!("Move {moving_title} to {epic_label}? [y/n]")
+                    format!("Move {moving_title} to {epic_label}? {keys}")
                 }
             }
         };

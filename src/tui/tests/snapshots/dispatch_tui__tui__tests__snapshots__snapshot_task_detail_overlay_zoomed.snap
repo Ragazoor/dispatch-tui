@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/snapshots.rs
+assertion_line: 455
 expression: rendered
 ---
 ╭ Task 1 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -41,4 +42,4 @@ expression: rendered
 │                                                                                                                      │
 │                                                                                                                      │
 ╰ j/k scroll · z zoom · q/Esc/Enter close ─────────────────────────────────────────────────────────────────────────────╯
-[Space] dispatch  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [s]plit
+[j/k] scroll  [z]oom  [q] close

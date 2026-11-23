@@ -11,9 +11,17 @@ use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
 /// The delete prompt for `package`. Shared by the handler that opens the
 /// prompt and the status bar's fallback, which rebuilds it once the status
 /// message has expired so the prompt never loses the package's name.
-pub(in crate::tui) fn delete_work_package_prompt(package: &WorkPackage) -> String {
+pub(in crate::tui) fn delete_work_package_prompt(
+    table: &'static [crate::keybindings::KeyBinding],
+    package: &WorkPackage,
+) -> String {
     let title = truncate_title(&package.title, TITLE_DISPLAY_LENGTH);
-    format!("Delete work package {title}? Its tasks and epics are kept [y/n]")
+    let keys = crate::keybindings::yes_no_hint(
+        table,
+        crate::keybindings::KeyNamespace::BoardConfirmDeleteWorkPackage,
+        "n",
+    );
+    format!("Delete work package {title}? Its tasks and epics are kept {keys}")
 }
 
 impl App {
@@ -227,7 +235,7 @@ impl App {
         let Some(package) = self.board.find_work_package(id) else {
             return vec![];
         };
-        let prompt = delete_work_package_prompt(package);
+        let prompt = delete_work_package_prompt(self.key_table, package);
         self.input.mode = InputMode::ConfirmDeleteWorkPackage(id);
         self.status.set(prompt);
         vec![]

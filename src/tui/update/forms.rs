@@ -15,6 +15,7 @@ pub(in crate::tui) fn copy_task(
     input: &mut InputState,
     status: &mut StatusState,
     task: &Task,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
     let title = format!("Copy of: {}", task.title);
     let description = task.description.clone();
@@ -39,7 +40,7 @@ pub(in crate::tui) fn copy_task(
     input.clear_buffer();
     input.copy_flow = true;
     input.mode = InputMode::InputTag;
-    status.set(crate::tui::ui::tag_prompt(false).to_string());
+    status.set(crate::tui::ui::tag_prompt(table, false));
     vec![]
 }
 
@@ -90,6 +91,7 @@ pub(in crate::tui) fn submit_title(
     input: &mut InputState,
     status: &mut StatusState,
     value: String,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
     input.clear_buffer();
     if value.is_empty() {
@@ -109,7 +111,7 @@ pub(in crate::tui) fn submit_title(
             work_package: None,
         });
         input.mode = InputMode::InputTag;
-        status.set(crate::tui::ui::tag_prompt(false).to_string());
+        status.set(crate::tui::ui::tag_prompt(table, false));
     }
     vec![]
 }
@@ -218,6 +220,7 @@ pub(in crate::tui) fn submit_base_branch(
     input: &mut InputState,
     status: &mut StatusState,
     value: String,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
     let base_branch = if value.is_empty() {
         input
@@ -233,7 +236,7 @@ pub(in crate::tui) fn submit_base_branch(
     }
     input.clear_buffer();
     input.mode = InputMode::InputWrapUpMode;
-    status.set("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip".to_string());
+    status.set(crate::tui::ui::wrap_up_prompt(table));
     vec![]
 }
 
@@ -253,8 +256,9 @@ pub(in crate::tui) fn submit_wrap_up_mode(
         draft.wrap_up_mode = Some(m);
     }
     input.mode = InputMode::InputModel;
-    let seeded = input.task_draft.as_ref().and_then(|d| d.model);
-    status.set(crate::tui::ui::model_prompt(seeded));
+    // The status bar rebuilds the model prompt from the mode with the keys
+    // of the table it draws with; a message would keep the wrap-up prompt.
+    status.clear();
     vec![]
 }
 
@@ -282,12 +286,13 @@ pub(in crate::tui) fn apply_model(input: &mut InputState, model: Option<TaskMode
 pub(in crate::tui) fn arm_phoenix(
     input: &mut InputState,
     status: &mut StatusState,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
     if let Some(ref mut draft) = input.task_draft {
         draft.phoenix = true;
     }
     // Mode is already InputTag; re-advertise the accepted set without `p`.
-    status.set(crate::tui::ui::tag_prompt(true).to_string());
+    status.set(crate::tui::ui::tag_prompt(table, true));
     vec![]
 }
 
@@ -326,11 +331,26 @@ pub(in crate::tui) fn submit_tag(
 pub(in crate::tui) fn start_quick_dispatch_selection(
     input: &mut InputState,
     status: &mut StatusState,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
+    use crate::keybindings::{hint_key, hint_keys, KeyNamespace};
     input.mode = InputMode::QuickDispatch;
     input.repo_cursor = 0;
     input.clear_buffer();
-    status.set("Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string());
+    let ns = KeyNamespace::BoardPickerQuickDispatch;
+    status.set(format!(
+        "Type to filter · {} navigate · {} select · {} cancel",
+        hint_keys(
+            table,
+            ns,
+            &[
+                ("quick_dispatch_cursor_up", "Up"),
+                ("quick_dispatch_cursor_down", "Down")
+            ]
+        ),
+        hint_key(table, ns, None, "quick_dispatch_select", "Enter"),
+        hint_key(table, ns, None, "quick_dispatch_cancel", "Esc"),
+    ));
     vec![]
 }
 

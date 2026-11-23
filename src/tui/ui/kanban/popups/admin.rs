@@ -10,6 +10,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::keybindings::{hint_key, hint_keys, yes_no_hint, KeyNamespace as N};
 use crate::models::MemberRole;
 use crate::palette::{CYAN, FG, GREEN, MUTED, RED, YELLOW};
 use crate::tui::types::{AdminConfirm, AdminPane, AdminPrompt, AdminScreen};
@@ -162,6 +163,9 @@ pub(super) fn admin_lines(screen: &AdminScreen, width: usize) -> Vec<Line<'stati
 /// What the keys of the active pane do, or the prompt or confirmation open.
 fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'static>> {
     let hint = |text: &str| Line::from(Span::styled(text.to_string(), Style::default().fg(MUTED)));
+    let t = app.key_table;
+    let yes_no = yes_no_hint(t, N::BoardConfirmAdmin, "n");
+    let key = |action, shown| format!("[{}]", hint_key(t, N::BoardAdmin, None, action, shown));
     match app.input.mode {
         InputMode::InputAdminText => {
             let label = match screen.prompt {
@@ -179,20 +183,24 @@ fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'stat
                     width.saturating_sub(label.len()).max(1),
                     Style::default().fg(YELLOW),
                 ),
-                hint("[Enter] send  [Esc] cancel"),
+                hint(&format!(
+                    "[{}] send  [{}] cancel",
+                    hint_key(t, N::BoardText, None, "submit_input", "Enter"),
+                    hint_key(t, N::BoardText, None, "cancel_input", "Esc"),
+                )),
             ]
         }
         InputMode::ConfirmAdmin => {
             let (text, color) = match &screen.confirm {
                 Some(AdminConfirm::DeleteWorkspace { name, members, .. }) => (
-                    format!("Delete workspace {name} and its {members} membership(s)? [y/n]"),
+                    format!("Delete workspace {name} and its {members} membership(s)? {yes_no}"),
                     RED,
                 ),
                 Some(AdminConfirm::RemoveMember {
                     person, workspace, ..
                 }) => (
                     format!(
-                        "Remove {person} from {workspace}? Their private items there stay unseen. [y/n]"
+                        "Remove {person} from {workspace}? Their private items there stay unseen. {yes_no}"
                     ),
                     RED,
                 ),
@@ -203,11 +211,11 @@ fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'stat
                         .iter()
                         .find(|p| &p.identity == identity)
                         .map_or_else(|| identity.clone(), |p| p.shown_name.clone());
-                    (format!("Revoke super-admin from {name}? [y/n]"), YELLOW)
+                    (format!("Revoke super-admin from {name}? {yes_no}"), YELLOW)
                 }
                 Some(AdminConfirm::DeleteUnseen { kind, id }) => (
                     format!(
-                        "Delete {kind} {id} for good? An epic goes with its subtree. You cannot read it first. [y/n]"
+                        "Delete {kind} {id} for good? An epic goes with its subtree. You cannot read it first. {yes_no}"
                     ),
                     RED,
                 ),
@@ -217,23 +225,54 @@ fn footer_lines(app: &App, screen: &AdminScreen, width: usize) -> Vec<Line<'stat
         }
         _ => {
             let keys = match screen.pane {
-                AdminPane::Workspaces if screen.snapshot.i_am_super_admin => {
-                    "[n] new  [r] rename  [d] delete  [a] add member"
+                AdminPane::Workspaces if screen.snapshot.i_am_super_admin => format!(
+                    "{} new  {} rename  {} delete  {} add member",
+                    key("admin_new_workspace", "n"),
+                    key("admin_rename_workspace", "r"),
+                    key("admin_delete_workspace", "d"),
+                    key("admin_add_member", "a"),
+                ),
+                AdminPane::Workspaces => format!(
+                    "{} rename  {} add member",
+                    key("admin_rename_workspace", "r"),
+                    key("admin_add_member", "a"),
+                ),
+                AdminPane::Members => format!(
+                    "{} add  {} admin/member  {} remove",
+                    key("admin_add_member", "a"),
+                    key("admin_toggle_role", "m"),
+                    key("admin_remove_member", "x"),
+                ),
+                AdminPane::SuperAdmins => format!(
+                    "{} grant  {} revoke",
+                    key("admin_grant_super_admin", "g"),
+                    key("admin_revoke_super_admin", "v"),
+                ),
+                AdminPane::Unseen => {
+                    format!("{} delete item", key("admin_delete_unseen_item", "D"))
                 }
-                AdminPane::Workspaces => "[r] rename  [a] add member",
-                AdminPane::Members => "[a] add  [m] admin/member  [x] remove",
-                AdminPane::SuperAdmins => "[g] grant  [v] revoke",
-                AdminPane::Unseen => "[D] delete item",
             };
             let claim = if screen.snapshot.claimable {
-                "  [c] claim super-admin"
+                format!(
+                    "  {} claim super-admin",
+                    key("admin_claim_super_admin", "c")
+                )
             } else {
-                ""
+                String::new()
             };
+            let moves = hint_keys(
+                t,
+                N::BoardAdmin,
+                &[("admin_navigate_down", "j"), ("admin_navigate_up", "k")],
+            );
             vec![Line::from(vec![
-                Span::styled(keys.to_string(), Style::default().fg(GREEN)),
+                Span::styled(keys, Style::default().fg(GREEN)),
                 Span::styled(
-                    format!("{claim}  [Tab] pane  [j/k] move  [Esc] close"),
+                    format!(
+                        "{claim}  {} pane  [{moves}] move  {} close",
+                        key("admin_next_pane", "Tab"),
+                        key("admin_close", "Esc"),
+                    ),
                     Style::default().fg(MUTED),
                 ),
             ])]

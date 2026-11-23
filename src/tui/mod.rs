@@ -950,10 +950,15 @@ impl App {
         }
 
         let count = detachable.len();
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmDetachTmux,
+            "n",
+        );
         let msg = if count == 1 {
-            "Detach tmux panel? [y/n]".to_string()
+            format!("Detach tmux panel? {keys}")
         } else {
-            format!("Detach {count} tmux panels? [y/n]")
+            format!("Detach {count} tmux panels? {keys}")
         };
         self.input.mode = InputMode::ConfirmDetachTmux(detachable);
         self.status.set(msg);

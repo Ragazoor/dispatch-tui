@@ -9,6 +9,9 @@ use ratatui::{
 };
 use std::collections::HashSet;
 
+use crate::keybindings::{
+    hint_keys, hint_row_keys, keys_of, short_key_form, KeyBinding, KeyNamespace,
+};
 use crate::models::{Epic, EpicId};
 use crate::palette::{MUTED, PURPLE};
 use crate::tui::ui::shared::{centered_x, open_overlay, titled_block};
@@ -39,7 +42,19 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
         .map(|e| format!(" Reparent epic: \"{}\" ", e.title))
         .unwrap_or_else(|| " Reparent epic ".to_string());
 
-    render_tree_picker(frame, area, &title, &picker.items, &picker.tree_state);
+    let hint = tree_picker_hint(
+        app.key_table,
+        KeyNamespace::BoardPickerReparentEpic,
+        "reparent_picker",
+    );
+    render_tree_picker(
+        frame,
+        area,
+        &title,
+        &hint,
+        &picker.items,
+        &picker.tree_state,
+    );
 }
 
 pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
@@ -67,7 +82,40 @@ pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
         .map(|t| format!(" Move task: \"{}\" ", t.title))
         .unwrap_or_else(|| " Move task to epic ".to_string());
 
-    render_tree_picker(frame, area, &title, &picker.items, &picker.tree_state);
+    let hint = tree_picker_hint(
+        app.key_table,
+        KeyNamespace::BoardPickerMoveToEpic,
+        "move_to_epic_picker",
+    );
+    render_tree_picker(
+        frame,
+        area,
+        &title,
+        &hint,
+        &picker.items,
+        &picker.tree_state,
+    );
+}
+
+/// The tree picker's footer, built from the rows of `ns` whose actions start
+/// with `prefix` (`HintsNameOnlyTableKeys`). The fold keys pair the collapse
+/// row's keys with the expand row's, by position (`h/l/←/→`).
+fn tree_picker_hint(table: &'static [KeyBinding], ns: KeyNamespace, prefix: &str) -> String {
+    let action = |name: &str| format!("{prefix}_{name}");
+    let navigate = hint_keys(table, ns, &[(&action("down"), "j"), (&action("up"), "k")]);
+    let collapse = keys_of(table, ns, &action("collapse"));
+    let expand = keys_of(table, ns, &action("expand"));
+    let fold: Vec<&str> = collapse
+        .iter()
+        .zip(&expand)
+        .flat_map(|(c, e)| [short_key_form(c), short_key_form(e)])
+        .collect();
+    format!(
+        " {navigate}:navigate  {}:fold  {}:select  {}:cancel",
+        fold.join("/"),
+        hint_row_keys(table, ns, &action("confirm"), &["Space", "Enter"]),
+        hint_row_keys(table, ns, &action("cancel"), &["q", "Esc"]),
+    )
 }
 
 /// Shared magenta-bordered tree picker overlay used by both the reparent-epic
@@ -77,6 +125,7 @@ fn render_tree_picker(
     frame: &mut Frame,
     area: Rect,
     title: &str,
+    hint: &str,
     items: &[tui_tree_widget::TreeItem<'static, String>],
     tree_state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>,
 ) {
@@ -106,10 +155,7 @@ fn render_tree_picker(
         ..inner_area
     };
 
-    let hints = Paragraph::new(
-        " j/k:navigate  h/l/\u{2190}/\u{2192}:fold  Space/Enter:select  q/Esc:cancel",
-    )
-    .style(Style::default().fg(MUTED));
+    let hints = Paragraph::new(hint.to_string()).style(Style::default().fg(MUTED));
     frame.render_widget(hints, footer_area);
 
     let tree = match tui_tree_widget::Tree::new(items) {

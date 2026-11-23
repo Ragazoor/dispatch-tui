@@ -1,6 +1,9 @@
+use crate::keybindings::{
+    embedded_hint, hint_key, hint_keys, hint_row_keys, KeyBinding, KeyNamespace as N,
+};
 use crate::models::{TaskId, TaskModel};
 use crate::palette::{CYAN, MUTED, RED};
-use crate::tui::{App, InputState};
+use crate::tui::{App, InputMode, InputState};
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -186,49 +189,50 @@ pub(in crate::tui) fn input_title_lines(
     vec![
         caret_field("  Title: ", app, area, styles.active),
         Line::from(""),
-        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", styles.hint)),
+        Line::from(Span::styled(
+            format!(
+                "  [{}] confirm  [{}] cancel",
+                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
+                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
+            ),
+            styles.hint,
+        )),
     ]
 }
 
-/// The tag keys both prompt variants below are built from. Every key sits
-/// inside the label it selects (CreateTask: EveryKeyInItsName, in
+/// The tag picker's value rows and the label each key sits in. Every key
+/// sits inside the label it selects (CreateTask: EveryKeyInItsName, in
 /// docs/specs/tasks.allium), which is why PrReview reads `pr-re[v]iew` — `p`
-/// belongs to `[p]hoenix`.
-///
-/// A macro rather than a `const` because `concat!` composes literals, not
-/// const names, and composing is the point: the two variants differ only by the
-/// `[p]hoenix` segment, so a tag renamed in one literal and not the other would
-/// be the same drift `tag_prompt` exists to prevent, one level down. Adding a
-/// tag now means editing this list and the handler's match, and both prompts
-/// follow.
-macro_rules! tag_keys {
-    () => {
-        "Tag: [b]ug  [f]eature  [c]hore  pr-re[v]iew  [r]esearch  fi[x]"
-    };
-}
-
-/// The tag picker's prompt, first pass.
-const TAG_PROMPT: &str = concat!(tag_keys!(), "  [p]hoenix  [Enter] none");
-
-/// The same prompt on the second pass, after `p` armed the flag: `[p]hoenix` is
-/// gone, because so is `p` from the accepted set (CreateTask: PhoenixArming).
-/// The armed flag shows as a settled `Phoenix: yes` line above the picker
-/// instead of being restated here.
-const TAG_PROMPT_PHOENIX_ARMED: &str = concat!(tag_keys!(), "  [Enter] none");
+/// belongs to `[p]hoenix`. A key rebound to one its label lacks is drawn
+/// `[key] label` ([`embedded_hint`]).
+const TAG_KEYS: [(&str, &str, &str); 6] = [
+    ("tag_picker_select_bug", "b", "bug"),
+    ("tag_picker_select_feature", "f", "feature"),
+    ("tag_picker_select_chore", "c", "chore"),
+    ("tag_picker_select_pr_review", "v", "pr-review"),
+    ("tag_picker_select_research", "r", "research"),
+    ("tag_picker_select_fix", "x", "fix"),
+];
 
 /// The tag step's prompt, shared by all three surfaces that show it: the form
 /// panel's active line (below), the status-bar hint (`kanban/status_bar.rs`)
 /// and the transient status set on entering or re-entering the step
-/// (`update/forms.rs`). One function because the three must agree, and the
-/// accepted set now has two variants — a panel still offering `[p]hoenix`
-/// under a status bar that has dropped it is a drift no test would catch if
-/// each surface carried its own literal.
-pub(in crate::tui) fn tag_prompt(phoenix_armed: bool) -> &'static str {
-    if phoenix_armed {
-        TAG_PROMPT_PHOENIX_ARMED
-    } else {
-        TAG_PROMPT
+/// (`update/forms.rs`). One function because the three must agree. After `p`
+/// armed the flag, `[p]hoenix` is gone, because so is `p` from the accepted
+/// set (CreateTask: PhoenixArming); the armed flag shows as a settled
+/// `Phoenix: yes` line above the picker instead. Each key is the key of its
+/// row in `table` (`HintsNameOnlyTableKeys`).
+pub(in crate::tui) fn tag_prompt(table: &'static [KeyBinding], phoenix_armed: bool) -> String {
+    let key = |action, shown| hint_key(table, N::BoardPickerTag, None, action, shown);
+    let mut parts: Vec<String> = TAG_KEYS
+        .iter()
+        .map(|(action, shown, label)| embedded_hint(key(action, shown), label))
+        .collect();
+    if !phoenix_armed {
+        parts.push(embedded_hint(key("phoenix_arm", "p"), "phoenix"));
     }
+    parts.push(format!("[{}] none", key("tag_picker_default", "Enter")));
+    format!("Tag: {}", parts.join("  "))
 }
 
 /// The `Line` count [`input_tag_lines`] returns with phoenix armed: 2 settled
@@ -269,12 +273,28 @@ pub(in crate::tui) fn input_tag_lines(
         lines.push(Line::from(Span::styled("  Phoenix: yes", styles.completed)));
     }
     lines.push(Line::from(Span::styled(
-        format!("  {}", tag_prompt(phoenix_armed)),
+        format!("  {}", tag_prompt(app.key_table, phoenix_armed)),
         styles.active,
     )));
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "  [Enter] skip  [Esc] cancel",
+        format!(
+            "  [{}] skip  [{}] cancel",
+            hint_key(
+                app.key_table,
+                N::BoardPickerTag,
+                None,
+                "tag_picker_default",
+                "Enter"
+            ),
+            hint_key(
+                app.key_table,
+                N::BoardPickerTag,
+                None,
+                "tag_picker_cancel",
+                "Esc"
+            ),
+        ),
         styles.hint,
     )));
     lines
@@ -294,13 +314,57 @@ pub(in crate::tui) fn input_description_lines(
             styles.active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  [Esc] cancel", styles.hint)),
+        Line::from(Span::styled(
+            format!(
+                "  [{}] cancel",
+                hint_key(
+                    app.key_table,
+                    N::BoardDescriptionEditor,
+                    None,
+                    "cancel_input",
+                    "Esc"
+                )
+            ),
+            styles.hint,
+        )),
     ]
 }
 
-/// The hint every `RepoPathPicker` surface closes with. One literal rather than
-/// three, so the pickers cannot drift apart on a 65-character string of glyphs.
-const REPO_PICKER_HINT: &str = "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel";
+/// The hint every `RepoPathPicker` surface closes with, built from the rows
+/// of the picker `app` is in. One builder rather than three, so the pickers
+/// cannot drift apart.
+fn repo_picker_hint(app: &App) -> String {
+    let (ns, down, up, select, cancel) = match app.input.mode {
+        InputMode::QuickDispatch => (
+            N::BoardPickerQuickDispatch,
+            "quick_dispatch_cursor_down",
+            "quick_dispatch_cursor_up",
+            "quick_dispatch_select",
+            "quick_dispatch_cancel",
+        ),
+        InputMode::InputBaseBranch => (
+            N::BoardPickerBaseBranch,
+            "picker_cursor_down",
+            "picker_cursor_up",
+            "submit_input",
+            "cancel_input",
+        ),
+        _ => (
+            N::BoardPickerRepoPath,
+            "picker_cursor_down",
+            "picker_cursor_up",
+            "submit_input",
+            "cancel_input",
+        ),
+    };
+    let table = app.key_table;
+    format!(
+        "  Type to filter · [{}] navigate · [{}] select · [{}] cancel",
+        hint_keys(table, ns, &[(up, "Up"), (down, "Down")]),
+        hint_key(table, ns, None, select, "Enter"),
+        hint_key(table, ns, None, cancel, "Esc"),
+    )
+}
 
 /// Append a picker's candidate list and its closing hint — the tail shared by
 /// every `RepoPathPicker` surface (docs/specs/dispatch.allium: RepoPathPicker).
@@ -330,7 +394,7 @@ fn append_picker_candidates<'a>(
         },
     );
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(REPO_PICKER_HINT, styles.hint)));
+    lines.push(Line::from(Span::styled(repo_picker_hint(app), styles.hint)));
 }
 
 /// Rows the repo-path step spends outside its candidate list: title, tag,
@@ -438,10 +502,18 @@ fn answered_step_lines(app: &App, area: Rect, completed: Style) -> Vec<Line<'sta
 /// `active` is the part that differs per step — a styled span for a
 /// single-key picker, a [`caret_field`] for a free-text one. The wrap-up and
 /// model pickers use it.
-fn form_step_page<'a>(mut settled: Vec<Line<'a>>, active: Line<'a>, hint: Style) -> Vec<Line<'a>> {
+fn form_step_page<'a>(
+    mut settled: Vec<Line<'a>>,
+    active: Line<'a>,
+    cancel_key: &str,
+    hint: Style,
+) -> Vec<Line<'a>> {
     settled.push(active);
     settled.push(Line::from(""));
-    settled.push(Line::from(Span::styled("  [Esc] cancel", hint)));
+    settled.push(Line::from(Span::styled(
+        format!("  [{cancel_key}] cancel"),
+        hint,
+    )));
     settled
 }
 
@@ -457,30 +529,57 @@ pub(in crate::tui) fn input_wrap_up_mode_lines(
     form_step_page(
         answered_step_lines(app, area, styles.completed),
         Line::from(Span::styled(
-            "  Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip",
+            format!("  {}", wrap_up_prompt(app.key_table)),
             styles.active,
         )),
+        hint_key(
+            app.key_table,
+            N::BoardPickerWrapUpMode,
+            None,
+            "wrap_up_mode_picker_cancel",
+            "Esc",
+        ),
         styles.hint,
+    )
+}
+
+/// The wrap-up step's prompt, shared by the form panel's active line, the
+/// status-bar hint and the transient status set on entering the step. Each
+/// key is the key of its row in `table` (`HintsNameOnlyTableKeys`).
+pub(in crate::tui) fn wrap_up_prompt(table: &'static [KeyBinding]) -> String {
+    let key = |action, shown| hint_key(table, N::BoardPickerWrapUpMode, None, action, shown);
+    format!(
+        "Wrap-up: {}  {}  {}  [{}] skip",
+        embedded_hint(key("wrap_up_mode_picker_select_rebase", "r"), "rebase"),
+        embedded_hint(key("wrap_up_mode_picker_select_pr", "p"), "pr"),
+        embedded_hint(key("wrap_up_mode_picker_select_done", "d"), "done"),
+        key("wrap_up_mode_picker_default", "Enter"),
     )
 }
 
 /// The model step's prompt, shared by all three surfaces that show it: the
 /// form panel's active line, the status-bar hint and the transient status set
 /// on entering the step (CreateTask: ModelPicker). `[Enter]` names the model
-/// Enter keeps: the draft's own (a copy's), else the default.
-pub(in crate::tui) fn model_prompt(draft_model: Option<TaskModel>) -> String {
-    // Each key is its alias's first letter, the default key of its
-    // model_picker_select_<model> row.
+/// Enter keeps: the draft's own (a copy's), else the default. Each key is the
+/// key of its `model_picker_select_<model>` row in `table`, by default its
+/// alias's first letter.
+pub(in crate::tui) fn model_prompt(
+    table: &'static [KeyBinding],
+    draft_model: Option<TaskModel>,
+) -> String {
+    let key = |action: &str, shown: &str| hint_key(table, N::BoardPickerModel, None, action, shown);
     let keys: Vec<String> = TaskModel::ALL
         .iter()
         .map(|m| {
-            let (key, rest) = m.as_str().split_at(1);
-            format!("[{key}]{rest}")
+            let alias = m.as_str();
+            let action = format!("model_picker_select_{alias}");
+            embedded_hint(key(&action, &alias[..1]), alias)
         })
         .collect();
     format!(
-        "Model: {}  [Enter] {}",
+        "Model: {}  [{}] {}",
         keys.join("  "),
+        key("model_picker_default", "Enter"),
         draft_model.unwrap_or(TaskModel::DEFAULT)
     )
 }
@@ -511,9 +610,19 @@ pub(in crate::tui) fn input_model_lines(
     form_step_page(
         settled,
         Line::from(Span::styled(
-            format!("  {}", model_prompt(draft.and_then(|d| d.model))),
+            format!(
+                "  {}",
+                model_prompt(app.key_table, draft.and_then(|d| d.model))
+            ),
             styles.active,
         )),
+        hint_key(
+            app.key_table,
+            N::BoardPickerModel,
+            None,
+            "model_picker_cancel",
+            "Esc",
+        ),
         styles.hint,
     )
 }
@@ -543,6 +652,23 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     lines
 }
 
+/// The retry prompt's keys, built from board.confirm.retry's rows: resume
+/// (offered only when `resume`), fresh start and cancel. Shared by the
+/// status bar and the status set on opening the prompt.
+pub(in crate::tui) fn retry_keys(table: &'static [KeyBinding], resume: bool) -> String {
+    let key = |action, shown| hint_key(table, N::BoardConfirmRetry, None, action, shown);
+    let resume = if resume {
+        format!("[{}] Resume  ", key("confirm_retry_resume", "r"))
+    } else {
+        String::new()
+    };
+    format!(
+        "{resume}[{}] Fresh start  [{}] Cancel",
+        key("confirm_retry_fresh", "f"),
+        key("confirm_retry_no", "Esc"),
+    )
+}
+
 pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'static>> {
     let label = if app.is_crashed(id) {
         "crashed"
@@ -551,6 +677,7 @@ pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'st
     };
     let warning = Style::default().fg(RED).add_modifier(Modifier::BOLD);
     let hint = Style::default().fg(MUTED);
+    let key = |action, shown| hint_key(app.key_table, N::BoardConfirmRetry, None, action, shown);
     vec![
         Line::from(Span::styled(
             format!("  Agent is {label}. What do you want to do?"),
@@ -558,14 +685,23 @@ pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'st
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  [r] Resume (--continue in existing worktree)",
+            format!(
+                "  [{}] Resume (--continue in existing worktree)",
+                key("confirm_retry_resume", "r")
+            ),
             hint,
         )),
         Line::from(Span::styled(
-            "  [f] Fresh start (clean worktree + new dispatch)",
+            format!(
+                "  [{}] Fresh start (clean worktree + new dispatch)",
+                key("confirm_retry_fresh", "f")
+            ),
             hint,
         )),
-        Line::from(Span::styled("  [Esc] Cancel", hint)),
+        Line::from(Span::styled(
+            format!("  [{}] Cancel", key("confirm_retry_no", "Esc")),
+            hint,
+        )),
     ]
 }
 
@@ -577,7 +713,14 @@ pub(in crate::tui) fn input_epic_title_lines(
     vec![
         caret_field("  Title: ", app, area, styles.active),
         Line::from(""),
-        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", styles.hint)),
+        Line::from(Span::styled(
+            format!(
+                "  [{}] confirm  [{}] cancel",
+                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
+                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
+            ),
+            styles.hint,
+        )),
     ]
 }
 
@@ -599,7 +742,19 @@ pub(in crate::tui) fn input_epic_description_lines(
             styles.active,
         )),
         Line::from(""),
-        Line::from(Span::styled("  [Esc] cancel", styles.hint)),
+        Line::from(Span::styled(
+            format!(
+                "  [{}] cancel",
+                hint_key(
+                    app.key_table,
+                    N::BoardDescriptionEditor,
+                    None,
+                    "cancel_input",
+                    "Esc"
+                )
+            ),
+            styles.hint,
+        )),
     ]
 }
 
@@ -652,13 +807,28 @@ pub(in crate::tui) fn input_placement_lines(
         styles.active,
     )));
     lines.push(Line::from(""));
+    let ns = N::BoardPickerPlacement;
+    let table = app.key_table;
     let moves = if placement.names_workspace && several {
-        "[j/k] workspace  "
+        let keys = hint_keys(
+            table,
+            ns,
+            &[
+                ("placement_picker_workspace_down", "j"),
+                ("placement_picker_workspace_up", "k"),
+            ],
+        );
+        format!("[{keys}] workspace  ")
     } else {
-        ""
+        String::new()
     };
     lines.push(Line::from(Span::styled(
-        format!("  {moves}[Tab] public/private  [Space/Enter] create  [Esc] cancel"),
+        format!(
+            "  {moves}[{}] public/private  [{}] create  [{}] cancel",
+            hint_key(table, ns, None, "placement_picker_visibility", "Tab"),
+            hint_row_keys(table, ns, "placement_picker_create", &["Space", "Enter"]),
+            hint_key(table, ns, None, "placement_picker_cancel", "Esc"),
+        ),
         styles.hint,
     )));
     lines

@@ -209,11 +209,14 @@ fn input_tag_lines_returns_a_fixed_line_count_per_variant() {
 #[test]
 fn the_two_tag_prompts_differ_only_by_the_phoenix_key() {
     assert_eq!(
-        tag_prompt(false).replace("  [p]hoenix", ""),
-        tag_prompt(true),
+        tag_prompt(crate::keybindings::KEY_BINDINGS, false).replace("  [p]hoenix", ""),
+        tag_prompt(crate::keybindings::KEY_BINDINGS, true),
         "the armed prompt is the unarmed one minus [p]hoenix"
     );
-    assert_ne!(tag_prompt(false), tag_prompt(true));
+    assert_ne!(
+        tag_prompt(crate::keybindings::KEY_BINDINGS, false),
+        tag_prompt(crate::keybindings::KEY_BINDINGS, true)
+    );
 }
 
 #[test]
@@ -353,7 +356,13 @@ fn model_step_restates_wrap_up_and_shows_the_shared_prompt() {
     assert_eq!(line_text(&lines[4]), "  Wrap-up: pr");
     assert_eq!(
         line_text(&lines[5]),
-        format!("  {}", model_prompt(Some(crate::models::TaskModel::Opus)))
+        format!(
+            "  {}",
+            model_prompt(
+                crate::keybindings::KEY_BINDINGS,
+                Some(crate::models::TaskModel::Opus)
+            )
+        )
     );
 
     app.input.task_draft = Some(long_draft());

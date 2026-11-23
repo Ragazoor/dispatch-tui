@@ -116,12 +116,20 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
 
     // ── Block with hints ─────────────────────────────────────────────────────
     let hint_style = Style::default().fg(MUTED);
+    let (table, ns) = (app.key_table, crate::keybindings::KeyNamespace::BoardDetail);
+    let footer = format!(
+        " {} scroll · {} zoom · {} close ",
+        crate::keybindings::hint_keys(
+            table,
+            ns,
+            &[("scroll_detail_down", "j"), ("scroll_detail_up", "k")]
+        ),
+        crate::keybindings::hint_key(table, ns, None, "zoom_detail", "z"),
+        crate::keybindings::hint_row_keys(table, ns, "close_detail", &["q", "Esc", "Enter"]),
+    );
     let block = rounded_block(BORDER)
         .title(format!(" {} ", task.heading()))
-        .title_bottom(Line::from(Span::styled(
-            " j/k scroll · z zoom · q/Esc/Enter close ",
-            hint_style,
-        )));
+        .title_bottom(Line::from(Span::styled(footer, hint_style)));
 
     let inner = open_overlay(frame, overlay_area, block);
 

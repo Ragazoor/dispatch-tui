@@ -18,7 +18,8 @@ use super::input_form::{
     input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
     quick_dispatch_lines, FormStyles, MODEL_STEP_LINES, PHOENIX_ARMED_TAG_STEP_LINES,
 };
-use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
+use super::shared::{render_top_indicators, rounded_block, HintBar};
+use crate::keybindings::{KeyBinding, KeyContext as C, KeyNamespace};
 use crate::palette::{
     header_label_focused, header_label_unfocused, mix, BLUE, BOARD_GROUND, BOARD_GROUND_FOCUSED,
     BORDER, CARD_BORDER, CARD_SURFACE, CURSOR_BORDER, CYAN, FG, GREEN, HEADER_BG,
@@ -593,26 +594,25 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
 
 /// Build context-sensitive keybinding hint spans for the status bar.
 /// Returns styled spans showing available actions for the selected task.
+/// Each hint names the key of the board.normal row it stands for in `table`
+/// (`HintsNameOnlyTableKeys` in `docs/specs/keybindings.allium`).
 ///
 /// `dispatch_in_flight` comes from [`crate::tui::App::dispatch_may_be_in_flight`].
 /// It is not cosmetic: an unprovisioned task is indistinguishable from one
 /// mid-provisioning, and advertising retry on the latter invites a second
 /// dispatch. See `RetryReachableInPlace` in `docs/specs/dispatch.allium`.
 pub(in crate::tui) fn action_hints(
+    table: &'static [KeyBinding],
     task: Option<&Task>,
     dispatch_in_flight: bool,
     enter_jumps_to_epic: bool,
     key_color: Color,
 ) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(MUTED);
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-
-    let mut push_hint = |key: &'static str, label: &'static str| {
-        push_hint_spans(&mut spans, key, label, key_color, label_style);
-    };
+    let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
+    let mut push_hint = |context, action, key, label| bar.push(context, action, key, label);
 
     if let Some(task) = task {
+        let off_epic = Some(C::OffEpicCard);
         match task.status {
             TaskStatus::Backlog => {
                 // One name for starting a task, whether or not a plan is
@@ -620,47 +620,47 @@ pub(in crate::tui) fn action_hints(
                 // a design step the dispatch prompt no longer has (#4366) —
                 // and the plan's presence changes what the agent is told to do
                 // first, not what the user is doing by pressing Space.
-                push_hint("Space", "dispatch");
-                push_hint("e", "edit");
-                push_hint("L", "move");
-                push_hint("x", "done");
+                push_hint(Some(C::BacklogTask), "dispatch_task", "Space", "dispatch");
+                push_hint(None, "edit_task", "e", "edit");
+                push_hint(off_epic, "move_task_forward", "L", "move");
+                push_hint(None, "delete_task", "x", "done");
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
-                    push_hint("Space", "session");
+                    push_hint(Some(C::TaskWithWindow), "jump_to_tmux", "Space", "session");
                 } else if task.worktree.is_some() {
-                    push_hint("Space", "resume");
+                    push_hint(Some(C::TaskWithWorktree), "resume_task", "Space", "resume");
                 } else if !dispatch_in_flight {
                     // Unprovisioned: nothing to jump to or resume, but Space
                     // opens the kill-and-retry dialog. See RetryReachableInPlace
                     // in docs/specs/dispatch.allium.
-                    push_hint("Space", "retry");
+                    push_hint(Some(C::StuckTask), "open_retry_dialog", "Space", "retry");
                 }
-                push_hint("e", "edit");
-                push_hint("L", "move");
-                push_hint("H", "back");
-                push_hint("x", "done");
+                push_hint(None, "edit_task", "e", "edit");
+                push_hint(off_epic, "move_task_forward", "L", "move");
+                push_hint(off_epic, "move_task_backward", "H", "back");
+                push_hint(None, "delete_task", "x", "done");
             }
             TaskStatus::Review => {
                 if task.tmux_window.is_some() {
-                    push_hint("Space", "session");
-                    push_hint("T", "detach");
+                    push_hint(Some(C::TaskWithWindow), "jump_to_tmux", "Space", "session");
+                    push_hint(None, "detach_tmux", "T", "detach");
                 } else if task.worktree.is_some() {
-                    push_hint("Space", "resume");
+                    push_hint(Some(C::TaskWithWorktree), "resume_task", "Space", "resume");
                 }
-                push_hint("e", "edit");
-                push_hint("L", "move");
-                push_hint("H", "back");
-                push_hint("x", "done");
+                push_hint(None, "edit_task", "e", "edit");
+                push_hint(off_epic, "move_task_forward", "L", "move");
+                push_hint(off_epic, "move_task_backward", "H", "back");
+                push_hint(None, "delete_task", "x", "done");
             }
             TaskStatus::Done => {
-                push_hint("e", "edit");
-                push_hint("H", "back");
-                push_hint("x", "delete");
+                push_hint(None, "edit_task", "e", "edit");
+                push_hint(off_epic, "move_task_backward", "H", "back");
+                push_hint(None, "delete_task", "x", "delete");
             }
         }
         if task.url.is_some() {
-            push_hint("p", "open URL");
+            push_hint(None, "open_pr_url", "p", "open URL");
         }
     }
 
@@ -669,74 +669,87 @@ pub(in crate::tui) fn action_hints(
         // epic (and does nothing for a task with no epic); elsewhere it opens
         // the detail (`jump_to_task_epic` / `open_task_detail`).
         match (enter_jumps_to_epic, task.epic_id) {
-            (false, _) => push_hint("Enter", "detail"),
-            (true, Some(_)) => push_hint("Enter", "epic"),
+            (false, _) => push_hint(
+                Some(C::OnUnflattenedTaskCard),
+                "open_task_detail",
+                "Enter",
+                "detail",
+            ),
+            (true, Some(_)) => push_hint(
+                Some(C::OnFlattenedTaskCard),
+                "jump_to_task_epic",
+                "Enter",
+                "epic",
+            ),
             (true, None) => {}
         }
-        push_hint("c", "copy");
+        push_hint(None, "copy_task", "c", "copy");
     }
-    push_hint("a", "select all");
-    push_hint("n", "new");
-    push_hint("E", "epic");
-    push_hint("D", "quick");
-    push_hint("s", "split");
-    push_hint("Tab", "lens");
-    push_hint("f", "filter");
-    push_hint("/", "search");
-    push_hint("?", "help");
+    push_hint(None, "select_all", "a", "select all");
+    push_hint(None, "create_task", "n", "new");
+    push_hint(None, "create_epic", "E", "epic");
+    push_hint(None, "quick_dispatch", "D", "quick");
+    push_hint(None, "toggle_split_mode", "s", "split");
+    push_hint(None, "cycle_lens_forward", "Tab", "lens");
+    push_hint(None, "open_board_filter", "f", "filter");
+    push_hint(None, "search_tasks", "/", "search");
+    push_hint(None, "toggle_help", "?", "help");
 
-    spans
+    bar.spans
 }
 
 /// Status bar hints for a work package card (`work-packages.allium`). A
 /// package has no status, so there is nothing to move.
-pub(in crate::tui) fn package_action_hints(key_color: Color) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(MUTED);
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut push_hint = |key: &'static str, label: &'static str| {
-        push_hint_spans(&mut spans, key, label, key_color, label_style);
-    };
-    push_hint("Space", "open");
-    push_hint("e", "rename");
-    push_hint("x", "delete");
-    push_hint("n", "new");
-    push_hint("E", "epic");
-    push_hint("/", "search");
-    push_hint("?", "help");
-    spans
+pub(in crate::tui) fn package_action_hints(
+    table: &'static [KeyBinding],
+    key_color: Color,
+) -> Vec<Span<'static>> {
+    let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
+    bar.push(
+        Some(C::OnWorkPackageCard),
+        "enter_work_package",
+        "Space",
+        "open",
+    );
+    bar.push(None, "edit_task", "e", "rename");
+    bar.push(None, "delete_task", "x", "delete");
+    bar.push(None, "create_task", "n", "new");
+    bar.push(None, "create_epic", "E", "epic");
+    bar.push(None, "search_tasks", "/", "search");
+    bar.push(None, "toggle_help", "?", "help");
+    bar.spans
 }
 
 /// Build context-sensitive keybinding hints for a selected epic.
-pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(MUTED);
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-
-    let mut push_hint = |key: &'static str, label: &'static str| {
-        push_hint_spans(&mut spans, key, label, key_color, label_style);
-    };
+pub(in crate::tui) fn epic_action_hints(
+    table: &'static [KeyBinding],
+    epic: &Epic,
+    key_color: Color,
+) -> Vec<Span<'static>> {
+    let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
+    let on_epic = Some(C::OnEpicCard);
 
     // `Space` on an epic card enters the epic (`EpicMessage::Enter`). `U` is deliberately
     // absent: it needs `current_epic_id()`, so it only works from inside the epic view,
     // where the header badge advertises it instead.
-    push_hint("Space", "enter");
-    push_hint("Enter", "deepest");
-    push_hint("e", "edit");
+    bar.push(on_epic, "enter_epic", "Space", "enter");
+    bar.push(on_epic, "jump_to_deepest_epic", "Enter", "deepest");
+    bar.push(None, "edit_task", "e", "edit");
     if epic.feed_command.is_some() {
-        push_hint("r", "refresh");
+        bar.push(None, "refresh_feed", "r", "refresh");
     }
-    push_hint("L", "status \u{2192}");
-    push_hint("H", "status \u{2190}");
-    push_hint("x", "delete");
+    bar.push(on_epic, "move_task_forward", "L", "status \u{2192}");
+    bar.push(on_epic, "move_task_backward", "H", "status \u{2190}");
+    bar.push(None, "delete_task", "x", "delete");
 
-    push_hint("a", "select all");
-    push_hint("n", "new");
-    push_hint("E", "epic");
-    push_hint("D", "quick");
-    push_hint("Tab", "lens");
-    push_hint("f", "filter");
-    push_hint("/", "search");
-    push_hint("?", "help");
+    bar.push(None, "select_all", "a", "select all");
+    bar.push(None, "create_task", "n", "new");
+    bar.push(None, "create_epic", "E", "epic");
+    bar.push(None, "quick_dispatch", "D", "quick");
+    bar.push(None, "cycle_lens_forward", "Tab", "lens");
+    bar.push(None, "open_board_filter", "f", "filter");
+    bar.push(None, "search_tasks", "/", "search");
+    bar.push(None, "toggle_help", "?", "help");
 
-    spans
+    bar.spans
 }

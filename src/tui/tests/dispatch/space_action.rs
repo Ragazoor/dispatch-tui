@@ -161,6 +161,7 @@ fn space_on_freshly_claimed_task_outside_dispatching_map_does_not_offer_retry() 
 fn action_hints_hide_retry_while_dispatch_in_flight() {
     let task = make_unprovisioned_task(4, TaskStatus::Running);
     let hints = crate::tui::ui::action_hints(
+        crate::keybindings::KEY_BINDINGS,
         Some(&task),
         true,
         false,

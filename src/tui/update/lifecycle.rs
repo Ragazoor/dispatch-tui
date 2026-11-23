@@ -87,6 +87,11 @@ impl App {
         if ids.is_empty() {
             return;
         }
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmDone,
+            "n",
+        );
         let status = match ids.as_slice() {
             [single] => {
                 let title = self
@@ -94,9 +99,9 @@ impl App {
                     .find_task(*single)
                     .map(|t| truncate_title(&t.title, TITLE_DISPLAY_LENGTH))
                     .unwrap_or_default();
-                format!("Move {title} to Done? [y/n]")
+                format!("Move {title} to Done? {keys}")
             }
-            _ => format!("Move {} tasks to Done? [y/n]", ids.len()),
+            _ => format!("Move {} tasks to Done? {keys}", ids.len()),
         };
         self.select.pending_done = ids;
         self.input.mode = InputMode::ConfirmDone;
@@ -240,8 +245,13 @@ impl App {
         }
         let expanded = crate::models::expand_tilde(&repo_path);
         self.input.mode = InputMode::ConfirmTrustRepo { task_id, mode };
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmTrustRepo,
+            "N",
+        );
         self.status.set(format!(
-            "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
+            "Repo '{expanded}' not trusted by Claude Code — trust it? {keys}"
         ));
         vec![]
     }
@@ -256,8 +266,13 @@ impl App {
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
         let expanded = crate::models::expand_tilde(&draft.repo_path);
+        let keys = crate::keybindings::yes_no_hint(
+            self.key_table,
+            crate::keybindings::KeyNamespace::BoardConfirmTrustRepoQuickDispatch,
+            "N",
+        );
         self.status.set(format!(
-            "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
+            "Repo '{expanded}' not trusted by Claude Code — trust it? {keys}"
         ));
         self.input.mode = InputMode::ConfirmTrustRepoQuickDispatch { draft, epic_id };
         vec![]

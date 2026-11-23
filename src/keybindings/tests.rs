@@ -975,3 +975,58 @@ fn the_startup_screens_exit_keys_follow_the_override_file() {
     assert!(press(KeyCode::Char('q'), KeyModifiers::NONE, diff));
     assert!(!press(KeyCode::Char('x'), KeyModifiers::CONTROL, diff));
 }
+
+// ---------------------------------------------------------------------------
+// Hint builders (HintsNameOnlyTableKeys)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_hint_shows_its_chosen_key_while_the_row_lists_it_and_else_the_first() {
+    let ns = KeyNamespace::BoardFilter;
+    assert_eq!(hint_key(KEY_BINDINGS, ns, None, "filter_close", "q"), "q");
+    let rebound = table_with_keys(ns, "filter_close", &["Ctrl+T"]);
+    assert_eq!(hint_key(rebound, ns, None, "filter_close", "q"), "Ctrl+T");
+    // Delete is drawn in its short form.
+    assert_eq!(
+        hint_key(
+            KEY_BINDINGS,
+            ns,
+            None,
+            "repo_filter_delete_repo_path",
+            "Delete"
+        ),
+        "Del"
+    );
+}
+
+#[test]
+fn a_hint_picks_the_row_of_its_context() {
+    let ns = KeyNamespace::BoardNormal;
+    let ctx = Some(KeyContext::OnTaskCard);
+    let table = table_with_keys(ns, "open_task_detail", &["Ctrl+T"]);
+    // Both open_task_detail rows were rebound; the one guarded by
+    // OnTaskCard is the one asked for.
+    assert_eq!(hint_key(table, ns, ctx, "open_task_detail", "i"), "Ctrl+T");
+    assert_eq!(
+        hint_key(KEY_BINDINGS, ns, ctx, "open_task_detail", "i"),
+        "i"
+    );
+}
+
+#[test]
+fn a_catch_all_no_is_drawn_as_n_unless_a_row_takes_n() {
+    let ns = KeyNamespace::BoardConfirmQuit;
+    assert_eq!(yes_no_hint(KEY_BINDINGS, ns, "n"), "[y/n]");
+    let yes_is_n = table_with_keys(ns, "confirm_quit_yes", &["n"]);
+    assert_eq!(yes_no_hint(yes_is_n, ns, "n"), "[n/Esc]");
+    let rebound = table_with_keys(ns, "confirm_quit_yes", &["Ctrl+T"]);
+    assert_eq!(yes_no_hint(rebound, ns, "n"), "[Ctrl+T/n]");
+}
+
+#[test]
+fn an_embedded_hint_falls_back_to_a_bracketed_key() {
+    assert_eq!(embedded_hint("r", "rebase"), "[r]ebase");
+    assert_eq!(embedded_hint("v", "pr-review"), "pr-re[v]iew");
+    assert_eq!(embedded_hint("q", "rebase"), "[q] rebase");
+    assert_eq!(embedded_hint("Ctrl+T", "rebase"), "[Ctrl+T] rebase");
+}

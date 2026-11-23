@@ -71,7 +71,9 @@ impl InputMessage {
         match self {
             InputMessage::StartNewTask => forms::start_new_task(&mut app.input, &mut app.status),
             InputMessage::CopyTask => match app.selected_task().cloned() {
-                Some(task) => forms::copy_task(&mut app.input, &mut app.status, &task),
+                Some(task) => {
+                    forms::copy_task(&mut app.input, &mut app.status, &task, app.key_table)
+                }
                 None => vec![],
             },
             InputMessage::CancelInput
@@ -87,7 +89,7 @@ impl InputMessage {
                 app.board.work_packages.len(),
             ),
             InputMessage::SubmitTitle(value) => {
-                forms::submit_title(&mut app.input, &mut app.status, value)
+                forms::submit_title(&mut app.input, &mut app.status, value, app.key_table)
             }
             InputMessage::SubmitRepoPath(value) => forms::submit_repo_path(
                 &mut app.input,
@@ -97,7 +99,7 @@ impl InputMessage {
             ),
             InputMessage::SubmitTag(tag) => forms::submit_tag(&mut app.input, &mut app.status, tag),
             InputMessage::SubmitBaseBranch(value) => {
-                forms::submit_base_branch(&mut app.input, &mut app.status, value)
+                forms::submit_base_branch(&mut app.input, &mut app.status, value, app.key_table)
             }
             InputMessage::StartSetDisplayName => app.handle_start_set_display_name(),
             InputMessage::SubmitDisplayName(name) => app.handle_submit_display_name(name),
@@ -117,7 +119,9 @@ impl InputMessage {
                 app.handle_placement_move_workspace(delta)
             }
             InputMessage::SubmitPlacement => app.handle_submit_placement(),
-            InputMessage::ArmPhoenix => forms::arm_phoenix(&mut app.input, &mut app.status),
+            InputMessage::ArmPhoenix => {
+                forms::arm_phoenix(&mut app.input, &mut app.status, app.key_table)
+            }
             InputMessage::InputChar(c) => {
                 app.input.insert_char(c);
                 vec![]
@@ -154,9 +158,11 @@ impl InputMessage {
                 app.input.cursor_end();
                 vec![]
             }
-            InputMessage::StartQuickDispatchSelection => {
-                forms::start_quick_dispatch_selection(&mut app.input, &mut app.status)
-            }
+            InputMessage::StartQuickDispatchSelection => forms::start_quick_dispatch_selection(
+                &mut app.input,
+                &mut app.status,
+                app.key_table,
+            ),
             InputMessage::SelectQuickDispatchRepo(idx) => {
                 match forms::take_quick_dispatch_repo(
                     &mut app.input,

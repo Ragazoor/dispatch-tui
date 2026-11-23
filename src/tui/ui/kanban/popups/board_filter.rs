@@ -8,6 +8,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::keybindings::{catch_all_keys, hint_key, hint_keys, KeyBinding, KeyNamespace};
 use crate::palette::{CYAN, MUTED, YELLOW};
 use crate::tui::types::{FilterEpicMark, FilterEpicRow, FilterTab};
 use crate::tui::ui::shared::{
@@ -403,12 +404,13 @@ fn append_windowed_list<'a>(
     }
 }
 
-/// Footer help, one branch per input mode the overlay can be in.
+/// Footer help, one branch per input mode the overlay can be in. Every key
+/// is the key of its row in the board's table (`HintsNameOnlyTableKeys`).
 fn append_help_lines<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &HintStyles) {
     match app.mode() {
         InputMode::ConfirmDeleteRepoPath => lines.push(delete_repo_path_help_line(app, styles)),
-        InputMode::BoardFilterSearch => append_search_help_lines(lines, styles),
-        _ => append_browse_help_lines(lines, app.filter_overlay.tab, styles),
+        InputMode::BoardFilterSearch => append_search_help_lines(lines, app.key_table, styles),
+        _ => append_browse_help_lines(lines, app.key_table, app.filter_overlay.tab, styles),
     }
 }
 
@@ -418,20 +420,25 @@ fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a>
         .get(app.input.repo_cursor)
         .map(|p| p.as_str())
         .unwrap_or("?");
+    let ns = KeyNamespace::BoardConfirmDeleteRepoPath;
+    let yes = hint_key(app.key_table, ns, None, "confirm_delete_repo_path_yes", "y");
     Line::from(vec![
         Span::styled(
             format!("  Delete {path_label}?  "),
             Style::default().fg(YELLOW),
         ),
-        Span::styled("y", styles.accent),
+        Span::styled(yes, styles.accent),
         Span::styled(": yes  ", styles.note),
-        Span::styled("n/Esc", styles.accent),
+        Span::styled(
+            catch_all_keys(app.key_table, ns, &["n", "Esc"]),
+            styles.accent,
+        ),
         Span::styled(": cancel", styles.note),
     ])
 }
 
 /// One footer hint: the bracketed key, then what it does.
-fn footer_hint(key: &'static str, label: &'static str, styles: &HintStyles) -> [Span<'static>; 2] {
+fn footer_hint(key: String, label: &'static str, styles: &HintStyles) -> [Span<'static>; 2] {
     [
         Span::styled(key, styles.accent),
         Span::styled(label, styles.note),
@@ -441,47 +448,97 @@ fn footer_hint(key: &'static str, label: &'static str, styles: &HintStyles) -> [
 /// The footer while the Epics tab's title search is being typed: only the
 /// keys board.filter_search answers, in two rows like the browse footer so
 /// starting a search never resizes the popup.
-fn append_search_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) {
-    let hint = |key, label| footer_hint(key, label, styles);
+fn append_search_help_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    table: &'static [KeyBinding],
+    styles: &HintStyles,
+) {
+    let key = |action, shown| hint_key(table, KeyNamespace::BoardFilterSearch, None, action, shown);
+    let hint = |key: String, label| footer_hint(key, label, styles);
     lines.extend([
-        Line::from([hint("  [Enter]", " keep  "), hint("[Esc]", " clear")].concat()),
-        Line::from(hint("  [Backspace]", " delete").to_vec()),
+        Line::from(
+            [
+                hint(
+                    format!("  [{}]", key("filter_search_commit", "Enter")),
+                    " keep  ",
+                ),
+                hint(
+                    format!("[{}]", key("filter_search_cancel", "Esc")),
+                    " clear",
+                ),
+            ]
+            .concat(),
+        ),
+        Line::from(
+            hint(
+                format!("  [{}]", key("text_backspace", "Backspace")),
+                " delete",
+            )
+            .to_vec(),
+        ),
     ]);
 }
 
 /// The two-row default footer, the same height on every tab so switching
 /// tabs never resizes the popup. The confirm mode renders one row; the layout
 /// budget is counted from whichever this produces, not assumed.
-fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, tab: FilterTab, styles: &HintStyles) {
-    let hint = |key, label| footer_hint(key, label, styles);
+fn append_browse_help_lines<'a>(
+    lines: &mut Vec<Line<'a>>,
+    table: &'static [KeyBinding],
+    tab: FilterTab,
+    styles: &HintStyles,
+) {
+    let ns = KeyNamespace::BoardFilter;
+    let key = |action, shown| hint_key(table, ns, None, action, shown);
+    let hint = |key: String, label| footer_hint(key, label, styles);
+    let navigate = hint_keys(
+        table,
+        ns,
+        &[("filter_cursor_down", "j"), ("filter_cursor_up", "k")],
+    );
+    let toggle = key("filter_toggle_row", "Space");
     let first: Vec<Span> = match tab {
         FilterTab::Repos => [
-            hint("  [j/k]", " navigate  "),
-            hint("[Space]", " toggle  "),
-            hint("[Del]", " forget"),
+            hint(format!("  [{navigate}]"), " navigate  "),
+            hint(format!("[{toggle}]"), " toggle  "),
+            hint(
+                format!("[{}]", key("repo_filter_delete_repo_path", "Delete")),
+                " forget",
+            ),
         ]
         .concat(),
         FilterTab::Epics => [
-            hint("  [Space]", " hide/show  "),
-            hint("[z]", " fold  "),
-            hint("[d]", " done  "),
-            hint("[/]", " search  "),
+            hint(format!("  [{toggle}]"), " hide/show  "),
+            hint(format!("[{}]", key("filter_fold_epics", "z")), " fold  "),
+            hint(
+                format!("[{}]", key("filter_toggle_done_epics", "d")),
+                " done  ",
+            ),
+            hint(
+                format!("[{}]", key("filter_search_epics", "/")),
+                " search  ",
+            ),
         ]
         .concat(),
         FilterTab::Packages => [
-            hint("  [j/k]", " navigate  "),
-            hint("[Space]", " hide/show  "),
+            hint(format!("  [{navigate}]"), " navigate  "),
+            hint(format!("[{toggle}]"), " hide/show  "),
         ]
         .concat(),
     };
+    let next_tab = key("filter_next_tab", "Tab");
     let mut second: Vec<Span> = vec![];
     if tab == FilterTab::Repos {
-        second.extend(hint("  [i]", " incl/excl  "));
-        second.extend(hint("[Tab]", " next tab  "));
+        second.extend(hint(
+            format!("  [{}]", key("repo_filter_toggle_mode", "i")),
+            " incl/excl  ",
+        ));
+        second.extend(hint(format!("[{next_tab}]"), " next tab  "));
     } else {
-        second.extend(hint("  [Tab]", " next tab  "));
+        second.extend(hint(format!("  [{next_tab}]"), " next tab  "));
     }
-    second.extend(hint("[q/Esc]", " close"));
+    let close = hint_keys(table, ns, &[("filter_close", "q"), ("filter_back", "Esc")]);
+    second.extend(hint(format!("[{close}]"), " close"));
     lines.extend([Line::from(first), Line::from(second)]);
 }
 

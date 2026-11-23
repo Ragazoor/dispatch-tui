@@ -114,6 +114,7 @@ impl EpicMessage {
                     &app.interaction,
                     &mut app.status,
                     &app.board.epics,
+                    app.key_table,
                 );
                 vec![]
             }
@@ -136,6 +137,7 @@ impl EpicMessage {
                 &mut app.status,
                 epic_id,
                 other_host,
+                app.key_table,
             ),
         }
     }

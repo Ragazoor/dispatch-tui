@@ -242,7 +242,11 @@ fn feed_not_authors_host_names_why_and_does_not_refresh() {
 fn epic_action_hints_shows_refresh_for_feed_epic() {
     let mut epic = make_epic(1);
     epic.feed_command = Some("echo '[]'".to_string());
-    let hints = ui::epic_action_hints(&epic, ratatui::style::Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        ratatui::style::Color::Rgb(122, 162, 247),
+    );
     let keys = hint_keys(&hints);
     assert!(
         keys.contains(&"[r]"),
@@ -253,7 +257,11 @@ fn epic_action_hints_shows_refresh_for_feed_epic() {
 #[test]
 fn epic_action_hints_no_refresh_for_non_feed_epic() {
     let epic = make_epic(1); // no feed_command
-    let hints = ui::epic_action_hints(&epic, ratatui::style::Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        ratatui::style::Color::Rgb(122, 162, 247),
+    );
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[r]"),

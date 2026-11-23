@@ -13,8 +13,11 @@ use ratatui::{
     Frame,
 };
 
-use super::super::shared::push_hint_spans;
+use super::super::shared::HintBar;
 use super::{action_hints, epic_action_hints};
+use crate::keybindings::{
+    hint_key, hint_keys, hint_row_keys, keys_of, yes_no_hint, KeyContext as C, KeyNamespace as N,
+};
 use crate::palette::{CYAN, GREEN, MUTED, PURPLE, RED, YELLOW};
 use crate::tui::{App, ColumnItem, InputMode};
 
@@ -56,109 +59,254 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
         return (Line::from(msg.clone()), Style::default().fg(YELLOW));
     }
 
+    let t = app.key_table;
+    let key = |ns, action, shown| hint_key(t, ns, None, action, shown);
+    let yes_no = |ns| yes_no_hint(t, ns, "n");
+    let text_keys = |verb: &str| {
+        format!(
+            "[{}] {verb}  [{}] cancel",
+            key(N::BoardText, "submit_input", "Enter"),
+            key(N::BoardText, "cancel_input", "Esc"),
+        )
+    };
+    let editor_cancel = || key(N::BoardDescriptionEditor, "cancel_input", "Esc");
     match &app.input.mode {
         InputMode::Normal => normal_status_line(app),
         InputMode::SearchTasks => hint(
             format!(
-                "Search board: {}_   [Enter] keep  [Esc] cancel",
-                app.search.query
+                "Search board: {}_   [{}] keep  [{}] cancel",
+                app.search.query,
+                key(N::BoardSearch, "search_commit", "Enter"),
+                key(N::BoardSearch, "search_cancel", "Esc"),
             ),
             CYAN,
         ),
         InputMode::InputTitle => hint("Creating task: enter title", YELLOW),
-        InputMode::InputDescription => {
-            hint("Creating task: opening $EDITOR for description  [Esc] cancel", YELLOW)
-        }
+        InputMode::InputDescription => hint(
+            format!(
+                "Creating task: opening $EDITOR for description  [{}] cancel",
+                editor_cancel()
+            ),
+            YELLOW,
+        ),
         InputMode::InputRepoPath => hint("Creating task: enter repo path", YELLOW),
         InputMode::InputTag => hint_text(
             app,
-            crate::tui::ui::tag_prompt(app.input.phoenix_armed()),
+            &crate::tui::ui::tag_prompt(t, app.input.phoenix_armed()),
             YELLOW,
         ),
-        InputMode::ConfirmDeleteTask(_) => hint_text(app, "Delete? [y/n]", RED),
+        InputMode::ConfirmDeleteTask(_) => hint_text(
+            app,
+            &format!("Delete? {}", yes_no(N::BoardConfirmDeleteTask)),
+            RED,
+        ),
         InputMode::QuickDispatch => hint("Quick dispatch: select repo path", YELLOW),
-        InputMode::ConfirmRetry(_) => hint("[r] Resume  [f] Fresh start  [Esc] Cancel", RED),
-        InputMode::ConfirmBatchDelete => hint_text(app, "Delete items? [y/n]", RED),
-        InputMode::ConfirmDone => hint_text(app, "Move to Done? [y/n]", YELLOW),
+        InputMode::ConfirmRetry(_) => hint(crate::tui::ui::retry_keys(t, true), RED),
+        InputMode::ConfirmBatchDelete => hint_text(
+            app,
+            &format!("Delete items? {}", yes_no(N::BoardConfirmBatchDelete)),
+            RED,
+        ),
+        InputMode::ConfirmDone => hint_text(
+            app,
+            &format!("Move to Done? {}", yes_no(N::BoardConfirmDone)),
+            YELLOW,
+        ),
         InputMode::InputEpicTitle => hint("Creating epic: enter title", PURPLE),
-        InputMode::InputEpicDescription => {
-            hint("Creating epic: opening $EDITOR for description  [Esc] cancel", PURPLE)
+        InputMode::InputEpicDescription => hint(
+            format!(
+                "Creating epic: opening $EDITOR for description  [{}] cancel",
+                editor_cancel()
+            ),
+            PURPLE,
+        ),
+        InputMode::ConfirmDeleteEpic => hint_text(
+            app,
+            &format!(
+                "Delete epic and subtasks? {}",
+                yes_no(N::BoardConfirmDeleteEpic)
+            ),
+            RED,
+        ),
+        InputMode::Help => {
+            let keys: Vec<String> = keys_of(t, N::BoardHelp, "close_help")
+                .iter()
+                .map(|k| format!("[{k}]"))
+                .collect();
+            hint(format!("{} to close help", keys.join(" or ")), CYAN)
         }
-        InputMode::ConfirmDeleteEpic => hint_text(app, "Delete epic and subtasks? [y/n]", RED),
-        InputMode::Help => hint("[?] or [Esc] to close help", CYAN),
         InputMode::BoardFilter => hint(
-            "Board filter: [Tab] next tab  [Space] toggle  [q/Esc] close",
+            format!(
+                "Board filter: [{}] next tab  [{}] toggle  [{}] close",
+                key(N::BoardFilter, "filter_next_tab", "Tab"),
+                key(N::BoardFilter, "filter_toggle_row", "Space"),
+                hint_keys(t, N::BoardFilter, &[("filter_close", "q"), ("filter_back", "Esc")]),
+            ),
             CYAN,
         ),
         InputMode::BoardFilterSearch => hint(
             format!(
-                "Search epics: {}_   [Enter] keep  [Esc] clear",
-                app.filter_overlay.epic_query
+                "Search epics: {}_   [{}] keep  [{}] clear",
+                app.filter_overlay.epic_query,
+                key(N::BoardFilterSearch, "filter_search_commit", "Enter"),
+                key(N::BoardFilterSearch, "filter_search_cancel", "Esc"),
             ),
             CYAN,
         ),
-        InputMode::ConfirmDeleteRepoPath => {
-            hint("Delete repo path? y to confirm, any key to cancel", YELLOW)
-        }
-        InputMode::ConfirmDetachTmux(_) => hint_text(app, "Detach tmux panel? [y/n]", YELLOW),
-        InputMode::ConfirmOverrideFeedOwner { .. } => {
-            hint_text(app, "Take over polling for this feed? [y/N]", YELLOW)
-        }
-        InputMode::ConfirmQuit => hint("Quit dispatch? [y/n]", YELLOW),
-        InputMode::InputBaseBranch => hint_text(app, "Base branch: ", YELLOW),
-        InputMode::InputWrapUpMode => {
-            hint_text(app, "Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip", YELLOW)
-        }
-        InputMode::InputPlacement => hint(
-            "[Tab] public/private  [j/k] workspace  [Space/Enter] create  [Esc] cancel",
+        InputMode::ConfirmDeleteRepoPath => hint(
+            format!(
+                "Delete repo path? {} to confirm, any key to cancel",
+                key(N::BoardConfirmDeleteRepoPath, "confirm_delete_repo_path_yes", "y")
+            ),
             YELLOW,
         ),
+        InputMode::ConfirmDetachTmux(_) => hint_text(
+            app,
+            &format!("Detach tmux panel? {}", yes_no(N::BoardConfirmDetachTmux)),
+            YELLOW,
+        ),
+        InputMode::ConfirmOverrideFeedOwner { .. } => hint_text(
+            app,
+            &format!(
+                "Take over polling for this feed? {}",
+                yes_no_hint(t, N::BoardConfirmOverrideFeedOwner, "N")
+            ),
+            YELLOW,
+        ),
+        InputMode::ConfirmQuit => hint(
+            format!("Quit dispatch? {}", yes_no(N::BoardConfirmQuit)),
+            YELLOW,
+        ),
+        InputMode::InputBaseBranch => hint_text(app, "Base branch: ", YELLOW),
+        InputMode::InputWrapUpMode => {
+            hint_text(app, &crate::tui::ui::wrap_up_prompt(t), YELLOW)
+        }
+        InputMode::InputPlacement => {
+            let ns = N::BoardPickerPlacement;
+            hint(
+                format!(
+                    "[{}] public/private  [{}] workspace  [{}] create  [{}] cancel",
+                    key(ns, "placement_picker_visibility", "Tab"),
+                    hint_keys(
+                        t,
+                        ns,
+                        &[
+                            ("placement_picker_workspace_down", "j"),
+                            ("placement_picker_workspace_up", "k")
+                        ]
+                    ),
+                    hint_row_keys(t, ns, "placement_picker_create", &["Space", "Enter"]),
+                    key(ns, "placement_picker_cancel", "Esc"),
+                ),
+                YELLOW,
+            )
+        }
         InputMode::InputModel => {
             let seeded = app.input.task_draft.as_ref().and_then(|d| d.model);
-            hint_text(app, &crate::tui::ui::model_prompt(seeded), YELLOW)
+            hint_text(app, &crate::tui::ui::model_prompt(t, seeded), YELLOW)
         }
         InputMode::ReparentEpic(_) => hint(
-            "Select new parent: navigate tree above, Enter to select",
+            format!(
+                "Select new parent: navigate tree above, {} to select",
+                key(N::BoardPickerReparentEpic, "reparent_picker_confirm", "Enter")
+            ),
             PURPLE,
         ),
-        InputMode::ConfirmReparentEpic { .. } => hint_text(app, "Reparent epic? [y/n]", PURPLE),
+        InputMode::ConfirmReparentEpic { .. } => hint_text(
+            app,
+            &format!("Reparent epic? {}", yes_no(N::BoardConfirmReparentEpic)),
+            PURPLE,
+        ),
         InputMode::MoveTaskToEpic(_) => hint(
-            "Select target epic: navigate tree above, Enter to select",
+            format!(
+                "Select target epic: navigate tree above, {} to select",
+                key(N::BoardPickerMoveToEpic, "move_to_epic_picker_confirm", "Enter")
+            ),
             PURPLE,
         ),
-        InputMode::ConfirmMoveTaskToEpic { .. } => {
-            hint_text(app, "Move task to epic? [y/n]", PURPLE)
-        }
-        InputMode::ConfirmTrustRepo { .. } | InputMode::ConfirmTrustRepoQuickDispatch { .. } => {
-            hint_text(app, "Repo not trusted — trust it? [y/N]", YELLOW)
-        }
-        InputMode::LinkWorkPackage { .. } => hint(
-            "Link to work package: [j/k] move  [Space/Enter] toggle  [Esc] close",
-            CYAN,
+        InputMode::ConfirmMoveTaskToEpic { .. } => hint_text(
+            app,
+            &format!("Move task to epic? {}", yes_no(N::BoardConfirmMoveToEpic)),
+            PURPLE,
         ),
+        InputMode::ConfirmTrustRepo { .. } => hint_text(
+            app,
+            &format!(
+                "Repo not trusted — trust it? {}",
+                yes_no_hint(t, N::BoardConfirmTrustRepo, "N")
+            ),
+            YELLOW,
+        ),
+        InputMode::ConfirmTrustRepoQuickDispatch { .. } => hint_text(
+            app,
+            &format!(
+                "Repo not trusted — trust it? {}",
+                yes_no_hint(t, N::BoardConfirmTrustRepoQuickDispatch, "N")
+            ),
+            YELLOW,
+        ),
+        InputMode::LinkWorkPackage { .. } => {
+            let ns = N::BoardPickerWorkPackage;
+            hint(
+                format!(
+                    "Link to work package: [{}] move  [{}] toggle  [{}] close",
+                    hint_keys(
+                        t,
+                        ns,
+                        &[
+                            ("work_package_picker_down", "j"),
+                            ("work_package_picker_up", "k")
+                        ]
+                    ),
+                    hint_row_keys(t, ns, "work_package_picker_toggle", &["Space", "Enter"]),
+                    key(ns, "work_package_picker_close", "Esc"),
+                ),
+                CYAN,
+            )
+        }
         InputMode::InputWorkPackageTitle(_) => hint(
-            "New work package: type a title  [Enter] create  [Esc] back",
+            format!(
+                "New work package: type a title  [{}] create  [{}] back",
+                key(N::BoardText, "submit_input", "Enter"),
+                key(N::BoardText, "cancel_input", "Esc"),
+            ),
             CYAN,
         ),
         InputMode::Admin => hint(
-            "Admin: [Tab] pane  [j/k] move  [Esc] close  (keys for the pane are shown on the screen)",
+            format!(
+                "Admin: [{}] pane  [{}] move  [{}] close  (keys for the pane are shown on the screen)",
+                key(N::BoardAdmin, "admin_next_pane", "Tab"),
+                hint_keys(
+                    t,
+                    N::BoardAdmin,
+                    &[("admin_navigate_down", "j"), ("admin_navigate_up", "k")]
+                ),
+                key(N::BoardAdmin, "admin_close", "Esc"),
+            ),
             CYAN,
         ),
-        InputMode::InputAdminText => hint("Admin: type a name  [Enter] send  [Esc] cancel", CYAN),
-        InputMode::ConfirmAdmin => hint("Admin: confirm with [y], any other key cancels", YELLOW),
+        InputMode::InputAdminText => hint(format!("Admin: type a name  {}", text_keys("send")), CYAN),
+        InputMode::ConfirmAdmin => hint(
+            format!(
+                "Admin: confirm with [{}], any other key cancels",
+                key(N::BoardConfirmAdmin, "confirm_admin_yes", "y")
+            ),
+            YELLOW,
+        ),
         InputMode::InputDisplayName => hint(
-            "Display name: type a name  [Enter] save  [Esc] cancel",
+            format!("Display name: type a name  {}", text_keys("save")),
             CYAN,
         ),
-        InputMode::RenameWorkPackage(_) => {
-            hint("Rename work package: [Enter] save  [Esc] cancel", CYAN)
-        }
+        InputMode::RenameWorkPackage(_) => hint(
+            format!("Rename work package: {}", text_keys("save")),
+            CYAN,
+        ),
         InputMode::ConfirmDeleteWorkPackage(id) => {
             // The status message auto-clears after STATUS_MESSAGE_TTL while
             // the mode lives on, so rebuild the titled prompt.
             let fallback = app.board.find_work_package(*id).map_or_else(
-                || "Delete work package? Its tasks and epics are kept [y/n]".to_string(),
-                crate::tui::update::delete_work_package_prompt,
+                || format!("Delete work package? Its tasks and epics are kept {}", yes_no(N::BoardConfirmDeleteWorkPackage)),
+                |package| crate::tui::update::delete_work_package_prompt(t, package),
             );
             hint_text(app, &fallback, RED)
         }
@@ -170,16 +318,28 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
 /// them.
 fn normal_status_line(app: &App) -> (Line<'static>, Style) {
     let key_color = CYAN;
+    let t = app.key_table;
+    if matches!(app.board.view_mode, crate::tui::ViewMode::TaskDetail { .. }) {
+        // The detail answers board.detail's keys, not the board's.
+        let mut bar = HintBar::new(t, N::BoardDetail, key_color);
+        bar.push_keys(
+            &[("scroll_detail_down", "j"), ("scroll_detail_up", "k")],
+            "scroll",
+        );
+        bar.push(None, "zoom_detail", "z", "zoom");
+        bar.push(None, "close_detail", "q", "close");
+        return (Line::from(bar.spans), Style::default());
+    }
     let mut spans = if app.has_selection() {
         let count = app.selected_tasks().len() + app.selected_epics().len();
         let has_tasks = !app.selected_tasks().is_empty();
-        batch_action_hints(count, key_color, has_tasks)
+        batch_action_hints(t, count, key_color, has_tasks)
     } else {
         // One column build for the cursor's item, not one per question asked
         // of it.
         match app.selected_column_item() {
-            Some(ColumnItem::Epic(epic)) => epic_action_hints(epic, key_color),
-            Some(ColumnItem::WorkPackage(_)) => super::package_action_hints(key_color),
+            Some(ColumnItem::Epic(epic)) => epic_action_hints(t, epic, key_color),
+            Some(ColumnItem::WorkPackage(_)) => super::package_action_hints(t, key_color),
             item => {
                 let task = match item {
                     Some(ColumnItem::Task(task)) => Some(task),
@@ -187,19 +347,28 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
                 };
                 let now = chrono::Utc::now();
                 let in_flight = task.is_some_and(|t| app.dispatch_may_be_in_flight(t, now));
-                action_hints(task, in_flight, app.cursor_in_flattened_column(), key_color)
+                action_hints(
+                    t,
+                    task,
+                    in_flight,
+                    app.cursor_in_flattened_column(),
+                    key_color,
+                )
             }
         }
     };
     if app.split_active() {
+        let key = hint_key(t, N::BoardNormal, None, "toggle_split_mode", "s");
+        let (key, rest) = if key == "s" {
+            ("[s]".to_string(), "plit ")
+        } else {
+            (format!("[{key}]"), " split ")
+        };
         prepend(
             &mut spans,
             vec![
-                Span::styled(
-                    "[s]",
-                    Style::default().fg(GREEN).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled("plit ", Style::default().fg(GREEN)),
+                Span::styled(key, Style::default().fg(GREEN).add_modifier(Modifier::BOLD)),
+                Span::styled(rest, Style::default().fg(GREEN)),
             ],
         );
     }
@@ -261,31 +430,33 @@ fn hidden_badge(epics: usize, packages: usize) -> Option<String> {
 
 /// Build status bar hints when tasks are batch-selected.
 pub(in crate::tui) fn batch_action_hints(
+    table: &'static [crate::keybindings::KeyBinding],
     count: usize,
     key_color: Color,
     has_tasks: bool,
 ) -> Vec<Span<'static>> {
-    let label_style = Style::default().fg(MUTED);
     let count_style = Style::default().fg(YELLOW).add_modifier(Modifier::BOLD);
 
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::styled(format!("{count} selected  "), count_style));
-
-    let mut push_hint = |key: &'static str, label: &'static str| {
-        push_hint_spans(&mut spans, key, label, key_color, label_style);
-    };
+    let mut bar = HintBar::new(table, N::BoardNormal, key_color);
+    bar.spans
+        .push(Span::styled(format!("{count} selected  "), count_style));
 
     if has_tasks {
-        push_hint("L", "move");
-        push_hint("H", "back");
+        bar.push(Some(C::OffEpicCard), "move_task_forward", "L", "move");
+        bar.push(Some(C::OffEpicCard), "move_task_backward", "H", "back");
     }
     // 'x' completes tasks that aren't Done yet and deletes the rest, so with
     // tasks selected the label can't commit to one verb. An epics-only
     // selection always deletes.
-    push_hint("x", if has_tasks { "done/delete" } else { "delete" });
-    push_hint("a", "select all");
-    push_hint("Tab", "lens");
-    push_hint("v", "toggle");
-    push_hint("Esc", "clear");
-    spans
+    bar.push(
+        None,
+        "delete_task",
+        "x",
+        if has_tasks { "done/delete" } else { "delete" },
+    );
+    bar.push(None, "select_all", "a", "select all");
+    bar.push(None, "cycle_lens_forward", "Tab", "lens");
+    bar.push(None, "toggle_select", "v", "toggle");
+    bar.push(Some(C::WithSelection), "clear_selection", "Esc", "clear");
+    bar.spans
 }

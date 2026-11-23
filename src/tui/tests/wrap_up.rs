@@ -244,7 +244,11 @@ fn status_bar_no_longer_shows_wrap_up_hint_for_review_task() {
 #[test]
 fn epic_action_hints_no_longer_shows_wrap_up_hint() {
     let epic = make_epic(10);
-    let hints = crate::tui::ui::epic_action_hints(&epic, ratatui::style::Color::White);
+    let hints = crate::tui::ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        ratatui::style::Color::White,
+    );
     let joined: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         !joined.contains("[W]"),

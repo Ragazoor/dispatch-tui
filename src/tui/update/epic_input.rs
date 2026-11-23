@@ -15,9 +15,15 @@ pub(in crate::tui) fn feed_owner_takeover_offered(
     status: &mut StatusState,
     epic_id: EpicId,
     other_host: String,
+    table: &'static [crate::keybindings::KeyBinding],
 ) -> Vec<Command> {
+    let keys = crate::keybindings::yes_no_hint(
+        table,
+        crate::keybindings::KeyNamespace::BoardConfirmOverrideFeedOwner,
+        "N",
+    );
     status.set(format!(
-        "This feed is currently owned by host {other_host} — take over polling? [y/N]"
+        "This feed is currently owned by host {other_host} — take over polling? {keys}"
     ));
     input.mode = InputMode::ConfirmOverrideFeedOwner {
         epic_id,
@@ -120,6 +126,7 @@ pub(in crate::tui) fn reparent_confirm(
     interaction: &InteractionState,
     status: &mut StatusState,
     epics: &[Epic],
+    table: &'static [crate::keybindings::KeyBinding],
 ) {
     let epic_id = match input.mode {
         InputMode::ReparentEpic(id) => id,
@@ -145,15 +152,20 @@ pub(in crate::tui) fn reparent_confirm(
         .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
         .unwrap_or_default();
 
+    let keys = crate::keybindings::yes_no_hint(
+        table,
+        crate::keybindings::KeyNamespace::BoardConfirmReparentEpic,
+        "n",
+    );
     let msg = match new_parent {
-        None => format!("Make {moving_title} a root epic? [y/n]"),
+        None => format!("Make {moving_title} a root epic? {keys}"),
         Some(pid) => {
             let parent_label = epics
                 .iter()
                 .find(|e| e.id == pid)
                 .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
                 .unwrap_or_else(|| "the epic".to_string());
-            format!("Reparent {moving_title} under {parent_label}? [y/n]")
+            format!("Reparent {moving_title} under {parent_label}? {keys}")
         }
     };
 

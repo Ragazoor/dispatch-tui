@@ -331,8 +331,13 @@ impl App {
             }
             let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
             self.input.mode = InputMode::ConfirmDeleteEpic;
+            let keys = crate::keybindings::yes_no_hint(
+                self.key_table,
+                crate::keybindings::KeyNamespace::BoardConfirmDeleteEpic,
+                "n",
+            );
             self.status
-                .set(format!("Delete epic {title} and subtasks? [y/n]"));
+                .set(format!("Delete epic {title} and subtasks? {keys}"));
         }
         vec![]
     }

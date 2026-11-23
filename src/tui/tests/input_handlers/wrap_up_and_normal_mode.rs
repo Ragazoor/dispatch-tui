@@ -84,10 +84,13 @@ fn wrap_up_mode_keys_record_the_mode_and_open_the_model_step() {
             app.input.task_draft.as_ref().unwrap().wrap_up_mode,
             Some(mode)
         );
-        assert_eq!(
-            app.status.message.as_deref(),
-            Some(crate::tui::ui::model_prompt(None).as_str()),
-            "the status message advertises the model step"
+        let buf = render_to_buffer(&mut app, 160, 50);
+        assert!(
+            buffer_contains(
+                &buf,
+                &crate::tui::ui::model_prompt(crate::keybindings::KEY_BINDINGS, None)
+            ),
+            "the status bar advertises the model step"
         );
     }
 }
@@ -193,10 +196,13 @@ fn model_step_ignores_other_keys_and_esc_cancels() {
 fn model_prompt_names_what_enter_picks() {
     use crate::models::TaskModel;
     assert_eq!(
-        crate::tui::ui::model_prompt(None),
+        crate::tui::ui::model_prompt(crate::keybindings::KEY_BINDINGS, None),
         "Model: [h]aiku  [s]onnet  [o]pus  [f]able  [Enter] opus"
     );
-    assert!(crate::tui::ui::model_prompt(Some(TaskModel::Fable)).ends_with("[Enter] fable"));
+    assert!(
+        crate::tui::ui::model_prompt(crate::keybindings::KEY_BINDINGS, Some(TaskModel::Fable))
+            .ends_with("[Enter] fable")
+    );
 }
 
 // ---------------------------------------------------------------------------

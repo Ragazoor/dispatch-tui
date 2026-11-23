@@ -10,6 +10,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::keybindings::{hint_key, hint_row_keys, KeyNamespace as N};
 use crate::models::WorkPackageItem;
 use crate::palette::{CYAN, FG, MUTED};
 use crate::tui::ui::shared::{
@@ -90,13 +91,27 @@ pub(in crate::tui::ui::kanban) fn render_work_package_picker_overlay(
         vec![
             title_field_line(app, width),
             Line::from(Span::styled(
-                "[Enter] create  [Esc] back",
+                format!(
+                    "[{}] create  [{}] back",
+                    hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
+                    hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
+                ),
                 Style::default().fg(MUTED),
             )),
         ]
     } else {
+        let ns = N::BoardPickerWorkPackage;
         vec![Line::from(Span::styled(
-            "[Space/Enter] toggle  [Esc] close",
+            format!(
+                "[{}] toggle  [{}] close",
+                hint_row_keys(
+                    app.key_table,
+                    ns,
+                    "work_package_picker_toggle",
+                    &["Space", "Enter"]
+                ),
+                hint_key(app.key_table, ns, None, "work_package_picker_close", "Esc"),
+            ),
             Style::default().fg(MUTED),
         ))]
     };
@@ -156,7 +171,11 @@ pub(in crate::tui::ui::kanban) fn render_work_package_rename_overlay(
         field_line(app, width, label),
         Line::raw(""),
         Line::from(Span::styled(
-            "[Enter] save  [Esc] cancel",
+            format!(
+                "[{}] save  [{}] cancel",
+                hint_key(app.key_table, N::BoardText, None, "submit_input", "Enter"),
+                hint_key(app.key_table, N::BoardText, None, "cancel_input", "Esc"),
+            ),
             Style::default().fg(MUTED),
         )),
     ];

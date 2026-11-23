@@ -45,7 +45,11 @@ fn toggle_flattened_message_flips_state() {
 #[test]
 fn epic_action_hints_not_done() {
     let epic = make_epic(1);
-    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        Color::Rgb(122, 162, 247),
+    );
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -61,7 +65,11 @@ fn epic_action_hints_not_done() {
 fn epic_action_hints_done() {
     let mut epic = make_epic(1);
     epic.status = TaskStatus::Done;
-    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        Color::Rgb(122, 162, 247),
+    );
     let keys: Vec<&str> = hints
         .iter()
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
@@ -74,7 +82,13 @@ fn epic_action_hints_done() {
 #[test]
 fn action_hints_no_ctrl_g_outside_epic() {
     let task = make_task(1, TaskStatus::Backlog);
-    let hints = ui::action_hints(Some(&task), false, false, Color::Rgb(122, 162, 247));
+    let hints = ui::action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        Some(&task),
+        false,
+        false,
+        Color::Rgb(122, 162, 247),
+    );
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[^g]"),
@@ -115,18 +129,51 @@ fn hint_bar_keys_are_all_in_the_keybinding_table() {
                     )
                 });
                 task.epic_id = Some(crate::models::EpicId(1));
-                bars.push(ui::action_hints(Some(&task), false, flattened, color));
+                bars.push(ui::action_hints(
+                    crate::keybindings::KEY_BINDINGS,
+                    Some(&task),
+                    false,
+                    flattened,
+                    color,
+                ));
             }
         }
     }
-    bars.push(ui::action_hints(None, false, false, color));
+    bars.push(ui::action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        None,
+        false,
+        false,
+        color,
+    ));
     let mut feed_epic: Epic = make_epic(1);
     feed_epic.feed_command = Some("true".to_string());
-    bars.push(ui::epic_action_hints(&feed_epic, color));
-    bars.push(ui::epic_action_hints(&make_epic(1), color));
-    bars.push(ui::package_action_hints(color));
-    bars.push(ui::batch_action_hints(2, color, true));
-    bars.push(ui::batch_action_hints(2, color, false));
+    bars.push(ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &feed_epic,
+        color,
+    ));
+    bars.push(ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &make_epic(1),
+        color,
+    ));
+    bars.push(ui::package_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        color,
+    ));
+    bars.push(ui::batch_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        2,
+        color,
+        true,
+    ));
+    bars.push(ui::batch_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        2,
+        color,
+        false,
+    ));
 
     for hints in &bars {
         // The batch bar's "N selected" count is bold too; only `[key]` spans
@@ -156,21 +203,46 @@ fn enter_hint_names_what_enter_does() {
     let mut task = make_task(1, TaskStatus::Running);
     task.epic_id = Some(crate::models::EpicId(1));
     assert_eq!(
-        label_after_enter(&ui::action_hints(Some(&task), false, false, color)).as_deref(),
+        label_after_enter(&ui::action_hints(
+            crate::keybindings::KEY_BINDINGS,
+            Some(&task),
+            false,
+            false,
+            color
+        ))
+        .as_deref(),
         Some("detail")
     );
     assert_eq!(
-        label_after_enter(&ui::action_hints(Some(&task), false, true, color)).as_deref(),
+        label_after_enter(&ui::action_hints(
+            crate::keybindings::KEY_BINDINGS,
+            Some(&task),
+            false,
+            true,
+            color
+        ))
+        .as_deref(),
         Some("epic")
     );
     task.epic_id = None;
     assert_eq!(
-        label_after_enter(&ui::action_hints(Some(&task), false, true, color)),
+        label_after_enter(&ui::action_hints(
+            crate::keybindings::KEY_BINDINGS,
+            Some(&task),
+            false,
+            true,
+            color
+        )),
         None,
         "a flattened task with no epic has nowhere to jump"
     );
     assert_eq!(
-        label_after_enter(&ui::epic_action_hints(&make_epic(1), color)).as_deref(),
+        label_after_enter(&ui::epic_action_hints(
+            crate::keybindings::KEY_BINDINGS,
+            &make_epic(1),
+            color
+        ))
+        .as_deref(),
         Some("deepest")
     );
 }
@@ -180,7 +252,11 @@ fn enter_hint_names_what_enter_does() {
 #[test]
 fn epic_action_hints_labels_space_as_enter() {
     let epic = make_epic(1);
-    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        Color::Rgb(122, 162, 247),
+    );
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(
         text.contains("[Space] enter"),
@@ -197,7 +273,11 @@ fn epic_action_hints_labels_space_as_enter() {
 #[test]
 fn epic_action_hints_omits_auto_dispatch() {
     let epic = make_epic(1);
-    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        Color::Rgb(122, 162, 247),
+    );
     let keys = hint_keys(&hints);
     assert!(
         !keys.contains(&"[U]"),
@@ -232,7 +312,11 @@ fn board_footer_for_selected_epic_card() {
 #[test]
 fn epic_action_hints_shows_filter_help() {
     let epic = make_epic(1);
-    let hints = ui::epic_action_hints(&epic, Color::Rgb(122, 162, 247));
+    let hints = ui::epic_action_hints(
+        crate::keybindings::KEY_BINDINGS,
+        &epic,
+        Color::Rgb(122, 162, 247),
+    );
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[f]"), "epic should show filter hint");
     assert!(keys.contains(&"[?]"), "epic should show help hint");

@@ -678,6 +678,138 @@ pub fn first_key(
         .unwrap_or_default()
 }
 
+/// The key a hint shows for `namespace`'s `action` row in `table` (the row
+/// guarded by `context` where the action has several): `shown` while the
+/// row lists it, otherwise the row's first key, in the hints' short form
+/// (`Del`, `↑`, `↓`). So a hint that shows one of a row's keys keeps its
+/// text under the default table and names the user's key after a remap
+/// (`HintsNameOnlyTableKeys` in `docs/specs/keybindings.allium`). Empty when
+/// no such row exists, which the drift test reads as a failure.
+pub fn hint_key(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    context: Option<KeyContext>,
+    action: &str,
+    shown: &str,
+) -> &'static str {
+    let rows = || bindings_in(table, namespace).filter(|b| b.action == action);
+    let row = rows()
+        .find(|b| b.context == context)
+        .or_else(|| rows().next());
+    let key = row.map_or("", |b| {
+        b.keys
+            .iter()
+            .copied()
+            .find(|k| *k == shown)
+            .or_else(|| b.keys.first().copied())
+            .unwrap_or_default()
+    });
+    short_key_form(key)
+}
+
+/// A hint naming several rows' keys at once, `/`-joined: `[j/k]` is
+/// `hint_keys(table, ns, &[("…_down", "j"), ("…_up", "k")])`. Each part is
+/// [`hint_key`] of the context-free row (or the first) of its action.
+pub fn hint_keys(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    parts: &[(&str, &str)],
+) -> String {
+    parts
+        .iter()
+        .map(|(action, shown)| hint_key(table, namespace, None, action, shown))
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// A hint naming several keys of one row, `/`-joined (`[Space/Enter]`): those
+/// of `shown` the row lists, or the row's first key when it lists none.
+pub fn hint_row_keys(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    action: &str,
+    shown: &[&str],
+) -> String {
+    let row = bindings_in(table, namespace).find(|b| b.action == action);
+    let listed: Vec<&str> = row.map_or_else(Vec::new, |b| {
+        shown
+            .iter()
+            .filter_map(|k| b.keys.iter().copied().find(|key| *key == *k))
+            .collect()
+    });
+    if listed.is_empty() {
+        return hint_key(table, namespace, None, action, "").to_string();
+    }
+    listed
+        .into_iter()
+        .map(short_key_form)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The `[y/n]` of a confirmation prompt in `namespace`: the key of its
+/// `_yes` row, then the key of its `_no` row. A catch-all no row has no key
+/// of its own and is drawn as `no` (`n`, or `N` where no is the default),
+/// unless another row of the namespace lists that key: then the first of Esc
+/// and q no row lists (`HintsNameOnlyTableKeys`).
+pub fn yes_no_hint(table: &'static [KeyBinding], namespace: KeyNamespace, no: &str) -> String {
+    let row = |suffix: &str| bindings_in(table, namespace).find(|b| b.action.ends_with(suffix));
+    let yes = row("_yes").map_or("", |b| hint_key(table, namespace, None, b.action, "y"));
+    let no = match row("_no") {
+        Some(b) if b.keys == [ANY_OTHER_KEY] => catch_all_keys(table, namespace, &[no]),
+        Some(b) => hint_key(table, namespace, None, b.action, no).to_string(),
+        None => String::new(),
+    };
+    format!("[{yes}/{no}]")
+}
+
+/// The keys a hint draws for a catch-all row, which has no key of its own:
+/// those of `shown` no row of `namespace` lists, `/`-joined, or else the
+/// first of Esc and q no row lists (`HintsNameOnlyTableKeys`).
+pub fn catch_all_keys(
+    table: &'static [KeyBinding],
+    namespace: KeyNamespace,
+    shown: &[&str],
+) -> String {
+    let listed = |k: &str| bindings_in(table, namespace).any(|b| b.keys.contains(&k));
+    let free: Vec<&str> = shown.iter().copied().filter(|k| !listed(k)).collect();
+    if !free.is_empty() {
+        return free.join("/");
+    }
+    ["Esc", "q"]
+        .into_iter()
+        .find(|k| !listed(k))
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// `label` with `key` bracketed inside it where the label holds that
+/// character (`[r]ebase`, `pr-re[v]iew`), else `[key] label`: the compact
+/// form a picker prompt writes its value keys in, kept when the key is
+/// rebound to one the label does not contain.
+pub fn embedded_hint(key: &str, label: &str) -> String {
+    let mut chars = key.chars();
+    if let (Some(c), None) = (chars.next(), chars.next()) {
+        if let Some(at) = label.find(c) {
+            let (head, tail) = label.split_at(at);
+            return format!("{head}[{key}]{}", &tail[c.len_utf8()..]);
+        }
+    }
+    format!("[{key}] {label}")
+}
+
+/// The short form a hint draws a key in.
+pub fn short_key_form(key: &'static str) -> &'static str {
+    match key {
+        "Delete" => "Del",
+        "Up" => "\u{2191}",
+        "Down" => "\u{2193}",
+        "Left" => "\u{2190}",
+        "Right" => "\u{2192}",
+        other => other,
+    }
+}
+
 /// Every key of `namespace`'s `action` rows in `table`, in table order:
 /// what a hint that names a row's keys shows (OverlayTitleNamesItsOwnKeys,
 /// PaneStartupScreenIsOutsideUsage).

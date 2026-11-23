@@ -212,6 +212,18 @@ pub(in crate::tui::ui) fn feed_role_label(role: FeedRole) -> Option<String> {
 
 pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, area: Rect) {
     let mut parts: Vec<Span> = Vec::new();
+    // The badges' keys are the keys of their board.normal rows
+    // (`HintsNameOnlyTableKeys` in `docs/specs/keybindings.allium`).
+    let key = |context, action, shown| {
+        crate::keybindings::hint_key(
+            app.key_table,
+            crate::keybindings::KeyNamespace::BoardNormal,
+            context,
+            action,
+            shown,
+        )
+    };
+    let in_epic = Some(crate::keybindings::KeyContext::InsideEpicView);
     // The store this board is connected to, in every state and in the same
     // muted style as the other badges (sync.allium: ConnectionIndicator,
     // `TheStoreIsAlwaysNamed`). A board on the wrong store otherwise looks
@@ -232,10 +244,17 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     // Auto dispatch indicator — only in epic view
     if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
         if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
+            let auto = key(in_epic, "toggle_auto_dispatch", "U");
             let (label, style) = if epic.auto_dispatch {
-                ("auto dispatch [U]  ", Style::default().fg(GREEN))
+                (
+                    format!("auto dispatch [{auto}]  "),
+                    Style::default().fg(GREEN),
+                )
             } else {
-                ("manual dispatch [U]  ", Style::default().fg(MUTED))
+                (
+                    format!("manual dispatch [{auto}]  "),
+                    Style::default().fg(MUTED),
+                )
             };
             parts.push(Span::styled(label, style));
 
@@ -255,10 +274,11 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
             }
 
             // Group-by-repo indicator — shown for all epics
+            let group = key(in_epic, "toggle_group_by_repo", "R");
             let (label, style) = if epic.group_by_repo {
-                ("group:on [R]  ", Style::default().fg(GREEN))
+                (format!("group:on [{group}]  "), Style::default().fg(GREEN))
             } else {
-                ("group:off [R]  ", Style::default().fg(MUTED))
+                (format!("group:off [{group}]  "), Style::default().fg(MUTED))
             };
             parts.push(Span::styled(label, style));
         }
@@ -276,12 +296,23 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     // (keep-awake.allium: BadgeMeansHeld). ASCII on purpose: the width
     // accounting below counts codepoints, so an emoji would cost a column.
     if app.keep_awake.shows_badge() {
-        parts.push(Span::styled("awake [W]  ", Style::default().fg(GREEN)));
+        let awake = key(None, "toggle_keep_awake", "W");
+        parts.push(Span::styled(
+            format!("awake [{awake}]  "),
+            Style::default().fg(GREEN),
+        ));
     }
+    let bell = key(None, "toggle_notifications", "N");
     if app.notifications_enabled() {
-        parts.push(Span::styled("\u{1F514} [N]", Style::default().fg(YELLOW)));
+        parts.push(Span::styled(
+            format!("\u{1F514} [{bell}]"),
+            Style::default().fg(YELLOW),
+        ));
     } else {
-        parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
+        parts.push(Span::styled(
+            format!("\u{1F515} [{bell}]"),
+            Style::default().fg(MUTED),
+        ));
     }
 
     // The model and budget indicators are prepended so they sit left of
@@ -374,6 +405,62 @@ pub(in crate::tui::ui) fn section_header_item(
         ListItem::new(vec![line])
     } else {
         ListItem::new(vec![Line::raw(""), line])
+    }
+}
+
+/// A status-bar run of key hints, each built from the row it stands for in
+/// the board's loaded table (`HintsNameOnlyTableKeys` in
+/// `docs/specs/keybindings.allium`), so a rebound row changes its hint.
+pub(in crate::tui::ui) struct HintBar {
+    table: &'static [crate::keybindings::KeyBinding],
+    namespace: crate::keybindings::KeyNamespace,
+    key_color: Color,
+    pub(in crate::tui::ui) spans: Vec<Span<'static>>,
+}
+
+impl HintBar {
+    pub(in crate::tui::ui) fn new(
+        table: &'static [crate::keybindings::KeyBinding],
+        namespace: crate::keybindings::KeyNamespace,
+        key_color: Color,
+    ) -> Self {
+        Self {
+            table,
+            namespace,
+            key_color,
+            spans: Vec::new(),
+        }
+    }
+
+    /// One hint: the key of `action`'s row (guarded by `context` where the
+    /// action has several), shown as `shown` while the row lists it.
+    pub(in crate::tui::ui) fn push(
+        &mut self,
+        context: Option<crate::keybindings::KeyContext>,
+        action: &str,
+        shown: &str,
+        label: &str,
+    ) {
+        let key = crate::keybindings::hint_key(self.table, self.namespace, context, action, shown);
+        push_hint_spans(
+            &mut self.spans,
+            key,
+            label,
+            self.key_color,
+            Style::default().fg(MUTED),
+        );
+    }
+
+    /// One hint naming several rows' keys, `/`-joined (`[j/k] scroll`).
+    pub(in crate::tui::ui) fn push_keys(&mut self, parts: &[(&str, &str)], label: &str) {
+        let keys = crate::keybindings::hint_keys(self.table, self.namespace, parts);
+        push_hint_spans(
+            &mut self.spans,
+            &keys,
+            label,
+            self.key_color,
+            Style::default().fg(MUTED),
+        );
     }
 }
 

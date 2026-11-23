@@ -126,7 +126,16 @@ contract KeybindingDriftGate {
         -- (PaneTitlesNameTheirOwnKeys) and asserted to name their rows' keys.
         -- Every hint is read twice: under the default table and under the
         -- remapped table of RemappedTableDrivesDispatch, where it names the
-        -- user's key and no longer the default one.
+        -- user's key and no longer the default one: each key the remap moved
+        -- carries, in the remapped frame, the label its default key carried
+        -- in the default frame.
+        -- A hint that shows only some of a row's keys (`[q/Esc] close` of a
+        -- row listing Enter and q) shows those it shows by default while the
+        -- row still lists them, and otherwise the row's first key.
+        -- A catch-all row has no key of its own; a y/n prompt draws it as
+        -- `n` (`N` where no is the default) — decided 2026-11-23 — unless
+        -- another row of the mode lists that key, when it draws the first of
+        -- Esc and q that no row lists.
 
     @invariant TmuxGlobalRowsTrackTheirBindings
         -- The key the board binds for the agent-tree toggle is the key of the
