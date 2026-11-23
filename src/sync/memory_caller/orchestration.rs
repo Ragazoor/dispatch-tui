@@ -42,18 +42,17 @@ impl MemoryReducerCaller {
         max_parallel: Option<i64>,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
-        match module::check_change_orchestrator_settings(
+        let row = match module::check_change_orchestrator_settings(
             &*tables,
             epic.0,
             start_rule.as_deref(),
             max_parallel,
         ) {
-            Ok(row) => {
-                self.write_orchestration(&mut tables, row);
-                Ok(ReducerOutcome::Applied(vec![]))
-            }
-            Err(why) => Ok(ReducerOutcome::Refused(why)),
-        }
+            Ok(row) => row,
+            Err(why) => return Ok(ReducerOutcome::Refused(why)),
+        };
+        self.write_orchestration(&mut tables, row);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_switch_orchestrator_off(&self, epic: EpicId) -> Result<ReducerOutcome> {
@@ -72,19 +71,18 @@ impl MemoryReducerCaller {
         agent_name: String,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
-        match module::check_mark_task_ready(&*tables, task.0, &marked_by, &agent_name) {
-            Ok(Some(row)) => {
-                let row = module::ReadyMark {
-                    marked_at: self.now(),
-                    ..row
-                };
-                tables.ready_marks.insert(row.task_id, row.clone());
-                self.rows.upsert_ready_mark(&row.into());
-                Ok(ReducerOutcome::Applied(vec![]))
-            }
-            Ok(None) => Ok(ReducerOutcome::Applied(vec![])),
-            Err(why) => Ok(ReducerOutcome::Refused(why)),
+        let row = match module::check_mark_task_ready(&*tables, task.0, &marked_by, &agent_name) {
+            Ok(row) => row,
+            Err(why) => return Ok(ReducerOutcome::Refused(why)),
+        };
+        if let Some(row) = row {
+            let row = module::ReadyMark {
+                marked_at: self.now(),
+                ..row
+            };
+            self.write_ready_mark(&mut tables, row);
         }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     pub(super) fn apply_clear_ready_mark(&self, task: TaskId) -> Result<ReducerOutcome> {
@@ -99,6 +97,11 @@ impl MemoryReducerCaller {
     fn write_orchestration(&self, tables: &mut Tables, row: module::EpicOrchestration) {
         tables.epic_orchestrations.insert(row.epic_id, row.clone());
         self.rows.upsert_epic_orchestration(&row.into());
+    }
+
+    fn write_ready_mark(&self, tables: &mut Tables, row: module::ReadyMark) {
+        tables.ready_marks.insert(row.task_id, row.clone());
+        self.rows.upsert_ready_mark(&row.into());
     }
 
     pub(super) fn delete_orchestration(&self, tables: &mut Tables, epic_id: i64) {

@@ -21,18 +21,18 @@ fn check_start_rule(rule: &str) -> Result<(), String> {
     }
 }
 
-fn check_max_parallel(max_parallel: Option<i64>) -> Result<(), String> {
-    match max_parallel {
-        Some(n) if n < 1 => Err("the limit must be at least 1".into()),
-        _ => Ok(()),
+fn check_max_parallel(max_parallel: i64) -> Result<(), String> {
+    if max_parallel < 1 {
+        return Err("the limit must be at least 1".into());
     }
+    Ok(())
 }
 
 /// `orchestrators.allium`'s `covering(epic)`: the switch on `epic_id` or on
 /// its nearest ancestor that has one. `0` (no epic) has none.
 pub fn covering_orchestration(r: &impl StoreReads, epic_id: i64) -> Option<EpicOrchestration> {
     let mut next = epic_id;
-    for _ in 0..=MAX_EPIC_DEPTH {
+    for _ in 0..MAX_EPIC_DEPTH {
         if next == 0 {
             return None;
         }
@@ -77,6 +77,17 @@ pub fn check_switch_orchestrator_on(
     if r.orchestration_of(epic_id).is_some() {
         return Err(format!("epic {epic_id} already has an orchestrator"));
     }
+    let start_rule = start_rule.unwrap_or(START_RULE_MARKED_ONLY);
+    check_start_rule(start_rule)?;
+    if let Some(n) = max_parallel {
+        check_max_parallel(n)?;
+    }
+    if let Some(above) = covering_orchestration(r, epic.parent_epic_id) {
+        return Err(format!(
+            "{} above this one has an orchestrator",
+            named(r, above.epic_id)
+        ));
+    }
     if let Some(below) = descendant_epic_ids(r, epic_id)
         .into_iter()
         .find(|id| r.orchestration_of(*id).is_some())
@@ -86,15 +97,6 @@ pub fn check_switch_orchestrator_on(
             named(r, below)
         ));
     }
-    if let Some(above) = covering_orchestration(r, epic.parent_epic_id) {
-        return Err(format!(
-            "{} above this one has an orchestrator",
-            named(r, above.epic_id)
-        ));
-    }
-    let start_rule = start_rule.unwrap_or(START_RULE_MARKED_ONLY);
-    check_start_rule(start_rule)?;
-    check_max_parallel(max_parallel)?;
     Ok(EpicOrchestration {
         epic_id,
         start_rule: start_rule.to_string(),
@@ -121,8 +123,8 @@ pub fn check_change_orchestrator_settings(
         check_start_rule(rule)?;
         row.start_rule = rule.to_string();
     }
-    check_max_parallel(max_parallel)?;
     if let Some(n) = max_parallel {
+        check_max_parallel(n)?;
         row.max_parallel = n;
     }
     Ok(row)
@@ -230,7 +232,7 @@ pub fn change_orchestrator_settings(
 #[spacetimedb::reducer]
 pub fn switch_orchestrator_off(ctx: &ReducerContext, epic_id: i64) -> Result<(), String> {
     check_switch_orchestrator_off(ctx, epic_id)?;
-    ctx.db.epic_orchestrations().epic_id().delete(epic_id);
+    delete_orchestration(ctx, epic_id);
     Ok(())
 }
 
@@ -253,21 +255,29 @@ pub fn mark_task_ready(
 #[spacetimedb::reducer]
 pub fn clear_ready_mark(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
     check_clear_ready_mark(ctx, task_id)?;
-    ctx.db.ready_marks().task_id().delete(task_id);
+    delete_ready_mark(ctx, task_id);
     Ok(())
+}
+
+pub(crate) fn delete_ready_mark(ctx: &ReducerContext, task_id: i64) {
+    ctx.db.ready_marks().task_id().delete(task_id);
+}
+
+pub(crate) fn delete_orchestration(ctx: &ReducerContext, epic_id: i64) {
+    ctx.db.epic_orchestrations().epic_id().delete(epic_id);
 }
 
 /// Called by every task write that can move a status.
 pub(crate) fn drop_ready_mark_on_leaving_backlog(ctx: &ReducerContext, prior: &Task, next: &Task) {
     if leaves_backlog(&prior.status, &next.status) {
-        ctx.db.ready_marks().task_id().delete(next.id);
+        delete_ready_mark(ctx, next.id);
     }
 }
 
 /// Called after an epic's parent changed.
 pub(crate) fn switch_off_on_reparent(ctx: &ReducerContext, epic_id: i64, new_parent: i64) {
     for id in switches_off_on_reparent(ctx, epic_id, new_parent) {
-        ctx.db.epic_orchestrations().epic_id().delete(id);
+        delete_orchestration(ctx, id);
     }
 }
 
