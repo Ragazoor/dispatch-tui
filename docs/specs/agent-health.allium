@@ -250,8 +250,10 @@ rule VoidSubagentsAndPendingStop {
         -- spacetime/module/src/agent_state.rs::subagent_clear_and_void_pending_stop,
         -- reached from the board through
         -- src/service/tasks/crud.rs::clear_subagents_no_drain. The dispatch
-        -- claim makes the same clear inside its own transaction
-        -- (store-split.allium: RequestDispatch). A detach reaches the store
+        -- claim makes the same clear inside its own transaction: the agent it
+        -- launches starts with none, and the agent it replaces lets go of its
+        -- entries as it ends (agents.allium: StartAgentOnFreshLaunch,
+        -- EndedAgentLetsGoOfItsSession). A detach reaches the store
         -- through spacetime/module/src/agent_state.rs::subagent_clear, which
         -- clears and applies a pending Stop in one write.
 }

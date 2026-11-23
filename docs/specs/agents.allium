@@ -199,6 +199,13 @@ rule StartAgentOnFreshLaunch {
         -- is the task's one agent with state = current, or null
         -- (OneCurrentAgentPerTask).
         --
+        -- This rule owns the agent's facts at the claim; store-split.allium's
+        -- RequestDispatch writes none of them. The launched agent starts with
+        -- core's defaults: no live subagents and no pending Stop (an assigned
+        -- agent has never run, AssignedAgentHasNoSession). The agent it
+        -- replaces lets go of its window, subagent entries and any deferred
+        -- Stop as it ends (EndedAgentLetsGoOfItsSession).
+        --
         -- Every claim gets an agent, whichever path wrote the request: the
         -- request_dispatch reducer and the epic chain inside
         -- request_exit_session share one write

@@ -43,7 +43,7 @@ contract DispatchRequestServing {
         -- prior run of this task (a backlog task should never carry live
         -- subagents from before) and resets live_subagents to 0. The
         -- module does this in the claim's own transaction
-        -- (store-split.allium: RequestDispatch), not ProvisionDispatch. stop_pending
+        -- (agents.allium: StartAgentOnFreshLaunch), not ProvisionDispatch. stop_pending
         -- is cleared too, but the HookSubagentStop drain path does NOT run
         -- there even if it was set: the claim moves the task into Running,
         -- and draining to Review in the same write would leave a task
