@@ -44,7 +44,9 @@ pub mod delete_task_reducer;
 pub mod delete_work_package_reducer;
 pub mod dispatch_request_timeout_type;
 pub mod dispatch_request_type;
+pub mod end_orchestrator_session_reducer;
 pub mod ensure_managed_epics_reducer;
+pub mod ensure_orchestrator_reducer;
 pub mod epic_orchestration_type;
 pub mod epic_patch_type;
 pub mod epic_type;
@@ -72,6 +74,8 @@ pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod mark_task_ready_reducer;
 pub mod mark_task_seen_reducer;
 pub mod membership_type;
+pub mod orchestrator_turn_completed_reducer;
+pub mod orchestrator_type;
 pub mod override_poll_owner_reducer;
 pub mod own_bookmarks_table;
 pub mod own_epics_table;
@@ -156,6 +160,7 @@ pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
 pub mod setting_type;
 pub mod setting_write_type;
+pub mod start_orchestrator_session_reducer;
 pub mod store_owner_type;
 pub mod sub_status_update_type;
 pub mod subagent_clear_and_void_pending_stop_reducer;
@@ -190,6 +195,7 @@ pub mod visible_feed_requests_table;
 pub mod visible_learning_retrievals_table;
 pub mod visible_learning_verdicts_table;
 pub mod visible_learnings_table;
+pub mod visible_orchestrators_table;
 pub mod visible_poll_owners_table;
 pub mod visible_ready_marks_table;
 pub mod visible_session_requests_table;
@@ -240,7 +246,9 @@ pub use delete_task_reducer::delete_task;
 pub use delete_work_package_reducer::delete_work_package;
 pub use dispatch_request_timeout_type::DispatchRequestTimeout;
 pub use dispatch_request_type::DispatchRequest;
+pub use end_orchestrator_session_reducer::end_orchestrator_session;
 pub use ensure_managed_epics_reducer::ensure_managed_epics;
+pub use ensure_orchestrator_reducer::ensure_orchestrator;
 pub use epic_orchestration_type::EpicOrchestration;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
@@ -268,6 +276,8 @@ pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use mark_task_ready_reducer::mark_task_ready;
 pub use mark_task_seen_reducer::mark_task_seen;
 pub use membership_type::Membership;
+pub use orchestrator_turn_completed_reducer::orchestrator_turn_completed;
+pub use orchestrator_type::Orchestrator;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use own_bookmarks_table::*;
 pub use own_epics_table::*;
@@ -352,6 +362,7 @@ pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
 pub use setting_type::Setting;
 pub use setting_write_type::SettingWrite;
+pub use start_orchestrator_session_reducer::start_orchestrator_session;
 pub use store_owner_type::StoreOwner;
 pub use sub_status_update_type::SubStatusUpdate;
 pub use subagent_clear_and_void_pending_stop_reducer::subagent_clear_and_void_pending_stop;
@@ -386,6 +397,7 @@ pub use visible_feed_requests_table::*;
 pub use visible_learning_retrievals_table::*;
 pub use visible_learning_verdicts_table::*;
 pub use visible_learnings_table::*;
+pub use visible_orchestrators_table::*;
 pub use visible_poll_owners_table::*;
 pub use visible_ready_marks_table::*;
 pub use visible_session_requests_table::*;
@@ -498,11 +510,20 @@ pub enum Reducer {
     DeleteWorkPackage {
         id: i64,
     },
+    EndOrchestratorSession {
+        id: i64,
+        host: String,
+        died: bool,
+    },
     EnsureManagedEpics {
         reviews_command: String,
         reviews_interval_secs: i64,
         cve_command: String,
         cve_interval_secs: i64,
+    },
+    EnsureOrchestrator {
+        epic_id: i64,
+        host: String,
     },
     ExpireBackgroundWait {
         id: i64,
@@ -541,6 +562,9 @@ pub enum Reducer {
     MarkTaskSeen {
         subscriber: String,
         task_id: i64,
+    },
+    OrchestratorTurnCompleted {
+        name: String,
     },
     OverridePollOwner {
         scope: String,
@@ -780,6 +804,10 @@ pub enum Reducer {
         host: String,
         command: String,
     },
+    StartOrchestratorSession {
+        id: i64,
+        host: String,
+    },
     SubagentClear {
         task_id: i64,
     },
@@ -878,7 +906,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteWorkPackage { .. } => "delete_work_package",
+            Reducer::EndOrchestratorSession { .. } => "end_orchestrator_session",
             Reducer::EnsureManagedEpics { .. } => "ensure_managed_epics",
+            Reducer::EnsureOrchestrator { .. } => "ensure_orchestrator",
             Reducer::ExpireBackgroundWait { .. } => "expire_background_wait",
             Reducer::FailInterruptedDispatchRequests { .. } => "fail_interrupted_dispatch_requests",
             Reducer::FailInterruptedSessionRequests { .. } => "fail_interrupted_session_requests",
@@ -888,6 +918,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::MarkTaskReady { .. } => "mark_task_ready",
             Reducer::MarkTaskSeen { .. } => "mark_task_seen",
+            Reducer::OrchestratorTurnCompleted { .. } => "orchestrator_turn_completed",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchLearning { .. } => "patch_learning",
@@ -948,6 +979,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
+            Reducer::StartOrchestratorSession { .. } => "start_orchestrator_session",
             Reducer::SubagentClear { .. } => "subagent_clear",
             Reducer::SubagentClearAndVoidPendingStop { .. } => {
                 "subagent_clear_and_void_pending_stop"
@@ -1128,6 +1160,15 @@ Reducer::ClearReadyMark{
 }             => __sats::bsatn::to_vec(&delete_work_package_reducer::DeleteWorkPackageArgs {
                 id: id.clone(),
 }),
+            Reducer::EndOrchestratorSession{
+                id,
+                host,
+                died,
+}             => __sats::bsatn::to_vec(&end_orchestrator_session_reducer::EndOrchestratorSessionArgs {
+                id: id.clone(),
+                host: host.clone(),
+                died: died.clone(),
+}),
             Reducer::EnsureManagedEpics{
                 reviews_command,
                 reviews_interval_secs,
@@ -1138,6 +1179,13 @@ Reducer::ClearReadyMark{
                 reviews_interval_secs: reviews_interval_secs.clone(),
                 cve_command: cve_command.clone(),
                 cve_interval_secs: cve_interval_secs.clone(),
+}),
+            Reducer::EnsureOrchestrator{
+                epic_id,
+                host,
+}             => __sats::bsatn::to_vec(&ensure_orchestrator_reducer::EnsureOrchestratorArgs {
+                epic_id: epic_id.clone(),
+                host: host.clone(),
 }),
             Reducer::ExpireBackgroundWait{
                 id,
@@ -1205,6 +1253,11 @@ Reducer::ClearReadyMark{
 }             => __sats::bsatn::to_vec(&mark_task_seen_reducer::MarkTaskSeenArgs {
                 subscriber: subscriber.clone(),
                 task_id: task_id.clone(),
+}),
+            Reducer::OrchestratorTurnCompleted{
+                name,
+}             => __sats::bsatn::to_vec(&orchestrator_turn_completed_reducer::OrchestratorTurnCompletedArgs {
+                name: name.clone(),
 }),
             Reducer::OverridePollOwner{
                 scope,
@@ -1623,6 +1676,13 @@ Reducer::RecordBaseBranch{
                 host: host.clone(),
                 command: command.clone(),
 }),
+            Reducer::StartOrchestratorSession{
+                id,
+                host,
+}             => __sats::bsatn::to_vec(&start_orchestrator_session_reducer::StartOrchestratorSessionArgs {
+                id: id.clone(),
+                host: host.clone(),
+}),
             Reducer::SubagentClear{
                 task_id,
 }             => __sats::bsatn::to_vec(&subagent_clear_reducer::SubagentClearArgs {
@@ -1766,6 +1826,7 @@ pub struct DbUpdate {
     visible_learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     visible_learnings: __sdk::TableUpdate<Learning>,
+    visible_orchestrators: __sdk::TableUpdate<Orchestrator>,
     visible_poll_owners: __sdk::TableUpdate<PollOwner>,
     visible_ready_marks: __sdk::TableUpdate<ReadyMark>,
     visible_session_requests: __sdk::TableUpdate<SessionRequest>,
@@ -1849,6 +1910,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(visible_learnings_table::parse_table_update(table_update)?),
+                "visible_orchestrators" => db_update.visible_orchestrators.append(
+                    visible_orchestrators_table::parse_table_update(table_update)?,
+                ),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
                     .append(visible_poll_owners_table::parse_table_update(table_update)?),
@@ -1957,6 +2021,10 @@ impl __sdk::DbUpdate for DbUpdate {
         );
         diff.visible_learnings =
             cache.apply_diff_to_table::<Learning>("visible_learnings", &self.visible_learnings);
+        diff.visible_orchestrators = cache.apply_diff_to_table::<Orchestrator>(
+            "visible_orchestrators",
+            &self.visible_orchestrators,
+        );
         diff.visible_poll_owners = cache
             .apply_diff_to_table::<PollOwner>("visible_poll_owners", &self.visible_poll_owners);
         diff.visible_ready_marks = cache
@@ -2052,6 +2120,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_learnings" => db_update
                     .visible_learnings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_orchestrators" => db_update
+                    .visible_orchestrators
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
@@ -2153,6 +2224,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_orchestrators" => db_update
+                    .visible_orchestrators
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_poll_owners" => db_update
                     .visible_poll_owners
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2209,6 +2283,7 @@ pub struct AppliedDiff<'r> {
     visible_learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     visible_learnings: __sdk::TableAppliedDiff<'r, Learning>,
+    visible_orchestrators: __sdk::TableAppliedDiff<'r, Orchestrator>,
     visible_poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     visible_ready_marks: __sdk::TableAppliedDiff<'r, ReadyMark>,
     visible_session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
@@ -2313,6 +2388,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<Learning>(
             "visible_learnings",
             &self.visible_learnings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Orchestrator>(
+            "visible_orchestrators",
+            &self.visible_orchestrators,
             event,
         );
         callbacks.invoke_table_row_callbacks::<PollOwner>(
@@ -3028,6 +3108,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         visible_learning_retrievals_table::register_table(client_cache);
         visible_learning_verdicts_table::register_table(client_cache);
         visible_learnings_table::register_table(client_cache);
+        visible_orchestrators_table::register_table(client_cache);
         visible_poll_owners_table::register_table(client_cache);
         visible_ready_marks_table::register_table(client_cache);
         visible_session_requests_table::register_table(client_cache);
@@ -3059,6 +3140,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "visible_learning_retrievals",
         "visible_learning_verdicts",
         "visible_learnings",
+        "visible_orchestrators",
         "visible_poll_owners",
         "visible_ready_marks",
         "visible_session_requests",

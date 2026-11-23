@@ -265,6 +265,7 @@ pub(crate) fn delete_ready_mark(ctx: &ReducerContext, task_id: i64) {
 
 pub(crate) fn delete_orchestration(ctx: &ReducerContext, epic_id: i64) {
     ctx.db.epic_orchestrations().epic_id().delete(epic_id);
+    delete_orchestrators_of(ctx, epic_id);
 }
 
 /// Called by every task write that can move a status.

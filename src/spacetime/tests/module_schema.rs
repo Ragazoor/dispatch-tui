@@ -129,7 +129,8 @@ fn parse_field(accessor: &str, line: &str) -> Column {
 ///
 /// `epic_orchestrations` and `ready_marks` (`core.allium: EpicOrchestration`,
 /// `ReadyMark`) are excluded too: a restore must not switch an orchestrator
-/// on by itself (`spacetime-seed.allium`).
+/// on by itself (`spacetime-seed.allium`). `orchestrators` (`core.allium:
+/// Orchestrator`) goes with them.
 ///
 /// `dispatch_requests`, `dispatch_request_timeouts`, `session_requests` and
 /// `session_request_timeouts` (`store-split.allium` W10) are excluded too: they
@@ -162,6 +163,7 @@ fn the_module_declares_every_shared_table_and_nothing_else() {
                     | "bookmarks"
                     | "epic_orchestrations"
                     | "ready_marks"
+                    | "orchestrators"
             )
         })
         .collect();

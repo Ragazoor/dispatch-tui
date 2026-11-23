@@ -171,6 +171,21 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     /// `tasks.allium: ClearReadyMark`.
     async fn clear_ready_mark(&self, task: TaskId) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: BoardRunsItsOrchestrators`'s create, once per
+    /// epic and host.
+    async fn ensure_orchestrator(&self, epic: EpicId, host: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: StartOrchestratorSession`.
+    async fn start_orchestrator_session(&self, id: i64, host: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: EndOrchestratorSession` (`died` false) and
+    /// `OrchestratorWindowGone` (`died` true).
+    async fn end_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        died: bool,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorTurnClearsTheRestartFlag`.
+    async fn orchestrator_turn_completed(&self, name: String) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `tasks.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.

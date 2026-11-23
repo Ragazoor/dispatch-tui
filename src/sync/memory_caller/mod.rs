@@ -63,6 +63,7 @@ mod grouping;
 mod identity;
 mod learnings;
 mod orchestration;
+mod orchestrator;
 mod pr_status;
 mod session_requests;
 mod tasks_epics;
@@ -121,6 +122,7 @@ struct Tables {
     bookmarks: BTreeMap<String, module::Bookmark>,
     epic_orchestrations: BTreeMap<i64, module::EpicOrchestration>,
     ready_marks: BTreeMap<i64, module::ReadyMark>,
+    orchestrators: BTreeMap<i64, module::Orchestrator>,
     user_profiles: BTreeMap<String, module::UserProfile>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
@@ -171,6 +173,7 @@ struct Tables {
     next_session_request_id: i64,
     next_feed_request_id: i64,
     next_agent_id: i64,
+    next_orchestrator_id: i64,
 }
 
 impl Tables {
@@ -191,6 +194,7 @@ impl Tables {
             next_session_request_id: 1,
             next_feed_request_id: 1,
             next_agent_id: 1,
+            next_orchestrator_id: 1,
             ..Self::default()
         }
     }
@@ -449,6 +453,27 @@ impl ReducerCaller for MemoryReducerCaller {
 
     async fn clear_ready_mark(&self, task: TaskId) -> Result<ReducerOutcome> {
         self.apply_clear_ready_mark(task)
+    }
+
+    async fn ensure_orchestrator(&self, epic: EpicId, host: String) -> Result<ReducerOutcome> {
+        self.apply_ensure_orchestrator(epic, host)
+    }
+
+    async fn start_orchestrator_session(&self, id: i64, host: String) -> Result<ReducerOutcome> {
+        self.apply_start_orchestrator_session(id, host)
+    }
+
+    async fn end_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        died: bool,
+    ) -> Result<ReducerOutcome> {
+        self.apply_end_orchestrator_session(id, host, died)
+    }
+
+    async fn orchestrator_turn_completed(&self, name: String) -> Result<ReducerOutcome> {
+        self.apply_orchestrator_turn_completed(name)
     }
 
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome> {

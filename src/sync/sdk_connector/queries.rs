@@ -98,6 +98,9 @@ pub(in crate::sync) fn subscription_queries(
         // EpicOrchestration, ReadyMark).
         "SELECT * FROM visible_epic_orchestrations".to_string(),
         "SELECT * FROM visible_ready_marks".to_string(),
+        // The orchestrators of those epics, every machine's
+        // (core.allium: Orchestrator).
+        "SELECT * FROM visible_orchestrators".to_string(),
         // Settings (`docs/specs/settings.allium`). The view serves the
         // settings of every host this person owns; a setting is this
         // machine's own, so the ask narrows it by host.

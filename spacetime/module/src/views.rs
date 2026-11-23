@@ -48,6 +48,10 @@ pub trait StoreReads {
     fn bookmarks_of(&self, subscriber: &str) -> Vec<Bookmark>;
     fn orchestration_of(&self, epic_id: i64) -> Option<EpicOrchestration>;
     fn ready_mark_of(&self, task_id: i64) -> Option<ReadyMark>;
+    fn orchestrator(&self, id: i64) -> Option<Orchestrator>;
+    fn orchestrator_named(&self, name: &str) -> Option<Orchestrator>;
+    fn orchestrators_of_epic(&self, epic_id: i64) -> Vec<Orchestrator>;
+    fn agent_named(&self, name: &str) -> bool;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
     fn watchers_of(&self, task_id: i64) -> Vec<TaskWatcher>;
@@ -182,6 +186,18 @@ macro_rules! impl_store_reads {
             }
             fn ready_mark_of(&self, task_id: i64) -> Option<ReadyMark> {
                 self.db.ready_marks().task_id().find(task_id)
+            }
+            fn orchestrator(&self, id: i64) -> Option<Orchestrator> {
+                self.db.orchestrators().id().find(id)
+            }
+            fn orchestrator_named(&self, name: &str) -> Option<Orchestrator> {
+                self.db.orchestrators().name().find(&name.to_string())
+            }
+            fn orchestrators_of_epic(&self, epic_id: i64) -> Vec<Orchestrator> {
+                self.db.orchestrators().epic_id().filter(epic_id).collect()
+            }
+            fn agent_named(&self, name: &str) -> bool {
+                self.db.agents().name().find(&name.to_string()).is_some()
             }
             fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent> {
                 self.db
@@ -752,6 +768,11 @@ fn covered_tasks(ctx: &ViewContext) -> Vec<Task> {
 #[spacetimedb::view(accessor = visible_epic_orchestrations, public)]
 fn visible_epic_orchestrations(ctx: &ViewContext) -> Vec<EpicOrchestration> {
     orchestrations_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_orchestrators, public)]
+fn visible_orchestrators(ctx: &ViewContext) -> Vec<Orchestrator> {
+    orchestrators_of_held(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_ready_marks, public)]

@@ -237,3 +237,182 @@ fn memory_caller_keeps_orchestrators_and_ready_marks_like_the_real_module() {
         wait_for!(switch_of(&rows_real, doomed).is_none() && rows_real.epic(doomed).is_none());
     });
 }
+
+/// An orchestrator row as the module and the twin keep it, without its id,
+/// name and clock stamps: (host, window, restarted_once, session_died,
+/// has a turn).
+fn orchestrator_of(rows: &SharedRows, epic: EpicId) -> Option<(String, String, bool, bool, bool)> {
+    rows.orchestrators()
+        .into_iter()
+        .find(|o| o.epic_id == epic.0)
+        .map(|o| {
+            (
+                o.host,
+                o.tmux_window,
+                o.restarted_once,
+                o.session_died,
+                !o.last_turn_at.is_empty(),
+            )
+        })
+}
+
+/// `orchestrators.allium: BoardRunsItsOrchestrators`,
+/// `StartOrchestratorSession`, `OrchestratorWindowGone`,
+/// `OrchestratorTurnClearsTheRestartFlag`, `EndOrchestratorSession`,
+/// `SwitchOrchestratorOff`. Both sides create one row per epic and host,
+/// spend and give back the one restart alike, refuse in the same words, and
+/// remove the row with the switch.
+#[test]
+fn memory_caller_runs_orchestrator_sessions_like_the_real_module() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+
+    let instance = Instance::start("memory-caller-orchestrator-sessions");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows_real = Arc::new(SharedRows::new());
+    let rows_mem = Arc::new(SharedRows::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_identity_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        register_profiles(&real, &mem, &accepted.identity).await;
+        let identity = accepted.identity.clone();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+
+        let mut woken = rows_real.changed();
+        macro_rules! wait_for {
+            ($cond:expr) => {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !$cond {
+                        woken.changed().await.expect("subscription must deliver");
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+            };
+        }
+        macro_rules! both {
+            ($call:ident ( $($arg:expr),* )) => {{
+                let r = real.$call($($arg.clone()),*).await.unwrap();
+                let m = mem.$call($($arg.clone()),*).await.unwrap();
+                match (r, m) {
+                    (ReducerOutcome::Applied(_), ReducerOutcome::Applied(_)) => None,
+                    (ReducerOutcome::Refused(r), ReducerOutcome::Refused(m)) => {
+                        assert_eq!(r, m, "both sides must refuse in the same words");
+                        Some(r)
+                    }
+                    other => panic!("the two sides disagree: {other:?}"),
+                }
+            }};
+        }
+
+        let row = bindings::Epic {
+            title: "E".into(),
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let epic = real.create_epic(row.clone()).await.unwrap();
+        assert_eq!(epic, mem.create_epic(row).await.unwrap());
+        wait_for!(rows_real.epic(epic).is_some());
+        let host = "host-a".to_string();
+
+        let refused = both!(ensure_orchestrator(epic, host)).expect("no switch");
+        assert_eq!(refused, format!("epic {} has no orchestrator", epic.0));
+
+        let none_rule: Option<String> = None;
+        let none_max: Option<i64> = None;
+        assert_eq!(
+            both!(switch_orchestrator_on(epic, none_rule, none_max)),
+            None
+        );
+        assert_eq!(both!(ensure_orchestrator(epic, host)), None);
+        assert_eq!(
+            both!(ensure_orchestrator(epic, host)),
+            None,
+            "a second ensure is no error"
+        );
+        wait_for!(orchestrator_of(&rows_real, epic).is_some());
+        let fresh = Some((host.clone(), String::new(), false, false, false));
+        assert_eq!(orchestrator_of(&rows_mem, epic), fresh);
+        assert_eq!(orchestrator_of(&rows_real, epic), fresh);
+        assert_eq!(rows_mem.orchestrators().len(), 1);
+
+        let id_of = |rows: &SharedRows| rows.orchestrators()[0].id;
+        let (id_real, id_mem) = (id_of(&rows_real), id_of(&rows_mem));
+        assert_eq!(id_real, id_mem, "ids are assigned alike");
+        let id = id_real;
+        let window = format!("orch-{}", epic.0);
+
+        // Start, die, the one restart, die again: the budget is spent.
+        assert_eq!(both!(start_orchestrator_session(id, host)), None);
+        let refused = both!(start_orchestrator_session(id, host)).expect("already live");
+        assert!(refused.contains("already running"), "{refused}");
+        assert_eq!(both!(end_orchestrator_session(id, host, true)), None);
+        assert_eq!(both!(start_orchestrator_session(id, host)), None);
+        let restarted = Some((host.clone(), window.clone(), true, false, false));
+        assert_eq!(orchestrator_of(&rows_mem, epic), restarted);
+        wait_for!(orchestrator_of(&rows_real, epic) == restarted);
+        assert_eq!(both!(end_orchestrator_session(id, host, true)), None);
+        let refused = both!(start_orchestrator_session(id, host)).expect("died twice");
+        assert!(refused.contains("died twice in a row"), "{refused}");
+
+        // A turn gives the restart back.
+        let name_real = rows_real.orchestrators()[0].name.clone();
+        let name_mem = rows_mem.orchestrators()[0].name.clone();
+        assert!(real
+            .orchestrator_turn_completed(name_real)
+            .await
+            .unwrap()
+            .applied()
+            .is_ok());
+        assert!(mem
+            .orchestrator_turn_completed(name_mem)
+            .await
+            .unwrap()
+            .applied()
+            .is_ok());
+        let after_turn = Some((host.clone(), String::new(), false, true, true));
+        assert_eq!(orchestrator_of(&rows_mem, epic), after_turn);
+        wait_for!(orchestrator_of(&rows_real, epic) == after_turn);
+        assert_eq!(both!(start_orchestrator_session(id, host)), None);
+        assert_eq!(both!(end_orchestrator_session(id, host, false)), None);
+        let refused = both!(end_orchestrator_session(id, host, false)).expect("not running");
+        assert!(refused.contains("is not running"), "{refused}");
+        let refused = both!(orchestrator_turn_completed("nobody".to_string())).expect("unknown");
+        assert_eq!(refused, "no orchestrator is named nobody");
+
+        // The switch takes the row with it.
+        assert_eq!(both!(switch_orchestrator_off(epic)), None);
+        assert!(rows_mem.orchestrators().is_empty());
+        wait_for!(rows_real.orchestrators().is_empty());
+    });
+}

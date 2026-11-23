@@ -56,6 +56,10 @@ enum Sent {
     SwitchOrchestratorOff(EpicId),
     MarkTaskReady(TaskId, String, String),
     ClearReadyMark(TaskId),
+    EnsureOrchestrator(EpicId, String),
+    StartOrchestratorSession(i64, String),
+    EndOrchestratorSession(i64, String, bool),
+    OrchestratorTurnCompleted(String),
     SetDisplayName(String),
     /// A call recorded by name only.
     Named(&'static str),
@@ -354,6 +358,35 @@ impl ReducerCaller for RecordingCaller {
 
     async fn clear_ready_mark(&self, task: TaskId) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ClearReadyMark(task))
+    }
+
+    async fn ensure_orchestrator(
+        &self,
+        epic: EpicId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::EnsureOrchestrator(epic, host))
+    }
+
+    async fn start_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::StartOrchestratorSession(id, host))
+    }
+
+    async fn end_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        died: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::EndOrchestratorSession(id, host, died))
+    }
+
+    async fn orchestrator_turn_completed(&self, name: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::OrchestratorTurnCompleted(name))
     }
 
     async fn patch_task(

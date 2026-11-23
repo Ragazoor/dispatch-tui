@@ -340,8 +340,14 @@ use super::*;
 /// end them (a task leaving backlog, a re-parent under an orchestrated epic,
 /// a delete). A board on an older build lacks the reducers.
 ///
+/// Bumped: an orchestrated epic's orchestrator on each machine
+/// (`orchestrator.rs`): its row, the four reducers that create it, start and
+/// end its session and record its turns, its view, and the switch's delete
+/// that removes it. Agent names now skip orchestrator names. A board on an
+/// older build lacks the reducers.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 65;
+pub const RULES_VERSION: i64 = 66;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

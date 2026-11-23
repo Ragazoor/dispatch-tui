@@ -28,6 +28,7 @@ impl module::AgentStore for MemAgentStore<'_> {
     }
     fn name_held_by_agent(&self, name: &str) -> bool {
         self.tables.agents.values().any(|a| a.name == name)
+            || self.tables.orchestrators.values().any(|o| o.name == name)
     }
     fn insert_agent(&mut self, row: module::Agent) {
         let id = MemoryReducerCaller::assign_id(0, &mut self.tables.next_agent_id);

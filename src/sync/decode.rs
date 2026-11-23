@@ -700,6 +700,22 @@ pub fn epic_orchestration(
     })
 }
 
+/// The store's `orchestrators` row.
+pub fn orchestrator(row: &bindings::Orchestrator) -> Decoded<crate::models::Orchestrator> {
+    const T: &str = "orchestrators";
+    Ok(crate::models::Orchestrator {
+        id: row.id,
+        epic_id: EpicId(row.epic_id),
+        host: row.host.clone(),
+        name: row.name.clone(),
+        tmux_window: tmux_window(&row.tmux_window),
+        started_at: timestamp(T, row.id, "started_at", &row.started_at)?,
+        restarted_once: row.restarted_once,
+        session_died: row.session_died,
+        last_turn_at: timestamp(T, row.id, "last_turn_at", &row.last_turn_at)?,
+    })
+}
+
 /// The store's `ready_marks` row. An unknown marker refuses the row.
 pub fn ready_mark(row: &bindings::ReadyMark) -> Decoded<crate::models::ReadyMark> {
     const T: &str = "ready_marks";

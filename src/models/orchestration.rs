@@ -54,6 +54,27 @@ impl EpicOrchestration {
     }
 }
 
+/// `core.allium: Orchestrator`: an orchestrated epic's orchestrator on one
+/// machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Orchestrator {
+    pub id: i64,
+    pub epic_id: EpicId,
+    pub host: String,
+    pub name: String,
+    pub tmux_window: Option<super::TmuxWindow>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub restarted_once: bool,
+    pub session_died: bool,
+    pub last_turn_at: Option<DateTime<Utc>>,
+}
+
+impl Orchestrator {
+    pub fn is_live(&self) -> bool {
+        self.tmux_window.is_some()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadyMark {
     pub task_id: TaskId,

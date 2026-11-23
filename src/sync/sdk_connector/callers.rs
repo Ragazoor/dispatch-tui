@@ -27,10 +27,11 @@ use crate::spacetime::bindings::{
     close_task as _, create_epic as _, create_learning as _, create_task as _,
     create_task_signalled as _, create_work_package as _, create_work_package_with_links as _,
     delete_epic as _, delete_learning as _, delete_repo_path as _, delete_task as _,
-    delete_work_package as _, ensure_managed_epics as _, expire_background_wait as _,
-    fail_interrupted_dispatch_requests as _, fail_interrupted_session_requests as _,
-    flatten_epic as _, ingest_feed as _, link_work_package_item as _, list_archived_tasks as _,
-    mark_pr_learnings_gate_shown as _, mark_task_ready as _, mark_task_seen as _,
+    delete_work_package as _, end_orchestrator_session as _, ensure_managed_epics as _,
+    ensure_orchestrator as _, expire_background_wait as _, fail_interrupted_dispatch_requests as _,
+    fail_interrupted_session_requests as _, flatten_epic as _, ingest_feed as _,
+    link_work_package_item as _, list_archived_tasks as _, mark_pr_learnings_gate_shown as _,
+    mark_task_ready as _, mark_task_seen as _, orchestrator_turn_completed as _,
     override_poll_owner as _, own_usage_summary as _, patch_epic as _, patch_learning as _,
     patch_task as _, patch_work_package as _, read_archived_task as _, record_base_branch as _,
     record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
@@ -41,14 +42,14 @@ use crate::spacetime::bindings::{
     request_exit_session as _, request_feed_refresh as _, request_wrap_up as _,
     rescope_epic_learnings as _, save_repo_path as _, save_setting as _, set_bookmark as _,
     set_display_name as _, set_epic_group_by_repo as _, set_managed_feed_settings as _,
-    set_task_epic as _, set_verify_command as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, switch_orchestrator_off as _, switch_orchestrator_on as _,
-    try_record_stop as _, unlink_work_package_item as _, unsubscribe_from_epic as _,
-    update_epic as _, update_task as _, update_work_package_with_links as _, DbConnection,
-    OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
-    VisibleDispatchRequestsTableAccess as _, VisibleLearningsTableAccess as _,
-    VisibleSessionRequestsTableAccess as _,
+    set_task_epic as _, set_verify_command as _, start_orchestrator_session as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, switch_orchestrator_off as _,
+    switch_orchestrator_on as _, try_record_stop as _, unlink_work_package_item as _,
+    unsubscribe_from_epic as _, update_epic as _, update_task as _,
+    update_work_package_with_links as _, DbConnection, OwnEpicsTableAccess as _,
+    OwnPackagesTableAccess as _, OwnTasksTableAccess as _, VisibleDispatchRequestsTableAccess as _,
+    VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
 };
 use crate::sync::encode;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -295,6 +296,51 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "clearing the ready mark",
             clear_ready_mark_then(task.0)
+        )
+    }
+
+    async fn ensure_orchestrator(
+        &self,
+        epic: EpicId,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the orchestrator row",
+            ensure_orchestrator_then(epic.0, host)
+        )
+    }
+
+    async fn start_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "starting the orchestrator's session",
+            start_orchestrator_session_then(id, host)
+        )
+    }
+
+    async fn end_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        died: bool,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "ending the orchestrator's session",
+            end_orchestrator_session_then(id, host, died)
+        )
+    }
+
+    async fn orchestrator_turn_completed(&self, name: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the orchestrator's turn",
+            orchestrator_turn_completed_then(name)
         )
     }
 

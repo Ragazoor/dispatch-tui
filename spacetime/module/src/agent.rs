@@ -493,7 +493,8 @@ fn validate_seeded_assigned_agent(row: &Agent) -> Result<(), String> {
 pub trait AgentStore {
     /// Every agent `task_id` has had, current and ended.
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent>;
-    /// Whether an agent row holds `name` (A4: a held name is taken).
+    /// Whether an agent or an orchestrator row holds `name` (A4: a held name
+    /// is taken; `OrchestratorNamesAreUnique`).
     fn name_held_by_agent(&self, name: &str) -> bool;
     /// Insert with a generated id.
     fn insert_agent(&mut self, row: Agent);
@@ -710,6 +711,7 @@ impl AgentStore for AgentTables<'_> {
     }
     fn name_held_by_agent(&self, name: &str) -> bool {
         self.0.db.agents().name().find(&name.to_string()).is_some()
+            || self.0.db.orchestrators().name().find(&name.to_string()).is_some()
     }
     fn insert_agent(&mut self, row: Agent) {
         self.0.db.agents().insert(Agent { id: 0, ..row });

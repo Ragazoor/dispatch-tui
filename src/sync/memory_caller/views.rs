@@ -84,6 +84,23 @@ impl StoreReads for Tables {
     fn ready_mark_of(&self, task_id: i64) -> Option<module::ReadyMark> {
         self.ready_marks.get(&task_id).cloned()
     }
+    fn orchestrator(&self, id: i64) -> Option<module::Orchestrator> {
+        self.orchestrators.get(&id).cloned()
+    }
+    fn orchestrator_named(&self, name: &str) -> Option<module::Orchestrator> {
+        self.orchestrators
+            .values()
+            .find(|o| o.name == name)
+            .cloned()
+    }
+    fn orchestrators_of_epic(&self, epic_id: i64) -> Vec<module::Orchestrator> {
+        keep(self.orchestrators.values().cloned(), |o| {
+            o.epic_id == epic_id
+        })
+    }
+    fn agent_named(&self, name: &str) -> bool {
+        self.agents.values().any(|a| a.name == name)
+    }
     fn bookmarks_of(&self, subscriber: &str) -> Vec<module::Bookmark> {
         keep(self.bookmarks.values().cloned(), |b| {
             b.subscriber == subscriber
@@ -187,6 +204,10 @@ impl MemoryReducerCaller {
             "visible_ready_marks" => ids(module::ready_marks_of_held(t, who)
                 .iter()
                 .map(|m| m.task_id)
+                .collect()),
+            "visible_orchestrators" => ids(module::orchestrators_of_held(t, who)
+                .iter()
+                .map(|o| o.id)
                 .collect()),
             "own_bookmarks" => module::own_bookmarks_of(t, who)
                 .into_iter()

@@ -159,6 +159,9 @@ struct Rows {
     /// `core.allium: ReadyMark`, keyed by task. Arrive scoped to the tasks
     /// this person holds by the `visible_ready_marks` view.
     ready_marks: BTreeMap<i64, bindings::ReadyMark>,
+    /// `core.allium: Orchestrator`, keyed by id. Arrive scoped to the
+    /// epics this person holds by the `visible_orchestrators` view.
+    orchestrators: BTreeMap<i64, bindings::Orchestrator>,
     /// `people.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
@@ -279,6 +282,7 @@ impl Rows {
             && self.bookmarks.is_empty()
             && self.epic_orchestrations.is_empty()
             && self.ready_marks.is_empty()
+            && self.orchestrators.is_empty()
             && self.user_profiles.is_empty()
             && self.settings.is_empty()
             && self.work_packages.is_empty()
@@ -649,6 +653,23 @@ impl SharedRows {
     /// The tasks with a ready mark (`core.allium: ReadyMark`), ascending.
     pub fn ready_task_ids(&self) -> Vec<TaskId> {
         self.read(|rows| rows.ready_marks.keys().map(|id| TaskId(*id)).collect())
+    }
+
+    pub fn upsert_orchestrator(&self, row: &bindings::Orchestrator) {
+        self.write(|rows| {
+            rows.orchestrators.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_orchestrator(&self, id: i64) {
+        self.write(|rows| rows.orchestrators.remove(&id).is_some());
+    }
+
+    /// Every orchestrator this subscription holds (`core.allium:
+    /// Orchestrator`), by id.
+    pub fn orchestrators(&self) -> Vec<bindings::Orchestrator> {
+        self.read(|rows| rows.orchestrators.values().cloned().collect())
     }
 
     /// The ready mark on `task` (`core.allium: ReadyMark`).
@@ -1039,6 +1060,10 @@ impl SharedRows {
 
     pub fn retire_epic_orchestration(&self, old: &bindings::EpicOrchestration) {
         self.write(|rows| remove_if_held(&mut rows.epic_orchestrations, &old.epic_id, old));
+    }
+
+    pub fn retire_orchestrator(&self, old: &bindings::Orchestrator) {
+        self.write(|rows| remove_if_held(&mut rows.orchestrators, &old.id, old));
     }
 
     pub fn retire_ready_mark(&self, old: &bindings::ReadyMark) {

@@ -23,6 +23,8 @@ struct Store {
     settings: Vec<Setting>,
     usage_events: Vec<UsageEvent>,
     archived_tasks: Vec<ArchivedTask>,
+    orchestrations: Vec<EpicOrchestration>,
+    orchestrators: Vec<Orchestrator>,
 }
 
 fn keep<T: Clone>(rows: &[T], f: impl Fn(&T) -> bool) -> Vec<T> {
@@ -90,11 +92,23 @@ impl StoreReads for Store {
     fn bookmarks_of(&self, who: &str) -> Vec<Bookmark> {
         keep(&self.bookmarks, |b| b.subscriber == who)
     }
-    fn orchestration_of(&self, _: i64) -> Option<EpicOrchestration> {
-        None
+    fn orchestration_of(&self, epic: i64) -> Option<EpicOrchestration> {
+        self.orchestrations.iter().find(|o| o.epic_id == epic).cloned()
     }
     fn ready_mark_of(&self, _: i64) -> Option<ReadyMark> {
         None
+    }
+    fn orchestrator(&self, id: i64) -> Option<Orchestrator> {
+        self.orchestrators.iter().find(|o| o.id == id).cloned()
+    }
+    fn orchestrator_named(&self, name: &str) -> Option<Orchestrator> {
+        self.orchestrators.iter().find(|o| o.name == name).cloned()
+    }
+    fn orchestrators_of_epic(&self, epic: i64) -> Vec<Orchestrator> {
+        keep(&self.orchestrators, |o| o.epic_id == epic)
+    }
+    fn agent_named(&self, name: &str) -> bool {
+        self.agents.iter().any(|a| a.name == name)
     }
     fn subagents_of(&self, _: i64) -> Vec<TaskSubagent> {
         Vec::new()
@@ -644,4 +658,56 @@ fn delete_check_for_a_plain_task_reports_it_when_not_done() {
         (check.blockers[0].epic_id, check.blockers[0].task_id),
         (0, 10)
     );
+}
+
+fn switched_on(epic_id: i64) -> EpicOrchestration {
+    EpicOrchestration {
+        epic_id,
+        start_rule: START_RULE_MARKED_ONLY.into(),
+        max_parallel: 0,
+        switched_on_at: String::new(),
+    }
+}
+
+#[test]
+fn an_orchestrators_name_skips_one_an_agent_holds() {
+    let store = Store {
+        orchestrations: vec![switched_on(1)],
+        agents: vec![Agent {
+            name: AGENT_NAMES[0].into(),
+            ..blank_agent()
+        }],
+        ..Store::default()
+    };
+
+    let row = check_ensure_orchestrator(&store, 1, "h", 0)
+        .unwrap()
+        .expect("a new row");
+
+    assert_eq!(row.name, AGENT_NAMES[1]);
+}
+
+#[test]
+fn an_orchestrators_name_skips_one_another_orchestrator_holds() {
+    let held = check_ensure_orchestrator(
+        &Store {
+            orchestrations: vec![switched_on(1)],
+            ..Store::default()
+        },
+        1,
+        "h1",
+        0,
+    )
+    .unwrap()
+    .unwrap();
+    let store = Store {
+        orchestrations: vec![switched_on(1)],
+        orchestrators: vec![held.clone()],
+        ..Store::default()
+    };
+
+    let row = check_ensure_orchestrator(&store, 1, "h2", 0).unwrap().unwrap();
+
+    assert_eq!(held.name, AGENT_NAMES[0]);
+    assert_eq!(row.name, AGENT_NAMES[1]);
 }

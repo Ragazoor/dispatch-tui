@@ -239,6 +239,21 @@ mirror!(
 );
 
 mirror!(
+    module::Orchestrator,
+    bindings::Orchestrator {
+        id,
+        epic_id,
+        host,
+        name,
+        tmux_window,
+        started_at,
+        restarted_once,
+        session_died,
+        last_turn_at
+    }
+);
+
+mirror!(
     module::ReadyMark,
     bindings::ReadyMark {
         task_id,

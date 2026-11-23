@@ -868,6 +868,29 @@ pub struct EpicOrchestration {
     pub switched_on_at: String,
 }
 
+/// An orchestrated epic's orchestrator on one machine (`core.allium:
+/// Orchestrator`). Not in the snapshot (`spacetime-seed.allium`). Every
+/// optional column is `""` for absent, as on [`Agent`].
+#[spacetimedb::table(accessor = orchestrators)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct Orchestrator {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub epic_id: i64,
+    pub host: String,
+    /// Unique across this table, and no agent row holds it either
+    /// (`OrchestratorNamesAreUnique`).
+    #[unique]
+    pub name: String,
+    pub tmux_window: String,
+    pub started_at: String,
+    pub restarted_once: bool,
+    pub session_died: bool,
+    pub last_turn_at: String,
+}
+
 /// The ready mark on a backlog task (`core.allium: ReadyMark`). Not in the
 /// snapshot (`spacetime-seed.allium`).
 #[spacetimedb::table(accessor = ready_marks)]
