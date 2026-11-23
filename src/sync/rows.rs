@@ -634,6 +634,11 @@ impl SharedRows {
         self.write(|rows| rows.epic_orchestrations.remove(&epic.0).is_some());
     }
 
+    /// Every orchestrator switch this subscription holds.
+    pub fn epic_orchestrations(&self) -> Vec<bindings::EpicOrchestration> {
+        self.read(|rows| rows.epic_orchestrations.values().cloned().collect())
+    }
+
     /// The orchestrator switch on `epic` (`core.allium: EpicOrchestration`).
     pub fn epic_orchestration(&self, epic: EpicId) -> Option<bindings::EpicOrchestration> {
         self.read(|rows| rows.epic_orchestrations.get(&epic.0).cloned())

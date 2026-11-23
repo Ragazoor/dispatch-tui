@@ -495,7 +495,7 @@ pub trait AgentStore {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent>;
     /// Whether an agent or an orchestrator row holds `name` (A4: a held name
     /// is taken; `OrchestratorNamesAreUnique`).
-    fn name_held_by_agent(&self, name: &str) -> bool;
+    fn name_held(&self, name: &str) -> bool;
     /// Insert with a generated id.
     fn insert_agent(&mut self, row: Agent);
     fn update_agent(&mut self, row: Agent);
@@ -555,7 +555,7 @@ pub fn display_agent(agents: &[Agent]) -> Option<&Agent> {
 /// pick at the same name and walk past the names just picked.
 fn free_agent_name<S: AgentStore + ?Sized>(store: &S, task_id: i64) -> String {
     let seed = store.name_seed().wrapping_add(task_id as u64);
-    pick_agent_name(seed, |n| store.name_held_by_agent(n))
+    pick_agent_name(seed, |n| store.name_held(n))
 }
 
 /// `AssignAgentOnTaskCreated` (A17): give a newly created task its assigned
@@ -709,7 +709,7 @@ impl AgentStore for AgentTables<'_> {
     fn agents_of_task(&self, task_id: i64) -> Vec<Agent> {
         self.0.db.agents().task_id().filter(&task_id).collect()
     }
-    fn name_held_by_agent(&self, name: &str) -> bool {
+    fn name_held(&self, name: &str) -> bool {
         self.0.db.agents().name().find(&name.to_string()).is_some()
             || self.0.db.orchestrators().name().find(&name.to_string()).is_some()
     }

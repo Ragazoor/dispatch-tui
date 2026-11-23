@@ -23,7 +23,7 @@ impl AgentStore for Rows {
             .cloned()
             .collect()
     }
-    fn name_held_by_agent(&self, name: &str) -> bool {
+    fn name_held(&self, name: &str) -> bool {
         self.agents.iter().any(|a| a.name == name)
     }
     fn insert_agent(&mut self, row: Agent) {

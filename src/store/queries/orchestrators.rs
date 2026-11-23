@@ -20,6 +20,17 @@ impl super::super::OrchestratorStore for Store {
             .collect()
     }
 
+    async fn orchestrator_named(&self, name: &str) -> Option<Orchestrator> {
+        let row = self
+            .rows
+            .orchestrators()
+            .into_iter()
+            .find(|row| row.name == name)?;
+        crate::sync::decode::orchestrator(&row)
+            .map_err(|e| tracing::warn!("{e}"))
+            .ok()
+    }
+
     async fn ensure_orchestrator(&self, epic: EpicId, host: &str) -> Result<()> {
         self.caller
             .ensure_orchestrator(epic, host.to_string())

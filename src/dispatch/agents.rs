@@ -426,7 +426,7 @@ pub(super) fn prompt_launch_command(claude: &str, flags: &LaunchFlags) -> String
 
 /// [`prompt_launch_command`] with `extra` flags after the fixed ones, e.g. the
 /// `--continue` of a resume that carries a message.
-fn prompt_launch_command_with(claude: &str, flags: &LaunchFlags, extra: &str) -> String {
+pub(super) fn prompt_launch_command_with(claude: &str, flags: &LaunchFlags, extra: &str) -> String {
     let base = format!("{}{extra}", flags.base);
     // The config path is a positional (`$1`) after the body, like `$0`, so it is
     // quoted once, outside the body, and never inside it.

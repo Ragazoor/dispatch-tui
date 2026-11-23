@@ -75,15 +75,24 @@ pub(super) fn write_agent_mcp_config(
         );
         return None;
     };
-    let path = admin_dir.join(CONFIG_FILE);
-    match crate::setup::write_json_file(&path, &config) {
+    write_mcp_config_at(&admin_dir, &config)
+}
+
+/// Write a session's caller-identity MCP config into `dir`, returning its
+/// path, or `None` (logged) when the write failed and the session must
+/// launch without one.
+pub(super) fn write_mcp_config_at(
+    dir: &std::path::Path,
+    config: &serde_json::Value,
+) -> Option<PathBuf> {
+    let path = dir.join(CONFIG_FILE);
+    match crate::setup::write_json_file(&path, config) {
         Ok(()) => Some(path),
         Err(error) => {
             tracing::warn!(
                 error = %format!("{error:#}"),
                 path = %path.display(),
-                "failed to write the agent's caller-identity MCP config; \
-                 launching without it"
+                "failed to write a caller-identity MCP config; launching without it"
             );
             None
         }

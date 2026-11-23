@@ -17,11 +17,9 @@ use crate::models::{
 use crate::process::ProcessRunner;
 use crate::tmux;
 
+use super::agents::{prompt_launch_command_with, LaunchFlags};
 use super::prompts::DISPATCH_PLUGIN_DIR;
 
-/// The MCP configuration the session's `--mcp-config` names, in its own
-/// directory.
-const CONFIG_FILE: &str = "dispatch-mcp.json";
 /// The prompt file the launch command reads and deletes.
 const PROMPT_FILE: &str = ".claude-prompt";
 
@@ -68,35 +66,24 @@ pub fn launch_orchestrator(
     std::fs::write(launch.dir.join(PROMPT_FILE), launch.prompt)
         .with_context(|| format!("failed to write the prompt in {dir}"))?;
 
-    let claude = runner.agent_binaries().claude;
-    let continue_flag = if resume { " --continue" } else { "" };
-    let (config_flag, config_arg) = match &config {
-        Some(path) => (
-            " --mcp-config \"$1\"",
-            Some(path.to_string_lossy().into_owned()),
-        ),
-        None => ("", None),
+    let flags = LaunchFlags {
+        base: format!("{DISPATCH_PLUGIN_DIR} --name {}", launch.name),
+        mcp_config: config.map(|p| p.to_string_lossy().into_owned()),
     };
-    let script = format!(
-        "prompt=$(cat {PROMPT_FILE}) && rm -f {PROMPT_FILE} && exec \"$0\" \
-         {DISPATCH_PLUGIN_DIR} --name {name}{continue_flag}{config_flag} -- \"$prompt\"",
-        name = launch.name,
-    );
+    let extra = if resume { " --continue" } else { "" };
+    let command =
+        prompt_launch_command_with(&runner.agent_binaries().claude_quoted(), &flags, extra);
     let orchestrator_env = format!("DISPATCH_ORCHESTRATOR={}", launch.name);
-    let mut argv: Vec<&str> = vec![
+    let argv = [
         "env",
         "-u",
         "DISPATCH_TASK_ID",
-        &orchestrator_env,
+        orchestrator_env.as_str(),
         "CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1",
-        "bash",
+        "sh",
         "-c",
-        &script,
-        &claude,
+        command.as_str(),
     ];
-    if let Some(path) = config_arg.as_deref() {
-        argv.push(path);
-    }
     tmux::kill_window_if_present(launch.window, runner)?;
     tmux::new_window_running(launch.window, &dir, &argv, runner)
         .context("failed to open the orchestrator's window")?;
@@ -122,14 +109,7 @@ fn write_mcp_config(launch: &OrchestratorLaunch<'_>) -> Option<PathBuf> {
         );
         return None;
     };
-    let path = launch.dir.join(CONFIG_FILE);
-    match crate::setup::write_json_file(&path, &config) {
-        Ok(()) => Some(path),
-        Err(error) => {
-            tracing::warn!(error = %format!("{error:#}"), path = %path.display(), "failed to write the orchestrator's MCP config");
-            None
-        }
-    }
+    super::caller_identity::write_mcp_config_at(launch.dir, &config)
 }
 
 /// Whether Claude Code keeps a conversation for `dir`, so `--continue` has
@@ -146,7 +126,7 @@ fn holds_a_conversation(claude_json: &Path, dir: &Path) -> bool {
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect();
-    let projects = home.join(".claude").join("projects").join(key);
+    let projects = crate::setup::claude_dir_in(home).join("projects").join(key);
     std::fs::read_dir(projects).is_ok_and(|entries| {
         entries
             .flatten()

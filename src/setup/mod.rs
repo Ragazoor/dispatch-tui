@@ -57,7 +57,7 @@ pub(super) fn claude_dir() -> Result<PathBuf> {
 }
 
 /// [`claude_dir`] under a given home directory.
-pub(super) fn claude_dir_in(home: &std::path::Path) -> PathBuf {
+pub(crate) fn claude_dir_in(home: &std::path::Path) -> PathBuf {
     home.join(crate::claude_paths::claude_dir_name!())
 }
 

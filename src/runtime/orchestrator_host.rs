@@ -33,26 +33,22 @@ pub(super) enum OrchestratorAction {
     CloseGone(TmuxWindow),
 }
 
-/// The ids of `root` and every epic below it.
-fn subtree(epics: &[Epic], root: EpicId) -> BTreeSet<EpicId> {
-    let mut seen = BTreeSet::from([root]);
-    let mut pending = vec![root];
-    while let Some(id) = pending.pop() {
-        for e in epics.iter().filter(|e| e.parent_epic_id == Some(id)) {
-            if seen.insert(e.id) {
-                pending.push(e.id);
+/// The epics with open work: every epic that holds, in its subtree, a task
+/// that is not done (`has_open_work`).
+fn epics_with_open_work(epics: &[Epic], tasks: &[Task]) -> HashSet<EpicId> {
+    let parent: std::collections::HashMap<EpicId, Option<EpicId>> =
+        epics.iter().map(|e| (e.id, e.parent_epic_id)).collect();
+    let mut open = HashSet::new();
+    for task in tasks.iter().filter(|t| t.status != TaskStatus::Done) {
+        let mut next = task.epic_id;
+        while let Some(id) = next {
+            if !open.insert(id) {
+                break;
             }
+            next = parent.get(&id).copied().flatten();
         }
     }
-    seen
-}
-
-/// `has_open_work(epic)`: some task in the epic's subtree is not done.
-fn has_open_work(epics: &[Epic], tasks: &[Task], epic: EpicId) -> bool {
-    let ids = subtree(epics, epic);
-    tasks
-        .iter()
-        .any(|t| t.status != TaskStatus::Done && t.epic_id.is_some_and(|e| ids.contains(&e)))
+    open
 }
 
 /// Decide this tick's actions for `host`. `windows` is every tmux window
@@ -70,12 +66,13 @@ pub(super) fn plan_orchestrators(
     windows: Option<&HashSet<String>>,
     seen_here: &BTreeSet<EpicId>,
 ) -> Vec<OrchestratorAction> {
+    let open = epics_with_open_work(epics, tasks);
     let mut actions = Vec::new();
     for on in orchestrations {
         let has_row = orchestrators
             .iter()
             .any(|o| o.epic_id == on.epic_id && o.host == host);
-        if !has_row && has_open_work(epics, tasks, on.epic_id) {
+        if !has_row && open.contains(&on.epic_id) {
             actions.push(OrchestratorAction::Ensure(on.epic_id));
         }
     }
@@ -89,7 +86,7 @@ pub(super) fn plan_orchestrators(
         if lost {
             actions.push(OrchestratorAction::WindowLost(o.clone()));
         }
-        let wanted = has_open_work(epics, tasks, o.epic_id);
+        let wanted = open.contains(&o.epic_id);
         if wanted && !live {
             if o.restarted_once && died {
                 actions.push(OrchestratorAction::GiveUp(o.clone()));
@@ -166,13 +163,7 @@ impl OrchestratorHost {
     pub(super) async fn tick(&self) {
         let db = &self.database;
         let host = db.host_id().to_string();
-        let epics = db.list_epics().await;
-        let mut orchestrations = Vec::new();
-        for e in &epics {
-            if let Some(on) = db.epic_orchestration(e.id).await {
-                orchestrations.push(on);
-            }
-        }
+        let orchestrations = db.list_epic_orchestrations().await;
         let orchestrators = db.list_orchestrators().await;
         let seen_here = std::mem::replace(
             &mut *self.seen_here.lock().unwrap_or_else(|e| e.into_inner()),
@@ -186,6 +177,7 @@ impl OrchestratorHost {
         if orchestrations.is_empty() && !here && seen_here.is_empty() {
             return;
         }
+        let epics = db.list_epics().await;
         let tasks = db.list_all_tasks_with_epic_id().await;
         let runner = self.runner.clone();
         let windows = tokio::task::spawn_blocking(move || tmux::list_all_window_names(&*runner))
@@ -239,12 +231,7 @@ impl OrchestratorHost {
             }
             OrchestratorAction::End(o) => {
                 if let Some(window) = o.tmux_window.clone() {
-                    let runner = self.runner.clone();
-                    let closed = tokio::task::spawn_blocking(move || {
-                        crate::dispatch::end_orchestrator(&window, &*runner)
-                    })
-                    .await;
-                    if !matches!(closed, Ok(Ok(()))) {
+                    if !self.close_window(window).await {
                         tracing::warn!(orchestrator = %o.name, "could not close the orchestrator's window");
                     }
                 }
@@ -265,17 +252,23 @@ impl OrchestratorHost {
                 }
             }
             OrchestratorAction::CloseGone(window) => {
-                let runner = self.runner.clone();
                 let name = window.as_str().to_string();
-                let closed = tokio::task::spawn_blocking(move || {
-                    crate::dispatch::end_orchestrator(&window, &*runner)
-                })
-                .await;
-                if matches!(closed, Ok(Ok(()))) {
+                if self.close_window(window).await {
                     tracing::info!(window = %name, "closed the window of an orchestrator that was switched off");
                 }
             }
         }
+    }
+
+    /// Close an orchestrator's window off the async runtime; `true` when it
+    /// is gone.
+    async fn close_window(&self, window: TmuxWindow) -> bool {
+        let runner = self.runner.clone();
+        let closed = tokio::task::spawn_blocking(move || {
+            crate::dispatch::end_orchestrator(&window, &*runner)
+        })
+        .await;
+        matches!(closed, Ok(Ok(())))
     }
 
     fn given_up(&self) -> std::sync::MutexGuard<'_, HashSet<i64>> {
@@ -343,7 +336,7 @@ impl OrchestratorHost {
         epics: &[Epic],
         tasks: &[Task],
     ) -> String {
-        let ids = subtree(epics, o.epic_id);
+        let ids = crate::models::epics::descendant_epic_ids(o.epic_id, epics);
         let mut mine: Vec<&Task> = tasks
             .iter()
             .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
@@ -591,14 +584,6 @@ mod tests {
         let epics = [EpicBuilder::new(1).build()];
 
         assert!(plan(&epics, &[], &[], &[], Some(&names)).is_empty());
-    }
-
-    #[test]
-    fn the_window_name_is_the_one_the_store_records() {
-        assert_eq!(
-            TmuxWindow::for_orchestrator(EpicId(42)).as_str(),
-            dispatch_spacetime_module::orchestrator_window_name(42)
-        );
     }
 
     // -- One tick after another, over the in-memory store --------------------

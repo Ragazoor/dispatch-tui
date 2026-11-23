@@ -26,7 +26,7 @@ impl module::AgentStore for MemAgentStore<'_> {
             .cloned()
             .collect()
     }
-    fn name_held_by_agent(&self, name: &str) -> bool {
+    fn name_held(&self, name: &str) -> bool {
         self.tables.agents.values().any(|a| a.name == name)
             || self.tables.orchestrators.values().any(|o| o.name == name)
     }

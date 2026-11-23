@@ -39,13 +39,7 @@ pub(super) async fn ready_marker(
     match identity {
         CallerIdentity::Session => Ok((ReadyMarker::Operator, None)),
         CallerIdentity::Orchestrator(name) => {
-            if state
-                .db
-                .list_orchestrators()
-                .await
-                .iter()
-                .any(|o| o.name == *name)
-            {
+            if state.db.orchestrator_named(name).await.is_some() {
                 Ok((ReadyMarker::Agent, Some(name.clone())))
             } else {
                 Err(ServiceError::Validation(format!(

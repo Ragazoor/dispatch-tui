@@ -634,6 +634,8 @@ pub trait OrchestratorStore: Send + Sync {
     /// Every orchestrator this board's subscription holds, every machine's.
     /// A row that does not decode is left out.
     async fn list_orchestrators(&self) -> Vec<crate::models::Orchestrator>;
+    /// The orchestrator that holds `name`, if this board holds it.
+    async fn orchestrator_named(&self, name: &str) -> Option<crate::models::Orchestrator>;
     /// `BoardRunsItsOrchestrators`'s create, once per epic and host.
     async fn ensure_orchestrator(&self, epic: EpicId, host: &str) -> Result<()>;
     /// `StartOrchestratorSession`.
@@ -663,6 +665,9 @@ pub trait EpicRead: Send + Sync {
     /// `core.allium: EpicOrchestration`: the orchestrator switch on `id`
     /// itself, if it is on. A row that does not decode reads as none.
     async fn epic_orchestration(&self, id: EpicId) -> Option<crate::models::EpicOrchestration>;
+    /// Every orchestrator switch this board holds. A row that does not
+    /// decode is left out.
+    async fn list_epic_orchestrations(&self) -> Vec<crate::models::EpicOrchestration>;
 }
 
 /// The optional fields an epic can be created with.

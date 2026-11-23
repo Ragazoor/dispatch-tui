@@ -99,21 +99,25 @@ fn resolve_one(
 
 /// Every orchestrator the board holds, with its epic's title.
 pub(super) async fn orchestrator_refs(state: &crate::mcp::McpState) -> Vec<OrchestratorRef> {
-    let mut refs = Vec::new();
-    for o in state.db.list_orchestrators().await {
-        let epic_title = state
-            .db
-            .get_epic(o.epic_id)
-            .await
-            .map(|e| e.title)
-            .unwrap_or_default();
-        refs.push(OrchestratorRef {
+    let orchestrators = state.db.list_orchestrators().await;
+    if orchestrators.is_empty() {
+        return Vec::new();
+    }
+    let titles: std::collections::HashMap<EpicId, String> = state
+        .db
+        .list_epics()
+        .await
+        .into_iter()
+        .map(|e| (e.id, e.title))
+        .collect();
+    orchestrators
+        .into_iter()
+        .map(|o| OrchestratorRef {
+            epic_title: titles.get(&o.epic_id).cloned().unwrap_or_default(),
             name: o.name,
             epic: o.epic_id,
-            epic_title,
-        });
-    }
-    refs
+        })
+        .collect()
 }
 
 fn resolve_epic(

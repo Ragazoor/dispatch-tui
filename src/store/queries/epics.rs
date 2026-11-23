@@ -38,6 +38,18 @@ impl super::super::EpicRead for Store {
             .map_err(|e| tracing::warn!("{e}"))
             .ok()
     }
+
+    async fn list_epic_orchestrations(&self) -> Vec<crate::models::EpicOrchestration> {
+        self.rows
+            .epic_orchestrations()
+            .iter()
+            .filter_map(|row| {
+                crate::sync::decode::epic_orchestration(row)
+                    .map_err(|e| tracing::warn!("{e}"))
+                    .ok()
+            })
+            .collect()
+    }
 }
 
 #[async_trait::async_trait]

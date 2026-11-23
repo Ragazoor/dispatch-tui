@@ -102,13 +102,7 @@ pub async fn handle_hook(
 /// switch went off) succeeds quietly, as a missing task does.
 async fn observe_orchestrator(state: &McpState, event: OrchestratorEvent) -> ObserveOutcome {
     let OrchestratorEvent::Stop { name } = event;
-    let known = state
-        .db
-        .list_orchestrators()
-        .await
-        .into_iter()
-        .any(|o| o.name == name);
-    if !known {
+    if state.db.orchestrator_named(&name).await.is_none() {
         tracing::debug!(orchestrator = %name, "turn of an orchestrator this board does not hold");
         return ObserveOutcome::Applied;
     }
