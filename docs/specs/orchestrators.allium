@@ -47,9 +47,10 @@
 --   - O5, the ready mark. The orchestrator starts only what is wanted. A
 --     backlog task is ready or not, and a new task is not. The operator sets
 --     the mark on the board; an agent sets it through MCP, at creation or
---     later. The mark states intent and locks nothing: an agent marks a task
---     ready only when the work is already wanted. An empty backlog is not a
---     goal.
+--     later. The mark states intent and locks nothing: it is a signal the
+--     orchestrator reads, and it changes no other way a task starts. An agent
+--     marks a task ready only when the work is already wanted. An empty
+--     backlog is not a goal.
 --   - O6, the start rule. An epic starts marked tasks only (the default), or
 --     everything, where every backlog task counts as ready (a feed of work
 --     that should all be handled).
@@ -479,9 +480,11 @@ rule OrchestratorStartsATask {
 
     let orchestration = orchestrator.orchestration
 
-    -- Its own discipline, from its prompt: it starts tasks of its epic only.
+    -- Its own discipline, from its prompt: it starts ready tasks of its epic
+    -- only. The mark is a signal to it and a condition on nobody else (O5).
     requires: covering(task) = orchestration
     requires: task.status = backlog
+    requires: counts_as_ready(task)
 
     ensures: StartAsked(task: task, host: orchestrator.host)
     ensures: split/DispatchRequested(
@@ -502,9 +505,10 @@ rule OrchestratorStartsATask {
         -- for its scheduled time. Two machines' orchestrators that pick the
         -- same task race on that request and the store accepts one.
         --
-        -- Ready and the limit are every start's, whoever asks
-        -- (StartsInAnOrchestratedEpicShareOneRule). The store does not ask who
-        -- the caller is.
+        -- The limit is every start's, whoever asks
+        -- (StartsInAnOrchestratedEpicShareOneLimit). Ready is not: the store
+        -- never checks the mark, and the operator starts any backlog task
+        -- with the usual key, marked or not.
         --
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on
@@ -516,24 +520,21 @@ rule OrchestratorStartsATask {
         -- may tell the operator that one looks unblocked.
 }
 
-rule StartsInAnOrchestratedEpicShareOneRule {
+rule StartsInAnOrchestratedEpicShareOneLimit {
     when: StartAsked(task, host)
 
-    -- O5, O7. Every way a task of an orchestrated epic starts on a machine
-    -- is held to the same two conditions: the task is ready, and the epic is
-    -- under its limit. A task no orchestrator covers has neither.
-    requires: covering(task) = null or counts_as_ready(task)
+    -- O7. Every way a task of an orchestrated epic starts on a machine, the
+    -- operator's own key included, is held to the one limit. A task no
+    -- orchestrator covers has none.
     requires: covering(task) = null
         or running_here(covering(task).epic, host).count < covering(task).limit
 
     ensures: StartAllowed(task, host)
 
     @guidance
-        -- Once built these are requires of RequestDispatch itself, with no
-        -- exception for who asks. The refusals read "task <id> is not marked
-        -- ready" and "epic <id> already runs <n> of <limit> tasks". The
-        -- operator's start key on a backlog card marks the task ready and
-        -- starts it in one step: pressing it is the intent the mark records. A resume of a task that already runs is not
+        -- Once built this is a requires of RequestDispatch itself, with no
+        -- exception for who asks. The refusal reads "epic <id> already runs
+        -- <n> of <limit> tasks". A resume of a task that already runs is not
         -- a start and is not held to it. Because a task in review and a
         -- detached task take no slot, an agent that waits for a PR review
         -- does not hold up the next task.
@@ -879,8 +880,9 @@ surface OrchestratorIdentity {
         -- needs input, stale or review state for an orchestrator.
 
     @guarantee NotATaskOfItsEpic
-        -- It is no card in a column and no child of its epic: the epic's
-        -- status and its counts are its tasks' alone.
+        -- On the board it lives on its epic's card (OrchestratorView) and in
+        -- the epic view's header. It is no task card and no child of its
+        -- epic: the epic's status and its counts are its tasks' alone.
 }
 
 -- What may be decided for the operator, and what may not (O9). This is the
