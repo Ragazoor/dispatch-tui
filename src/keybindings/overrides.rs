@@ -455,7 +455,7 @@ pub fn merge_overrides(text: &str) -> (&'static [KeyBinding], Vec<KeyLoadError>)
     }
 }
 
-/// [`merge_overrides`] over entries already parsed.
+/// The merge over entries already parsed: the table a load builds, leaked.
 fn merge_entries(list: &[Value]) -> (&'static [KeyBinding], Vec<KeyLoadError>) {
     let check = check_overrides(list);
     let errors = check.errors();
