@@ -1,0 +1,1084 @@
+-- allium: 3
+-- orchestrators.allium
+--
+-- Scope: The orchestrator of an epic. An epic can have an agent of its own
+--        that starts the epic's tasks, watches their agents, answers their
+--        questions and tells the operator when a person is needed. It writes
+--        no code and finishes no task.
+-- Includes: The switch on an epic and where it may be on; the ready mark on a
+--           backlog task and the epic's start rule; the orchestrator's
+--           session on each machine and when it runs; which tasks it may
+--           start and how many at once; what it may answer for the operator
+--           and what it must pass on; what it does about a task agent in
+--           trouble; the epic's log, its notes and the items that wait for
+--           the operator; what the board, the notifications and the MCP tools
+--           show of all this.
+-- Excludes: The dispatch request a start goes through (store-split.allium:
+--           RequestDispatch) and its provisioning (dispatch.allium); how a
+--           task agent's trouble is detected (agent-health.allium); how a
+--           task finishes (pr-workflow.allium: wrap-up, and a review task's
+--           own approve or merge); the knowledge base (learnings.allium),
+--           which this spec leaves as it is.
+-- Dependencies: Epic, Task, Agent, Host, TmuxWindow and core/local_host()
+--               from core.allium; DispatchRequested and DispatchRequest from
+--               store-split.allium.
+--
+-- STATUS: SPECIFIED AHEAD OF ITS CODE. This file states behaviour that is
+-- decided and not yet built. Every other spec still describes the system as
+-- it runs. Each build step moves the facts it implements into the specs that
+-- own them (the list is under "What the build changes elsewhere", at the
+-- end) in the same change as its code.
+--
+-- Decisions taken with the user, recorded so they are not re-litigated:
+--   - O1, what orchestration is. The orchestrator starts tasks, watches the
+--     task agents, answers their questions, and reports to the operator when
+--     a person is needed or the epic is finished. It does not split an epic
+--     into tasks.
+--   - O2, it never does a task's work. It edits no code, has no worktree, and
+--     never merges, rebases, approves, closes or deletes. Each task's own
+--     agent finishes its task, by wrap-up on any path, and a review task
+--     approves or merges its PR as it does without an orchestrator. How
+--     automatic an epic is follows from how its tasks are set up.
+--   - O3, a switch per epic, off by default, allowed on any epic at any
+--     depth, feed epics included (the Bot PRs epic is the first use).
+--   - O4, one orchestrator on any path from a root epic to a leaf. It covers
+--     its epic's whole subtree. Switching on is refused while an epic above
+--     or below has one. Nested orchestrators may be allowed later.
+--   - O5, the ready mark. The orchestrator starts only what is wanted. A
+--     backlog task is ready or not, and a new task is not. The operator sets
+--     the mark on the board; an agent sets it through MCP, at creation or
+--     later. The mark states intent and locks nothing: an agent marks a task
+--     ready only when the work is already wanted. An empty backlog is not a
+--     goal.
+--   - O6, the start rule. An epic starts marked tasks only (the default), or
+--     everything, where every backlog task counts as ready (a feed of work
+--     that should all be handled).
+--   - O7, at most three task agents at once per epic, changeable per epic.
+--     Tasks the operator started count.
+--   - O8, it replaces auto dispatch. An epic never has both.
+--   - O9, the answer line. See OrchestratorAnswerLine.
+--   - O10, one retry, then the operator. See the trouble rules.
+--   - O11, one user. Each machine that runs the board runs its own
+--     orchestrator for the epic and handles only the tasks on that machine.
+--     Nothing picks one machine.
+--   - O12, it runs while there is open work and the board runs. It ends when
+--     the epic has no open work and comes back when work does.
+--   - O13, its memory is in the store: the epic's log, the epic's notes and
+--     the items that wait for the operator. It must work from a fresh start.
+--   - O14, the board. Tab cycles flat, then flat and active only, then the
+--     orchestrator view; the board opens on flat. The orchestrator view
+--     replaces the epic-grouped view. In it an orchestrated epic has one
+--     card, placed by its orchestrator's state.
+--   - O15, one key in the epic view opens the orchestrator's window, or
+--     offers to start an orchestrator when the epic has none.
+--   - O16, notifications are for an item that waits for the operator and for
+--     a finished epic, and nothing else.
+
+use "./core.allium" as core
+use "./store-split.allium" as split
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- Which backlog tasks an orchestrator may start (O6).
+enum StartRule { marked_only | everything }
+
+-- Who set a ready mark.
+enum ReadyMarker { operator | agent }
+
+enum LogEntryKind {
+    started_task     -- it asked for a task to be started
+    answered         -- it answered a task agent's question
+    passed_on        -- it passed a question or a problem to the operator
+    acted_on_trouble -- it pinged, resumed, retried or redirected a task agent
+    session          -- its own session started, resumed or ended
+    summary          -- its closing summary of a finished epic
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- O7. An epic's own limit, when set, replaces it.
+    orchestrator_max_parallel: Integer = 3
+    -- How long the orchestrator waits for a stale agent to answer its ping
+    -- before it passes the task to the operator.
+    orchestrator_ping_wait: Duration = 10.minutes
+    -- How long a task may wait in review before the orchestrator reminds the
+    -- operator, once.
+    orchestrator_review_reminder_after: Duration = 24.hours
+    -- How many log entries the epic view shows, newest first.
+    orchestrator_log_shown: Integer = 10
+}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+-- The switch (O3). An epic is orchestrated while it has one of these.
+entity EpicOrchestration {
+    epic: core/Epic
+    start_rule: StartRule
+    max_parallel: Integer?   -- null follows config.orchestrator_max_parallel
+    switched_on_at: Timestamp
+
+    limit: if max_parallel != null: max_parallel else: config.orchestrator_max_parallel
+}
+
+-- The ready mark (O5). A backlog task is ready while it has one.
+entity ReadyMark {
+    task: core/Task
+    marked_by: ReadyMarker
+    agent_name: String?      -- the marking agent's name when marked_by = agent
+    marked_at: Timestamp
+}
+
+-- An epic's orchestrator on one machine (O11). The row keeps the name and
+-- whatever is needed to resume the same conversation; the session is live
+-- while it holds a window.
+entity Orchestrator {
+    orchestration: EpicOrchestration
+    host: core/Host
+    name: String             -- an agent name, from the pool task agents use
+    tmux_window: core/TmuxWindow?
+    started_at: Timestamp?   -- when the session it now holds started
+    restarted_once: Boolean = false  -- a session that died was started again and has not yet done a turn
+
+    epic: orchestration.epic
+    is_live: tmux_window != null
+}
+
+-- One line of the epic's log (O13). Append-only.
+entity OrchestratorLogEntry {
+    epic: core/Epic
+    host: core/Host          -- the machine whose orchestrator wrote it
+    at: Timestamp
+    kind: LogEntryKind
+    task: core/Task?         -- the task it is about; an answer always names one
+    text: String             -- one line: what was decided or done, and why
+    question: String?        -- for answered and passed_on: what was asked
+}
+
+-- Something the orchestrator keeps for the epic across its sessions: a
+-- decision that binds later tasks, a fact about the epic's work (O13).
+entity EpicNote {
+    epic: core/Epic
+    text: String
+    written_at: Timestamp
+}
+
+-- An item that waits for the operator (O1). Open until resolved.
+entity WaitingItem {
+    epic: core/Epic
+    host: core/Host
+    task: core/Task?         -- null when it is about the epic as a whole
+    about: String            -- the question or the problem
+    tried: String            -- what the orchestrator already did about it
+    recommendation: String   -- what it would do
+    raised_at: Timestamp
+    resolved_at: Timestamp?
+
+    is_open: resolved_at = null
+}
+
+------------------------------------------------------------
+-- Derived facts
+------------------------------------------------------------
+
+-- orchestration_of(epic) is the EpicOrchestration of epic, or null.
+-- covering(epic) is the orchestration of epic or of its nearest ancestor that
+-- has one, or null. covering(task) is covering(task.epic), null for a task
+-- with no epic. By OneOrchestratorOnAPath there is never a choice.
+--
+-- has_open_work(epic): some task in the epic's subtree is not done.
+-- running_here(epic, host): the tasks in the epic's subtree with status =
+-- running whose host is this one.
+-- counts_as_ready(task): the task has a ReadyMark, or covering(task) has
+-- start_rule = everything.
+-- wanted(orchestrator): its epic has open work.
+-- orchestrator_state(orchestrator), what the operator sees of it:
+--   working: its session is live and a task of the epic runs here.
+--   idle:    its session is live and none does.
+--   resting: the epic has no open work, so no session is wanted.
+--   down:    a session is wanted and none is live.
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == The switch ==
+
+rule SwitchOrchestratorOn {
+    when: OrchestratorSwitchedOn(epic, start_rule?, max_parallel?)
+
+    requires: orchestration_of(epic) = null
+    -- O4. The refusal names the epic that already has one.
+    requires: not epic.subtree_epics.any(e => orchestration_of(e) != null)
+    requires: covering(epic) = null
+    requires: max_parallel = null or max_parallel >= 1
+
+    ensures: EpicOrchestration.created(
+        epic: epic,
+        start_rule: if start_rule != null: start_rule else: marked_only,
+        max_parallel: max_parallel,
+        switched_on_at: now
+    )
+    -- O8. Auto dispatch goes off on the epic and on every epic below it.
+    ensures: epic.auto_dispatch = false
+    ensures:
+        for sub in epic.subtree_epics:
+            sub.auto_dispatch = false
+
+    @guidance
+        -- One store write. The refusals read "epic <id> already has an
+        -- orchestrator" and "epic <id> (<title>) above this one has an
+        -- orchestrator" or "... below this one ...", and write nothing.
+        -- Switching on an epic with auto dispatch on is not refused: the
+        -- orchestrator takes the chain's place, and the reply says auto
+        -- dispatch was turned off.
+}
+
+rule ChangeOrchestratorSettings {
+    when: OrchestratorSettingsChanged(epic, start_rule?, max_parallel?)
+
+    requires: orchestration_of(epic) != null
+    requires: max_parallel = null or max_parallel >= 1
+
+    ensures:
+        if start_rule != null: orchestration_of(epic).start_rule = start_rule
+    ensures:
+        if max_parallel != null: orchestration_of(epic).max_parallel = max_parallel
+
+    @guidance
+        -- A lower limit stops no task that already runs; it only holds back
+        -- the next start.
+}
+
+rule SwitchOrchestratorOff {
+    when: OrchestratorSwitchedOff(epic)
+
+    requires: orchestration_of(epic) != null
+
+    let orchestration = orchestration_of(epic)
+
+    -- Every machine's session ends. The task agents run on and ask the
+    -- operator again.
+    ensures:
+        for o in Orchestrators where orchestration = orchestration:
+            not exists o
+    ensures: not exists orchestration
+    ensures:
+        for item in WaitingItems where epic = epic and is_open:
+            item.resolved_at = now
+
+    @guidance
+        -- The log and the notes stay with the epic, so a later switch-on
+        -- starts with them. Ready marks stay too. Each board closes the
+        -- window of the orchestrator it ran when it sees the row go.
+}
+
+rule AutoDispatchIsRefusedUnderAnOrchestrator {
+    when: AutoDispatchTurnedOn(epic)
+
+    -- O8. Reached from the board's toggle and from any other writer of the
+    -- flag. The refusal reads "epic <id> is run by the orchestrator of epic
+    -- <id> (<title>)".
+    requires: covering(epic) = null
+
+    ensures: epic.auto_dispatch = true
+}
+
+rule ReparentingKeepsOneOrchestratorOnAPath {
+    when: EpicReparented(epic, new_parent)
+
+    -- The moved epic lands under an orchestrated epic: the orchestrator
+    -- above takes its subtree over, and every switch inside it goes off.
+    ensures:
+        if new_parent != null and covering(new_parent) != null:
+            for e in epic.subtree_epics + {epic}:
+                if orchestration_of(e) != null:
+                    OrchestratorSwitchedOff(e)
+                e.auto_dispatch = false
+
+    @guidance
+        -- In the same write as the move. The reply to the move says which
+        -- orchestrators were switched off.
+}
+
+rule DeletingAnEpicRemovesItsOrchestration {
+    when: EpicDeleted(epic)
+
+    ensures:
+        if orchestration_of(epic) != null: OrchestratorSwitchedOff(epic)
+    ensures:
+        for entry in OrchestratorLogEntries where epic = epic: not exists entry
+    ensures:
+        for note in EpicNotes where epic = epic: not exists note
+    ensures:
+        for item in WaitingItems where epic = epic: not exists item
+}
+
+-- == The ready mark ==
+
+rule MarkTaskReady {
+    when: TaskMarkedReady(task, marked_by, agent_name?)
+
+    requires: task.status = backlog
+
+    ensures:
+        if not exists ReadyMark{task: task}:
+            ReadyMark.created(
+                task: task,
+                marked_by: marked_by,
+                agent_name: agent_name,
+                marked_at: now
+            )
+
+    @guidance
+        -- Marking a task that is already ready changes nothing and is not an
+        -- error; the first marker stays recorded. A task outside backlog is
+        -- refused with "only a backlog task can be marked ready". A task may
+        -- be marked whether or not an orchestrator covers it: the mark waits.
+}
+
+rule ClearReadyMark {
+    when: TaskReadyCleared(task)
+
+    ensures: not exists ReadyMark{task: task}
+}
+
+rule LeavingBacklogDropsTheReadyMark {
+    when: task: core/Task.status transitions_to running
+
+    -- The mark said "start this". Once started it has been used: a task that
+    -- comes back to backlog is not ready until it is marked again.
+    ensures: not exists ReadyMark{task: task}
+}
+
+-- == The session ==
+
+rule BoardRunsItsOrchestrators {
+    when: BoardChecksOrchestrators(host)
+
+    -- Each running board, on its tick, for every orchestrated epic.
+    ensures:
+        for orchestration in EpicOrchestrations:
+            if has_open_work(orchestration.epic)
+               and not exists Orchestrator{orchestration: orchestration, host: host}:
+                Orchestrator.created(
+                    orchestration: orchestration,
+                    host: host,
+                    name: fresh_agent_name(),
+                    tmux_window: null,
+                    started_at: null
+                )
+    ensures:
+        for o in Orchestrators where host = host:
+            if wanted(o) and not o.is_live:
+                OrchestratorSessionWanted(o)
+            if not wanted(o) and o.is_live:
+                OrchestratorSessionUnwanted(o)
+
+    @guidance
+        -- HOST-SIDE. This is what "always running" means (O12): while the
+        -- board runs and the epic has open work, a missing session is started
+        -- again without asking, whatever ended it. A board start is the same
+        -- check, so every wanted orchestrator comes back with the board.
+        -- A board that does not run, runs none.
+}
+
+rule StartOrchestratorSession {
+    when: OrchestratorSessionWanted(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: not orchestrator.is_live
+    -- O10 applied to itself: one restart without a completed turn between.
+    requires: not orchestrator.restarted_once or not session_died(orchestrator)
+
+    ensures: orchestrator.tmux_window = orchestrator_window(orchestrator)
+    ensures: orchestrator.started_at = now
+    ensures:
+        if session_died(orchestrator): orchestrator.restarted_once = true
+    ensures: OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: session, task: null, question: null,
+        text: session_start_text(orchestrator)
+    )
+
+    @guidance
+        -- The session resumes the conversation this machine last held for the
+        -- epic when it can, and starts fresh otherwise. Either way it gets
+        -- the prompt (OrchestratorPrompt), so a fresh start loses nothing
+        -- that matters (O13).
+        -- It runs in a directory of its own under the data directory, not in
+        -- a worktree and not in a repository (O2). Its session carries the
+        -- orchestrator's name, as a task agent's does, so agents and the
+        -- operator reach it by that name.
+        -- session_died: the last session ended without the board ending it.
+}
+
+rule OrchestratorThatKeepsDyingWaitsForTheOperator {
+    when: OrchestratorSessionWanted(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: not orchestrator.is_live
+    requires: orchestrator.restarted_once and session_died(orchestrator)
+    requires: not exists WaitingItem{epic: orchestrator.epic, host: orchestrator.host, task: null, resolved_at: null}
+
+    ensures: WaitingItemRaised(
+        epic: orchestrator.epic, host: orchestrator.host, task: null,
+        about: "the orchestrator's session died twice in a row",
+        tried: "restarted it once",
+        recommendation: "open its window, or start it again from the epic view"
+    )
+
+    @guidance
+        -- It then shows as down. The operator starts it again with the
+        -- orchestrator key (OrchestratorKey), which clears restarted_once.
+}
+
+rule OrchestratorTurnClearsTheRestartFlag {
+    when: OrchestratorCompletedATurn(orchestrator)
+
+    ensures: orchestrator.restarted_once = false
+}
+
+rule EndOrchestratorSession {
+    when: OrchestratorSessionUnwanted(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: orchestrator.is_live
+
+    ensures: orchestrator.tmux_window = null
+    ensures:
+        if orchestrator.epic.status = done:
+            OrchestratorLogEntry.created(
+                epic: orchestrator.epic, host: orchestrator.host, at: now,
+                kind: summary, task: null, question: null,
+                text: closing_summary(orchestrator)
+            )
+            EpicFinishedNotified(orchestrator.epic)
+
+    @guidance
+        -- No open work is the one condition (O12): a finished epic, and an
+        -- epic that is not done but has nothing open, such as a feed with
+        -- nothing to handle. The orchestrator is asked for its closing
+        -- summary before its window closes. A task that reopens or arrives
+        -- makes the session wanted again on the next check.
+}
+
+-- == Starting tasks ==
+
+rule OrchestratorStartsATask {
+    when: OrchestratorStartsTask(orchestrator, task)
+
+    let orchestration = orchestrator.orchestration
+
+    requires: covering(task) = orchestration
+    requires: task.status = backlog
+    requires: counts_as_ready(task)
+    -- O7. Counted on this machine, the operator's own starts included.
+    requires: running_here(orchestrator.epic, orchestrator.host).count < orchestration.limit
+
+    ensures: split/DispatchRequested(
+        task: task,
+        requester: orchestrator.host,
+        origin: mcp
+    )
+    ensures: OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: started_task, task: task, question: null,
+        text: start_reason(orchestrator, task)
+    )
+
+    @guidance
+        -- The start is an ordinary dispatch request, so every refusal of
+        -- RequestDispatch applies as it stands: a task another machine holds,
+        -- a task with an open request, a phoenix task, a task still waiting
+        -- for its scheduled time. Two machines' orchestrators that pick the
+        -- same task race on that request and the store accepts one.
+        --
+        -- The three requires above are the store's, not only the prompt's:
+        -- a start by an orchestrator is refused for a task that is not
+        -- ready, not in its subtree, or over the limit, with a message that
+        -- says which. The operator's own start of any task is never held to
+        -- them.
+        --
+        -- WHICH ready task first is the orchestrator's judgement: it reads
+        -- the tasks and the plan and holds back a task that depends on
+        -- unfinished work. Between tasks it cannot tell apart it takes board
+        -- order (sort_order, then id), as the chain did.
+        --
+        -- It starts work when it wakes (OrchestratorWakeEvents) and a slot is
+        -- free. A task that is not ready is never started; the orchestrator
+        -- may tell the operator that one looks unblocked.
+}
+
+-- == Answering ==
+
+rule OrchestratorAnswersAnAgent {
+    when: OrchestratorAnswered(orchestrator, task, question, answer, reason)
+
+    requires: covering(task) = orchestrator.orchestration
+
+    ensures: OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: answered, task: task, question: question,
+        text: answer_line(answer, reason)
+    )
+
+    @guidance
+        -- The answer itself travels as a message to the task agent. The log
+        -- entry is how "every answer is recorded on the task" holds: the
+        -- task's detail lists the entries that name it.
+}
+
+rule OrchestratorPassesOnToTheOperator {
+    when: WaitingItemRaised(epic, host, task?, about, tried, recommendation)
+
+    ensures: WaitingItem.created(
+        epic: epic, host: host, task: task,
+        about: about, tried: tried, recommendation: recommendation,
+        raised_at: now, resolved_at: null
+    )
+    ensures: OrchestratorLogEntry.created(
+        epic: epic, host: host, at: now,
+        kind: passed_on, task: task, question: about,
+        text: recommendation
+    )
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(epic: epic, task: task, about: waits_for_operator)
+
+    @guidance
+        -- One notification per item, when it is raised (O16).
+}
+
+rule WaitingItemResolved {
+    when: WaitingItemResolved(item)
+
+    requires: item.is_open
+
+    ensures: item.resolved_at = now
+
+    @guidance
+        -- Three ways in. The operator resolves it on the board or by telling
+        -- the orchestrator. The orchestrator resolves it when the operator
+        -- has answered. And the store resolves it when its task is done or
+        -- deleted. Nothing resolves it on a timer: an item raised at night is
+        -- still there in the morning.
+}
+
+rule FinishedTaskResolvesItsItems {
+    when: task: core/Task.status transitions_to done
+
+    ensures:
+        for item in WaitingItems where task = task and is_open:
+            item.resolved_at = now
+}
+
+-- == Notes ==
+
+rule WriteEpicNote {
+    when: EpicNoteWritten(epic, text)
+
+    requires: text != ""
+
+    ensures: EpicNote.created(epic: epic, text: text, written_at: now)
+
+    @guidance
+        -- What the orchestrator would otherwise carry in its head and repeat
+        -- in its replies: a decision that binds later tasks, a shared fact
+        -- that moves while the epic runs (the next free version number, a
+        -- name another task introduced), a step nobody owns yet. It puts the
+        -- notes that fit into its brief to a task agent it starts or answers.
+        -- A task agent sends what it learns to the orchestrator, which
+        -- decides whether it is a note.
+}
+
+rule RemoveEpicNote {
+    when: EpicNoteRemoved(note)
+
+    ensures: not exists note
+
+    @guidance
+        -- A note that stopped being true is removed, not kept beside its
+        -- correction. The orchestrator sees the epic change, so it is the one
+        -- to notice.
+}
+
+-- == Trouble ==
+
+-- Each rule fires when the orchestrator, woken by the event, acts on it. A
+-- board with no live orchestrator for the task does what it does without one.
+
+rule AgentNeedsInput {
+    when: task: core/Task.sub_status transitions_to needs_input
+
+    requires: live_orchestrator_for(task) != null
+
+    ensures: OrchestratorAsked(live_orchestrator_for(task), task)
+
+    @guidance
+        -- The orchestrator reads what the agent is asking and either answers
+        -- (OrchestratorAnswersAnAgent) or passes it on, by
+        -- OrchestratorAnswerLine. The task keeps its needs-input state on the
+        -- board until the agent works again.
+}
+
+rule AgentIsStale {
+    when: task: core/Task.sub_status transitions_to stale
+
+    requires: live_orchestrator_for(task) != null
+
+    ensures: AgentPinged(live_orchestrator_for(task), task)
+
+    @guidance
+        -- A message asking for status. An agent that works again within
+        -- config.orchestrator_ping_wait ends it there.
+}
+
+rule StaleAgentDidNotAnswer {
+    when: AgentPingExpired(orchestrator, task)
+
+    requires: task.sub_status = stale
+
+    ensures: WaitingItemRaised(
+        epic: orchestrator.epic, host: orchestrator.host, task: task,
+        about: "the agent is stale and did not answer",
+        tried: "asked it for status",
+        recommendation: stale_recommendation(orchestrator, task)
+    )
+}
+
+rule AgentCrashed {
+    when: task: core/Task.sub_status transitions_to crashed
+
+    requires: live_orchestrator_for(task) != null
+
+    let orchestrator = live_orchestrator_for(task)
+
+    ensures:
+        if not already_retried(orchestrator, task):
+            TaskResumeRequested(task)
+        else:
+            WaitingItemRaised(
+                epic: orchestrator.epic, host: orchestrator.host, task: task,
+                about: "the agent crashed again after a resume",
+                tried: "resumed it once",
+                recommendation: crash_recommendation(orchestrator, task)
+            )
+
+    @guidance
+        -- already_retried: the log holds an acted_on_trouble entry for this
+        -- task and this kind of trouble since the task last entered running.
+        -- The resume writes that entry.
+}
+
+rule StartFailed {
+    when: request: split/DispatchRequest.state transitions_to failed
+
+    requires: live_orchestrator_for(request.task) != null
+    requires: started_by_orchestrator(request)
+
+    let orchestrator = live_orchestrator_for(request.task)
+
+    ensures:
+        if not already_retried(orchestrator, request.task):
+            OrchestratorStartsTask(orchestrator, request.task)
+        else:
+            WaitingItemRaised(
+                epic: orchestrator.epic, host: orchestrator.host, task: request.task,
+                about: "the task could not be started",
+                tried: "started it twice",
+                recommendation: request.reason
+            )
+
+    @guidance
+        -- The failed request has released the task to backlog already
+        -- (store-split.allium: ReleaseClaimOfFailedRequest). Its ready mark
+        -- went when it left backlog, so the retry marks it ready again first.
+}
+
+rule WrapUpConflict {
+    when: task: core/Task.sub_status transitions_to conflict
+
+    requires: live_orchestrator_for(task) != null
+
+    ensures: AgentToldToResolveConflict(live_orchestrator_for(task), task)
+
+    @guidance
+        -- A message to the task agent: resolve the conflict and wrap up
+        -- again. The orchestrator resolves nothing itself (O2). A second
+        -- conflict on the same task is passed to the operator.
+}
+
+rule LongWaitInReview {
+    when: task: core/Task.status_changed_at + config.orchestrator_review_reminder_after <= now
+
+    requires: task.status = review
+    requires: live_orchestrator_for(task) != null
+    requires: not exists WaitingItem{task: task, resolved_at: null}
+
+    ensures: WaitingItemRaised(
+        epic: live_orchestrator_for(task).epic,
+        host: live_orchestrator_for(task).host,
+        task: task,
+        about: "the task has waited in review",
+        tried: "nothing: a review is the operator's",
+        recommendation: review_recommendation(task)
+    )
+
+    @guidance
+        -- Once per stay in review. The task is not moved.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- O4.
+invariant OneOrchestratorOnAPath {
+    for a in EpicOrchestrations: for b in EpicOrchestrations:
+        a != b implies (a.epic not in b.epic.subtree_epics)
+}
+
+invariant OneOrchestrationPerEpic {
+    for a in EpicOrchestrations: for b in EpicOrchestrations:
+        a.epic = b.epic implies a = b
+}
+
+-- O11. One per epic and machine.
+invariant OneOrchestratorPerEpicAndHost {
+    for a in Orchestrators: for b in Orchestrators:
+        (a.orchestration = b.orchestration and a.host = b.host) implies a = b
+}
+
+-- O8.
+invariant NoAutoDispatchUnderAnOrchestrator {
+    for o in EpicOrchestrations:
+        o.epic.auto_dispatch = false
+        and o.epic.subtree_epics.all(e => e.auto_dispatch = false)
+}
+
+-- An orchestrator's name is no task agent's name, and no other
+-- orchestrator's: a message to a name reaches one session.
+invariant OrchestratorNamesAreUnique {
+    for o in Orchestrators:
+        not core/Agents.any(a => a.name = o.name)
+        and not Orchestrators.any(p => p != o and p.name = o.name)
+}
+
+-- O5. Only a backlog task is ready.
+invariant OnlyBacklogTasksAreReady {
+    for m in ReadyMarks:
+        m.task.status = backlog
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- What may be decided for the operator, and what may not (O9). This is the
+-- text of the orchestrator's prompt as much as it is a rule.
+surface OrchestratorAnswerLine {
+    facing agent: core/DispatchedAgent
+
+    @guarantee MayAnswer
+        -- Questions about the work: scope, approach, how to read the task or
+        -- the plan. A plan confirmation, when the plan fits the task and the
+        -- epic's goal. The wrap-up path, when the task or the epic already
+        -- states a preferred one. "May I approve or merge this PR?" from a
+        -- review task, when its review found nothing blocking and the checks
+        -- pass. Coordination between agents: who owns a file, who waits for
+        -- whom.
+
+    @guarantee MustPassOn
+        -- Anything destructive or hard to undo outside the task's own
+        -- worktree. A change to what the epic is for, or work its description
+        -- does not cover. New credentials, new external services, spending.
+        -- Anything it is not confident about. Any question where the agent
+        -- and the orchestrator still disagree after one round.
+
+    @guarantee LeadsWithADecision
+        -- An answer is a decision and a one-line reason, not a menu.
+
+    @guarantee NeverDoesTheWork
+        -- O2. It edits no file of any task, runs no wrap-up, merges,
+        -- approves, closes or deletes nothing. It talks to agents and uses
+        -- the dispatch tools.
+
+    @guidance
+        -- A question passed on raises a WaitingItem with the question, what
+        -- the orchestrator tried and what it recommends. The operator may
+        -- answer the orchestrator or the task agent; either way the answer
+        -- reaches the task agent, and the item is resolved.
+}
+
+-- What wakes a live orchestrator. Each arrives as a message in its session.
+surface OrchestratorWakeEvents {
+    facing agent: core/DispatchedAgent
+
+    @guarantee WokenByItsSubtreeOnly
+        -- A task appears in, or moves into, the subtree. A task is marked
+        -- ready or its mark is cleared. A task of this machine changes status
+        -- or enters needs input, stale, crashed or conflict. A start the
+        -- orchestrator asked for fails. A ping or a review reminder comes
+        -- due. A task agent or the operator writes to it. A WaitingItem of
+        -- the epic is resolved.
+
+    @guarantee QuietOtherwise
+        -- Between events it does nothing and costs nothing. It does not poll
+        -- the board.
+
+    @guarantee AnUndeliveredReplyIsNotLost
+        -- A message to a task agent whose session is not there to take it is
+        -- reported back to the orchestrator as undelivered
+        -- (agent-health.allium: UndeliveredPeerMessage). The answer is in the
+        -- log either way, and the agent's next prompt points it there.
+
+    @guarantee OnlyThisMachinesAgents
+        -- O11. It sees every task of the subtree, and acts on the agents of
+        -- its own machine. A task another machine runs is that machine's
+        -- orchestrator's.
+}
+
+-- What the orchestrator is told when its session starts, fresh or resumed.
+surface OrchestratorPrompt {
+    facing agent: core/DispatchedAgent
+
+    context orchestrator: Orchestrator
+
+    exposes:
+        orchestrator.name
+        orchestrator.epic.title
+        orchestrator.epic.description
+        orchestrator.epic.plan_path
+        orchestrator.orchestration.start_rule
+        orchestrator.orchestration.limit
+        orchestrator.epic.subtree_tasks
+        EpicNotes where epic = orchestrator.epic
+        WaitingItems where epic = orchestrator.epic and is_open
+        OrchestratorLogEntries where epic = orchestrator.epic
+
+    @guarantee SaysWhatItIs
+        -- That it orchestrates this epic and does none of its work (O1, O2),
+        -- the answer line (OrchestratorAnswerLine), the start rule and the
+        -- limit, and the trouble rules with their one retry (O10).
+
+    @guarantee EnoughForAFreshStart
+        -- Each task of the subtree with its id, title, status, sub-status,
+        -- ready mark and agent name; every note; every open item; and the
+        -- newest log entries. The rest of the log is read through MCP.
+
+    @guarantee FirstTurnChecksTheBoard
+        -- On a start it looks for what happened while no session ran: agents
+        -- that need input, ready tasks with a free slot, open items the
+        -- operator has answered.
+}
+
+-- What a task agent is told when an orchestrator covers its task.
+surface TaskAgentUnderAnOrchestrator {
+    facing agent: core/DispatchedAgent
+
+    @guarantee AsksTheOrchestratorFirst
+        -- The task's prompt names the orchestrator and says: send your
+        -- questions, plan confirmations included, to it and not to the
+        -- operator; tell it what you learn that later tasks of the epic
+        -- need. A prompt for a task no orchestrator covers says none of
+        -- this.
+
+    @guarantee QuestionsHaveOneShape
+        -- The prompt gives the shape of a question to the orchestrator: what
+        -- the agent plans, the question, the options, the one it recommends,
+        -- and where in the code or the spec the evidence is. It also asks for
+        -- a short outcome report when the task finishes.
+
+    @guarantee FallsBackToTheOperator
+        -- When no orchestrator is live for the task on this machine, the
+        -- agent asks the operator, as an agent without one does.
+
+    @guarantee MarksReadyOnlyWhatIsWanted
+        -- O5. Task-creating guidance says: create a task as ready only when
+        -- the operator asked for the work or it is a step of the epic's
+        -- plan. A new idea or a side finding is created not ready.
+}
+
+-- The MCP side. Every board action here has a tool, so an agent can do what
+-- the operator can.
+surface OrchestratorMcpTools {
+    facing _: core/McpClient
+
+    provides:
+        -- epic_update: orchestrator on or off, start rule, limit.
+        OrchestratorSwitchedOn(epic, start_rule?, max_parallel?)
+        OrchestratorSwitchedOff(epic)
+        OrchestratorSettingsChanged(epic, start_rule?, max_parallel?)
+        -- task_create and task_update: the ready argument. Optional on
+        -- create, where leaving it out means not ready.
+        TaskMarkedReady(task, marked_by, agent_name?)
+        TaskReadyCleared(task)
+        -- The orchestrator's own writes.
+        OrchestratorStartsTask(orchestrator, task)
+        OrchestratorAnswered(orchestrator, task, question, answer, reason)
+        WaitingItemRaised(epic, host, task?, about, tried, recommendation)
+        WaitingItemResolved(item)
+        EpicNoteWritten(epic, text)
+        EpicNoteRemoved(note)
+
+    @guarantee EpicReadsShowTheOrchestrator
+        -- epic_search for one epic says whether it is orchestrated, its
+        -- start rule and limit, each machine's orchestrator by name and
+        -- state, the open items, the notes and the newest log entries. A
+        -- further read returns the whole log, oldest entries by page.
+
+    @guarantee TaskReadsShowTheMark
+        -- A task read says ready or not, who marked it, the orchestrator
+        -- that covers it by name, and the log entries that name the task.
+
+    @guarantee OnlyTheOrchestratorWritesItsLog
+        -- A start, an answer and an item raised write their own log entry.
+        -- No tool appends a free line to the log or edits one.
+}
+
+-- The board's third lens (O14).
+surface OrchestratorView {
+    facing user: core/Operator
+
+    context orchestrator: Orchestrator
+
+    let epic = orchestrator.epic
+    let open_items = WaitingItems where epic = epic and is_open
+    let state = orchestrator_state(orchestrator)
+    let column = orchestrator_column(orchestrator)
+
+    exposes:
+        epic.title
+        state
+        column
+        open_items.count
+        running_here(epic, orchestrator.host).count
+        orchestrator.orchestration.limit
+
+    @guarantee LensOrder
+        -- Tab steps flat, flat and active only, orchestrators, and wraps;
+        -- BackTab steps back. Every board start opens on flat. The
+        -- epic-grouped lens is gone, and with it an epic card in several
+        -- columns.
+
+    @guarantee OneCardPerOrchestratedEpic
+        -- The view holds one card for each orchestrated epic the board
+        -- filter admits, for this machine's orchestrator, and nothing else:
+        -- no task cards and no other epics. An orchestrated epic whose
+        -- orchestrator has no row here yet shows as resting.
+
+    @guarantee EpicCardInOrchestratorView
+        -- The card's column, first match:
+        --   review   an item of the epic waits for the operator
+        --   running  a task of the epic runs on this machine
+        --   done     the epic has tasks and none is open
+        --   backlog  otherwise: on, and nothing is started
+        -- This is how the card is drawn. It is not the epic's stored status,
+        -- which is derived from its children as before.
+
+    @guarantee CardAnswersDoINeedToLook
+        -- Title; state (working, idle, resting, down); the count of items
+        -- that wait for the operator, the loudest thing on the card and
+        -- absent at zero; agents running out of the limit, as "2/3"; task
+        -- counts for backlog, ready, running, review and done; the newest
+        -- log line, cut to fit. Down is drawn as an alarm, like crashed.
+
+    @guarantee KeysOnTheCard
+        -- Enter opens the epic view, flattened, with the epic's tasks. The
+        -- orchestrator key opens the orchestrator's window.
+}
+
+-- The epic view's part (O14, O15).
+surface OrchestratorInEpicView {
+    facing _: core/Operator
+
+    context epic: core/Epic
+
+    provides:
+        -- The orchestrator key on an epic with no orchestrator above, below
+        -- or on it, then y.
+        OrchestratorSwitchedOn(epic, start_rule?, max_parallel?)
+        -- The ready key on a backlog task card, in any view.
+        TaskMarkedReady(task, marked_by, agent_name?)
+        TaskReadyCleared(task)
+        -- The resolve key on an open item.
+        WaitingItemResolved(item)
+
+    @guarantee HeaderShowsTheOrchestrator
+        -- In an orchestrated epic's view, and in the view of any epic below
+        -- it, the header shows the orchestrator's name and state, the open
+        -- items with what each is about, and the newest
+        -- config.orchestrator_log_shown log entries, newest first.
+
+    @guarantee OrchestratorKey
+        -- One key, in the epic view and on any task card of a covered epic.
+        -- With an orchestrator: it opens that orchestrator's window, starting
+        -- its session first when it is down. Without one: it asks "Start an
+        -- orchestrator for this epic? [y/n]" and y switches it on. Where an
+        -- epic above or below already has one it opens that one instead of
+        -- asking.
+
+    @guarantee SwitchingOffIsNotAKey
+        -- The epic's edit form has an orchestrator section: on or off, the
+        -- start rule and the limit. There is no one-key switch-off.
+
+    @guarantee ReadyShowsOnTheCard
+        -- A ready backlog card carries a ready marker; when an agent set
+        -- it, the marker names that agent.
+
+    @guarantee OrchestratorLeadsItsGroupInTheAgentList
+        -- In the agent list an orchestrator is the first row of its epic's
+        -- group, marked as the orchestrator.
+}
+
+-- O16.
+surface OrchestratorNotifications {
+    facing user: core/Operator
+
+    @guarantee TwoOccasions
+        -- A desktop notification when an item starts to wait for the
+        -- operator, naming the epic, the task and what it is about; and one
+        -- when an orchestrated epic finishes. Both follow
+        -- notifications_enabled. Nothing the orchestrator handles by itself
+        -- notifies.
+}
+
+------------------------------------------------------------
+-- What the build changes elsewhere
+------------------------------------------------------------
+
+-- Each of these is true once its build step lands, and moves to its owner
+-- then:
+--   - core.allium: the entities above; an orchestrator is an agent that
+--     belongs to an epic and has no task and no worktree, which the Agent
+--     entity and agents.allium's invariants do not allow for today.
+--   - epics.allium: ToggleAutoDispatch's refusal, the re-parent and delete
+--     effects, and the epic edit form's orchestrator section.
+--   - tasks.allium and mcp-task-tools.allium: the ready argument, the task
+--     and epic reads, and the caller identity of an orchestrator.
+--   - dispatch-prompt.allium: the line a covered task's prompt gains, and
+--     the orchestrator's own prompt.
+--   - agent-health.allium: the hooks of an orchestrator's session, and its
+--     wake events.
+--   - board-layout.allium, board-visuals.allium, agent-tree.allium and
+--     keybindings.allium: the lens order, the orchestrator view, the header,
+--     the ready marker and the two keys.
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "With the epic-grouped lens gone, an epic is entered from one of its task cards or from its card in Backlog. Is every epic still reachable: one with no tasks, and a sub-epic whose tasks are all outside backlog and hidden by a filter?"
+
+open question "The limit counts running tasks per machine, since each machine has its own orchestrator. Two machines can then run twice the limit for one epic. Is that wanted, or should the limit hold across machines?"
+
+open question "A task agent's findings now reach later tasks through the orchestrator's epic notes. Should epic-scoped learnings be retired in their favour, and what carries repo-wide pitfalls to a task that no orchestrator covers?"
+
+open question "Should a managed epic (Bot PRs) come with its orchestrator switched on when it is provisioned, or does the operator switch it on once by hand?"
