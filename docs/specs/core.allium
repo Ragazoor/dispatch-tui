@@ -189,6 +189,19 @@ enum StartRule { marked_only | everything }
 -- Who set a ready mark.
 enum ReadyMarker { operator | agent }
 
+-- What an orchestrator's log entry records (orchestrators.allium, O13).
+enum LogEntryKind {
+    started_task     -- it asked for a task to be started
+    answered         -- it answered a task agent's question
+    passed_on        -- it passed a question or a problem to the operator
+    acted_on_trouble -- it pinged, resumed, retried or redirected a task agent
+    session          -- its own session started, resumed, ended or died
+    summary          -- its closing summary of a finished epic
+}
+
+-- The trouble a log entry of kind acted_on_trouble is about.
+enum TroubleKind { stale | crashed | start_failed | conflict }
+
 -- SubStatus refines the parent status into a more precise state. The valid
 -- pairs are Task's SubStatusFitsStatus invariant. A status write that names no
 -- sub_status resets it to default_sub_status(new_status), whose table is the
@@ -601,6 +614,56 @@ entity Orchestrator {
 
     epic: orchestration.epic
     is_live: tmux_window != null
+}
+
+-- OrchestratorLogEntry: one line of an orchestrated epic's log
+-- (orchestrators.allium, O13). Append-only: written by the orchestrator's own
+-- writes (a start, an answer, an item raised, its summary) and by its
+-- session's start and end, never as a free line and never edited
+-- (orchestrators.allium: OnlyTheOrchestratorWritesItsLog). It stays when the
+-- switch goes off and goes with the epic (DeletingAnEpicRemovesItsOrchestratorMemory).
+-- A snapshot does not carry it (spacetime-seed.allium).
+entity OrchestratorLogEntry {
+    epic: Epic
+    host: Host          -- the machine whose orchestrator wrote it
+    at: Timestamp
+    kind: LogEntryKind
+    task: Task?         -- the task it is about; an answer always names one
+    text: String             -- one line: what was decided or done, and why
+    question: String?        -- for answered and passed_on: what was asked
+    trouble: TroubleKind?    -- for acted_on_trouble: which trouble
+}
+
+-- EpicNote: something an epic's orchestrator keeps for the epic across its
+-- sessions: a decision that binds later tasks, a fact about the epic's work
+-- (orchestrators.allium, O13, O17). Written, changed and removed by the
+-- orchestrator only (WriteEpicNote, ChangeEpicNote, RemoveEpicNote); it
+-- stays when the switch goes off and goes with the epic. A snapshot does not
+-- carry it.
+entity EpicNote {
+    epic: Epic
+    text: String
+    done: Boolean = false    -- a to-do that is finished; a plain fact never is
+    written_at: Timestamp
+}
+
+-- WaitingItem: something that waits for the operator (orchestrators.allium,
+-- O1). Raised by the orchestrator (OrchestratorPassesOnToTheOperator) and by
+-- the board for an orchestrator that keeps dying; open until resolved
+-- (WaitingItemResolved), and resolved by the store when its task is done or
+-- deleted and when the switch goes off. Never reopened. A snapshot does not
+-- carry it.
+entity WaitingItem {
+    epic: Epic
+    host: Host
+    task: Task?         -- null when it is about the epic as a whole
+    about: String            -- the question or the problem
+    tried: String            -- what the orchestrator already did about it
+    recommendation: String   -- what it would do
+    raised_at: Timestamp
+    resolved_at: Timestamp?
+
+    is_open: resolved_at = null
 }
 
 entity Task {

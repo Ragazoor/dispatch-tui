@@ -1611,6 +1611,9 @@ surface OrchestratorSessionPrompt {
         orchestrator.orchestration.start_rule
         orchestrator.orchestration.limit
         orchestrator.epic.subtree_tasks
+        core/EpicNotes where epic = orchestrator.epic
+        core/WaitingItems where epic = orchestrator.epic and is_open
+        core/OrchestratorLogEntries where epic = orchestrator.epic
 
     @guarantee ThePromptsParts
         -- In this order:
@@ -1627,6 +1630,25 @@ surface OrchestratorSessionPrompt {
         --   the trouble rules with their one retry (O10);
         --   one line per task of the subtree, in board order: id, title,
         --     status, sub-status, ready (backlog only), agent name;
+        --   its memory (orchestrators.allium, O13): every note of the epic,
+        --     open first, each with its id and a done tick; every open item,
+        --     with its id, task, what it is about and what it recommends; and
+        --     the newest config.orchestrator_log_shown log entries, newest
+        --     first, with the tool that reads the rest. Each part says "none"
+        --     when it is empty;
+        --   how it keeps that memory: the tools it writes it with (record
+        --     each answer, raise an item for what only a person can do,
+        --     resolve an item once answered, keep notes, give a reason with
+        --     every start), and that it records a closing summary once the
+        --     epic is done;
+        --   note or learning (O17): a note is a to-do or a fact about the
+        --     epic's work now; what stays true and useful after the epic is
+        --     done is a learning, for the knowledge base;
+        --   the learnings that fit the epic (GivenItsLearnings), ranked as for
+        --     a task by the epic's title and description, the epic as its
+        --     scope and no repository, under the heading a task's prompt
+        --     uses; left out when none fits. No retrieval is recorded: there
+        --     is no task to record it on;
         --   the first-turn check (FirstTurnChecksTheBoard): look for what
         --     happened while no session ran before anything else.
         -- Under start rule everything, every backlog task reads ready.

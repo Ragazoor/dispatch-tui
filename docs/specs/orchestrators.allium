@@ -48,22 +48,32 @@
 -- (OrchestratorSessionPrompt). Built (step 4): the limit. It is a
 -- requires of store-split.allium's RequestDispatch, which every start in an
 -- orchestrated epic passes through, and running_here below is what it
--- counts. OrchestratorStartsATask is built but for its log entry (step 5):
--- the orchestrator starts a task with task_dispatch (mcp-task-tools.allium:
--- DispatchTaskViaMcp), one of the dispatch tools its prompt names.
--- Left by step 3 for the steps that own them, so none is missed:
---   - step 5: the session log entry of StartOrchestratorSession; the
---     WaitingItem of OrchestratorThatKeepsDyingWaitsForTheOperator (until
---     then the board logs it to its own log, and the orchestrator stays
---     down); the closing summary of EndOrchestratorSession; switch-off
---     resolving the epic's WaitingItems; the notes, the open items, the log
---     and the learnings in the prompt (EnoughForAFreshStart,
---     GivenItsLearnings).
+-- counts. OrchestratorStartsATask is built: the orchestrator starts a task
+-- with task_dispatch (mcp-task-tools.allium: DispatchTaskViaMcp), one of the
+-- dispatch tools its prompt names. Built (step 5): the orchestrator's memory.
+-- The entities OrchestratorLogEntry, EpicNote and WaitingItem are in
+-- core.allium; every rule of this spec that writes or ends them is built,
+-- the trouble rules' entries and items excepted (step 7), and so are the
+-- session entries, the keeps-dying item, switch-off resolving items, and
+-- the summary the orchestrator records itself (OrchestratorRecordsItsSummary).
+-- The tools are mcp-task-tools.allium's (OrchestratorMemoryViaMcp,
+-- DispatchTaskViaMcp's reason); the reads epics.allium's GetEpicViaMcp and
+-- mcp-task-tools.allium's GetTaskViaMcp; the prompt's notes, items, log and
+-- learnings dispatch-prompt.allium's OrchestratorSessionPrompt.
+-- Left for the steps that own them, so none is missed:
 --   - step 6: the answer line in the prompt (OrchestratorAnswerLine).
---   - step 9: EpicFinishedNotified from EndOrchestratorSession, and
---     OrchestratorRestartAsked (the orchestrator key on a down
---     orchestrator). Until then switching the orchestrator off and on is the
---     only way out of down.
+--   - step 7: the board asking the orchestrator for its closing summary
+--     before it closes the window of a finished epic (EndOrchestratorSession);
+--     it needs the wake mechanism. Until then the summary is written only
+--     when the orchestrator records it on its own, as its prompt tells it.
+--   - step 9: EpicFinishedNotified from EndOrchestratorSession, the
+--     desktop notification of a raised item, and OrchestratorRestartAsked
+--     (the orchestrator key on a down orchestrator). Until then switching
+--     the orchestrator off and on is the only way out of down.
+-- Undecided, for the operator: learning_search, learning_record and
+-- learning_rate take a task, and an orchestrator has none, so it cannot yet
+-- rate or record a learning as GivenItsLearnings says. See the open question
+-- on the knowledge base, and the review task for the learning system.
 -- Everything else here is decided and not yet built, and every other spec
 -- still describes the system as it runs. Each build step moves the facts it
 -- implements into the specs that own them (the list is under "What the
@@ -130,18 +140,6 @@ use "./store-split.allium" as split
 -- Enumerations
 ------------------------------------------------------------
 
--- The trouble a log entry of kind acted_on_trouble is about.
-enum TroubleKind { stale | crashed | start_failed | conflict }
-
-enum LogEntryKind {
-    started_task     -- it asked for a task to be started
-    answered         -- it answered a task agent's question
-    passed_on        -- it passed a question or a problem to the operator
-    acted_on_trouble -- it pinged, resumed, retried or redirected a task agent
-    session          -- its own session started, resumed or ended
-    summary          -- its closing summary of a finished epic
-}
-
 ------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
@@ -166,40 +164,8 @@ config {
 
 -- An epic's orchestrator on one machine (O11) is core/Orchestrator.
 
--- One line of the epic's log (O13). Append-only.
-entity OrchestratorLogEntry {
-    epic: core/Epic
-    host: core/Host          -- the machine whose orchestrator wrote it
-    at: Timestamp
-    kind: LogEntryKind
-    task: core/Task?         -- the task it is about; an answer always names one
-    text: String             -- one line: what was decided or done, and why
-    question: String?        -- for answered and passed_on: what was asked
-    trouble: TroubleKind?    -- for acted_on_trouble: which trouble
-}
-
--- Something the orchestrator keeps for the epic across its sessions: a
--- decision that binds later tasks, a fact about the epic's work (O13).
-entity EpicNote {
-    epic: core/Epic
-    text: String
-    done: Boolean = false    -- a to-do that is finished; a plain fact never is
-    written_at: Timestamp
-}
-
--- An item that waits for the operator (O1). Open until resolved.
-entity WaitingItem {
-    epic: core/Epic
-    host: core/Host
-    task: core/Task?         -- null when it is about the epic as a whole
-    about: String            -- the question or the problem
-    tried: String            -- what the orchestrator already did about it
-    recommendation: String   -- what it would do
-    raised_at: Timestamp
-    resolved_at: Timestamp?
-
-    is_open: resolved_at = null
-}
+-- The epic's log, its notes and the items that wait for the operator (O13)
+-- are core/OrchestratorLogEntry, core/EpicNote and core/WaitingItem.
 
 ------------------------------------------------------------
 -- Derived facts
@@ -297,12 +263,14 @@ rule SwitchOrchestratorOff {
             not exists o
     ensures: not exists orchestration
     ensures:
-        for item in WaitingItems where epic = epic and is_open:
+        for item in core/WaitingItems where epic = epic and is_open:
             item.resolved_at = now
 
     @guidance
         -- The log and the notes stay with the epic, so a later switch-on
-        -- starts with them. Ready marks stay too. Each board closes the
+        -- starts with them. A re-parent that turns the switch off
+        -- (epics.allium: ReparentingKeepsOneOrchestratorOnAPath) resolves the
+        -- epic's open items the same way. Ready marks stay too. Each board closes the
         -- window of the orchestrator it ran when it sees the row go.
 }
 
@@ -313,11 +281,11 @@ rule DeletingAnEpicRemovesItsOrchestratorMemory {
     when: EpicDeleted(epic)
 
     ensures:
-        for entry in OrchestratorLogEntries where epic = epic: not exists entry
+        for entry in core/OrchestratorLogEntries where epic = epic: not exists entry
     ensures:
-        for note in EpicNotes where epic = epic: not exists note
+        for note in core/EpicNotes where epic = epic: not exists note
     ensures:
-        for item in WaitingItems where epic = epic: not exists item
+        for item in core/WaitingItems where epic = epic: not exists item
 }
 
 -- The ready mark's rules are tasks.allium's (MarkTaskReady, ClearReadyMark,
@@ -390,6 +358,11 @@ rule OrchestratorWindowGone {
 
     ensures: orchestrator.tmux_window = null
     ensures: orchestrator.session_died = true
+    ensures: core/OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: session, task: null, question: null, trouble: null,
+        text: "session died"
+    )
 
     @guidance
         -- The session ended without the board ending it: Claude exited, the
@@ -411,6 +384,12 @@ rule StartOrchestratorSession {
     ensures:
         if orchestrator.session_died: orchestrator.restarted_once = true
     ensures: orchestrator.session_died = false
+    ensures: core/OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: session, task: null, question: null, trouble: null,
+        text: if resumes_conversation(orchestrator): "session resumed"
+              else: "session started"
+    )
 
     @guidance
         -- The start is written to the store before the window opens, in one
@@ -432,8 +411,8 @@ rule StartOrchestratorSession {
         -- otherwise, and always after a session that died: the death may
         -- have been the conversation's. Either way it gets the prompt (OrchestratorPrompt), so
         -- a fresh start loses nothing that matters (O13).
-        --
-        -- The session log entry (kind session) comes with the log, in step 5.
+        -- resumes_conversation(o) is that choice: the board makes it before it
+        -- writes the start, and the start's log entry says which it was.
 }
 
 rule OrchestratorThatKeepsDyingWaitsForTheOperator {
@@ -442,7 +421,7 @@ rule OrchestratorThatKeepsDyingWaitsForTheOperator {
     requires: orchestrator.host = core/local_host()
     requires: not orchestrator.is_live
     requires: orchestrator.restarted_once and session_died(orchestrator)
-    requires: not exists WaitingItem{epic: orchestrator.epic, host: orchestrator.host, task: null, resolved_at: null}
+    requires: not exists core/WaitingItem{epic: orchestrator.epic, host: orchestrator.host, task: null, resolved_at: null}
 
     ensures: WaitingItemRaised(
         epic: orchestrator.epic, host: orchestrator.host, task: null,
@@ -454,6 +433,11 @@ rule OrchestratorThatKeepsDyingWaitsForTheOperator {
     @guidance
         -- It then shows as down. The operator starts it again with the
         -- orchestrator key (OrchestratorKey), which clears restarted_once.
+        -- The board asks the store on every tick that finds it down, and the
+        -- store raises the item only when no open epic-wide item of this
+        -- machine is there, in the same write, so the item is raised once per
+        -- bout however many ticks or boards ask. An item resolved while the
+        -- orchestrator is still down is raised again at the next tick.
 }
 
 rule OperatorRestartsADownOrchestrator {
@@ -501,13 +485,14 @@ rule EndOrchestratorSession {
 
     ensures: orchestrator.tmux_window = null
     ensures: orchestrator.session_died = false
+    ensures: core/OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: session, task: null, question: null, trouble: null,
+        text: "session ended"
+    )
     ensures:
         if orchestrator.epic.status = done:
-            OrchestratorLogEntry.created(
-                epic: orchestrator.epic, host: orchestrator.host, at: now,
-                kind: summary, task: null, question: null, trouble: null,
-                text: closing_summary(orchestrator)
-            )
+            OrchestratorAskedForItsSummary(orchestrator)
             EpicFinishedNotified(orchestrator.epic)
 
     @guidance
@@ -515,15 +500,38 @@ rule EndOrchestratorSession {
         -- epic that is not done but has nothing open, such as a feed with
         -- nothing to handle. The board closes the window. A task that
         -- reopens or arrives makes the session wanted again on the next
-        -- check. The closing summary, asked of the orchestrator before its
-        -- window closes, comes with the log in step 5; the notification
-        -- with step 9.
+        -- check. On a finished epic the board asks the orchestrator for its
+        -- closing summary before it closes the window, and the orchestrator
+        -- records it (OrchestratorRecordsItsSummary).
+}
+
+rule OrchestratorRecordsItsSummary {
+    when: OrchestratorSummaryRecorded(orchestrator, text)
+
+    requires: orchestrator.epic.status = done
+    requires: text != ""
+
+    ensures: core/OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: summary, task: null, question: null, trouble: null,
+        text: text
+    )
+
+    @guidance
+        -- What the epic delivered, what is left open, and the notes that look
+        -- worth keeping as learnings (O17). Its prompt tells the orchestrator
+        -- to record it once it sees the epic done; the board's ask
+        -- (OrchestratorAskedForItsSummary) is the reminder. A summary is
+        -- refused while the epic is not done, so no tool writes a free line
+        -- into the log (OnlyTheOrchestratorWritesItsLog). Decided by the
+        -- epic's acting orchestrator while the operator was away; open to the
+        -- operator's review.
 }
 
 -- == Starting tasks ==
 
 rule OrchestratorStartsATask {
-    when: OrchestratorStartsTask(orchestrator, task)
+    when: OrchestratorStartsTask(orchestrator, task, reason)
 
     let orchestration = orchestrator.orchestration
 
@@ -532,16 +540,17 @@ rule OrchestratorStartsATask {
     requires: covering(task) = orchestration
     requires: task.status = backlog
     requires: counts_as_ready(task)
+    requires: reason != ""
 
     ensures: split/DispatchRequested(
         task: task,
         requester: orchestrator.host,
         origin: mcp
     )
-    ensures: OrchestratorLogEntry.created(
+    ensures: core/OrchestratorLogEntry.created(
         epic: orchestrator.epic, host: orchestrator.host, at: now,
         kind: started_task, task: task, question: null, trouble: null,
-        text: start_reason(orchestrator, task)
+        text: reason
     )
 
     @guidance
@@ -568,6 +577,10 @@ rule OrchestratorStartsATask {
         -- It starts work when it wakes (OrchestratorWakeEvents) and a slot is
         -- free. A task that is not ready is never started; the orchestrator
         -- may tell the operator that one looks unblocked.
+        --
+        -- The reason is one line on why this task, now. The log entry is
+        -- written in the store write that takes the request, so a refused
+        -- start leaves no entry and a taken one always has its entry.
 }
 
 -- The limit (O7) is store-split.allium's: a requires of RequestDispatch,
@@ -580,7 +593,7 @@ rule OrchestratorAnswersAnAgent {
 
     requires: covering(task) = orchestrator.orchestration
 
-    ensures: OrchestratorLogEntry.created(
+    ensures: core/OrchestratorLogEntry.created(
         epic: orchestrator.epic, host: orchestrator.host, at: now,
         kind: answered, task: task, question: question, trouble: null,
         text: answer_line(answer, reason)
@@ -595,12 +608,12 @@ rule OrchestratorAnswersAnAgent {
 rule OrchestratorPassesOnToTheOperator {
     when: WaitingItemRaised(epic, host, task?, about, tried, recommendation)
 
-    ensures: WaitingItem.created(
+    ensures: core/WaitingItem.created(
         epic: epic, host: host, task: task,
         about: about, tried: tried, recommendation: recommendation,
         raised_at: now, resolved_at: null
     )
-    ensures: OrchestratorLogEntry.created(
+    ensures: core/OrchestratorLogEntry.created(
         epic: epic, host: host, at: now,
         kind: passed_on, task: task, question: about, trouble: null,
         text: recommendation
@@ -632,8 +645,23 @@ rule FinishedTaskResolvesItsItems {
     when: task: core/Task.status transitions_to done
 
     ensures:
-        for item in WaitingItems where task = task and is_open:
+        for item in core/WaitingItems where task = task and is_open:
             item.resolved_at = now
+}
+
+rule DeletedTaskResolvesItsItems {
+    when: TaskRowDeleted(task)
+
+    ensures:
+        for item in core/WaitingItems where task = task and is_open:
+            item.resolved_at = now
+
+    @guidance
+        -- Every delete of a task row: a person's delete (tasks.allium:
+        -- DeleteTask), a feed's reconcile, an epic's delete. The item keeps naming the task
+        -- id, so the epic's history still reads. Decided by the epic's
+        -- acting orchestrator while the operator was away; open to the
+        -- operator's review.
 }
 
 -- == Notes ==
@@ -643,7 +671,7 @@ rule WriteEpicNote {
 
     requires: text != ""
 
-    ensures: EpicNote.created(epic: epic, text: text, written_at: now)
+    ensures: core/EpicNote.created(epic: epic, text: text, written_at: now)
 
     @guidance
         -- What the orchestrator would otherwise carry in its head and repeat
@@ -710,7 +738,7 @@ rule AgentIsStale {
     requires: live_orchestrator_for(task) != null
 
     ensures: AgentPinged(live_orchestrator_for(task), task)
-    ensures: OrchestratorLogEntry.created(
+    ensures: core/OrchestratorLogEntry.created(
         epic: live_orchestrator_for(task).epic,
         host: live_orchestrator_for(task).host, at: now,
         kind: acted_on_trouble, task: task, question: null,
@@ -745,7 +773,7 @@ rule AgentCrashed {
     ensures:
         if not already_retried(task, crashed):
             TaskResumeRequested(task)
-            OrchestratorLogEntry.created(
+            core/OrchestratorLogEntry.created(
                 epic: orchestrator.epic, host: orchestrator.host, at: now,
                 kind: acted_on_trouble, task: task, question: null,
                 trouble: crashed, text: "resumed the agent after a crash"
@@ -770,7 +798,7 @@ rule StartFailed {
 
     ensures:
         if not already_retried(request.task, start_failed):
-            OrchestratorLogEntry.created(
+            core/OrchestratorLogEntry.created(
                 epic: orchestrator.epic, host: orchestrator.host, at: now,
                 kind: acted_on_trouble, task: request.task, question: null,
                 trouble: start_failed, text: request.reason
@@ -802,7 +830,7 @@ rule WrapUpConflict {
     ensures:
         if not already_retried(task, conflict):
             AgentToldToResolveConflict(orchestrator, task)
-            OrchestratorLogEntry.created(
+            core/OrchestratorLogEntry.created(
                 epic: orchestrator.epic, host: orchestrator.host, at: now,
                 kind: acted_on_trouble, task: task, question: null,
                 trouble: conflict, text: "told the agent to resolve the conflict and wrap up again"
@@ -829,7 +857,7 @@ rule LongWaitInReview {
     -- A review the operator has already given waits on the other author.
     requires: not waits_on_someone_else(task)
     requires: live_orchestrator_for(task) != null
-    requires: not exists WaitingItem{task: task, resolved_at: null}
+    requires: not exists core/WaitingItem{task: task, resolved_at: null}
 
     ensures: WaitingItemRaised(
         epic: live_orchestrator_for(task).epic,
@@ -972,9 +1000,9 @@ surface OrchestratorPrompt {
         orchestrator.orchestration.start_rule
         orchestrator.orchestration.limit
         orchestrator.epic.subtree_tasks
-        EpicNotes where epic = orchestrator.epic
-        WaitingItems where epic = orchestrator.epic and is_open
-        OrchestratorLogEntries where epic = orchestrator.epic
+        core/EpicNotes where epic = orchestrator.epic
+        core/WaitingItems where epic = orchestrator.epic and is_open
+        core/OrchestratorLogEntries where epic = orchestrator.epic
 
     @guarantee SaysWhatItIs
         -- That it orchestrates this epic and does none of its work (O1, O2),
@@ -1039,8 +1067,9 @@ surface OrchestratorMcpTools {
         TaskMarkedReady(task, marked_by, agent_name?)
         TaskReadyCleared(task)
         -- The orchestrator's own writes.
-        OrchestratorStartsTask(orchestrator, task)
+        OrchestratorStartsTask(orchestrator, task, reason)
         OrchestratorAnswered(orchestrator, task, question, answer, reason)
+        OrchestratorSummaryRecorded(orchestrator, text)
         WaitingItemRaised(epic, host, task?, about, tried, recommendation)
         WaitingItemResolved(item)
         EpicNoteWritten(epic, text)
@@ -1058,8 +1087,10 @@ surface OrchestratorMcpTools {
         -- that covers it by name, and the log entries that name the task.
 
     @guarantee OnlyTheOrchestratorWritesItsLog
-        -- A start, an answer and an item raised write their own log entry.
-        -- No tool appends a free line to the log or edits one.
+        -- A start, an answer, an item raised and a summary write their own
+        -- log entry, stamped with the calling orchestrator's epic and host.
+        -- No tool appends a free line to the log or edits one. The tools are
+        -- mcp-task-tools.allium's (OrchestratorMemoryViaMcp).
 }
 
 -- The board's third lens (O14).
@@ -1069,7 +1100,7 @@ surface OrchestratorView {
     context orchestrator: core/Orchestrator
 
     let epic = orchestrator.epic
-    let open_items = WaitingItems where epic = epic and is_open
+    let open_items = core/WaitingItems where epic = epic and is_open
     let state = orchestrator_state(orchestrator)
     let column = orchestrator_column(orchestrator)
 

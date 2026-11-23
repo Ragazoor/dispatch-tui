@@ -665,8 +665,17 @@ rule GetEpicViaMcp {
         -- start rule <rule>, limit <n>", with " (default)" after a limit the
         -- epic does not set. An epic under one reads "Orchestrator: covered
         -- by epic <id> (<title>)". An epic no orchestrator covers has no such
-        -- line. Each machine's orchestrator, the open items, the notes and
-        -- the log come with their own rows, in later steps.
+        -- line. On an epic whose own switch is on, the lines that follow
+        -- are each machine's orchestrator ("Orchestrator <name> on <host>:
+        -- <state>", state as orchestrators.allium's orchestrator_state), the
+        -- open items ("Waiting for the operator:", one line each with its
+        -- id, its task when it has one, what it is about, what was tried and
+        -- the recommendation), the notes ("Notes:", open ones first, each
+        -- with its id and [done] when ticked) and the newest
+        -- config.orchestrator_log_shown log entries ("Log:", newest first,
+        -- as orchestrator-log_search renders them), with a last line naming
+        -- orchestrator-log_search when there are more. A heading with nothing
+        -- under it is left out.
 }
 
 rule ListEpicsViaMcp {

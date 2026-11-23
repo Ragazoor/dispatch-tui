@@ -4,7 +4,10 @@
 -- Scope: the dispatch MCP server's task tools (task_create, task_search,
 --        task_update, usage_read, task_dispatch, task_resume,
 --        session_wrap-up, session_exit, verify-command_set, review-command_read,
---        review-command_set), the
+--        review-command_set), an orchestrator's memory tools
+--        (orchestrator-answer_record, orchestrator-summary_record,
+--        orchestrator-log_search, waiting-item_create, waiting-item_resolve,
+--        epic-note_create, epic-note_update, epic-note_delete), the
 --        CLI plan attachment, the agent port that serves them, the standard
 --        every tool description and agent-facing skill is held to, and the
 --        read-only context resources (resources/list, resources/read and their
@@ -1062,9 +1065,13 @@ rule GetTaskViaMcp {
         -- task whose covering orchestration starts everything reads
         -- "Ready: no mark; epic <id> starts every backlog task".
         -- [Orchestrated by] renders when an epic on the task's epic chain has
-        -- its orchestrator switched on: "Orchestrated by: epic <id> (<title>)".
-        -- The orchestrator's name and the log entries that name the task come
-        -- with the orchestrator's own rows, in a later step.
+        -- its orchestrator switched on: "Orchestrated by: epic <id> (<title>)",
+        -- followed by ", orchestrator <name> on <host>" for each machine's
+        -- orchestrator row.
+        -- [Orchestrator log] renders when log entries name the task: the
+        -- newest config.orchestrator_log_shown of them, newest first, one
+        -- line each as orchestrator-log_search renders it, and a last line
+        -- naming that tool when there are more.
         -- Model always renders, as the alias the agent launches on: task.model,
         -- or "opus (default)" when it is null. A missing line would read as
         -- "no model applies", and a null model is a concrete one
@@ -1431,9 +1438,13 @@ rule QueryUsageViaMcp {
 }
 
 rule DispatchTaskViaMcp {
-    when: McpDispatchTask(task)
+    when: McpDispatchTask(caller_identity, task, reason?)
 
     requires: task.status = backlog
+    -- An orchestrator gives a reason with every start, and nobody else gives
+    -- one (orchestrators.allium: OrchestratorStartsATask).
+    requires: caller_identity.kind = orchestrator or reason = null
+    requires: caller_identity.kind != orchestrator or reason != null
 
     -- No mode: the module derives it from the task (store-split.allium:
     -- RequestDispatch), by the same rule dispatch.allium's two entry rules
@@ -1466,6 +1477,14 @@ rule DispatchTaskViaMcp {
         -- on this machine, is refused with that reason instead. An
         -- orchestrator starts its epic's tasks with this tool, held to the
         -- same limit (orchestrators.allium: OrchestratorStartsATask).
+        --
+        -- reason is the orchestrator's one line on why this task, now. From an
+        -- orchestrator caller it is required, and the store writes it as the
+        -- epic's started_task log entry in the write that takes the request:
+        -- a refused start leaves no entry. From any other caller it is
+        -- refused with an error saying only an orchestrator gives a reason,
+        -- and a missing reason from an orchestrator is refused the same way,
+        -- before anything is written.
         --
         -- The call then waits on the request row, for at most
         -- config.dispatch_task_wait_cap, and answers by the row's state:
@@ -1546,6 +1565,72 @@ rule DispatchTaskViaMcp {
         -- caller resuming a task is about to call task_dispatch, so that is
         -- where it reads the story; task_update's `status` argument carries
         -- no copy to keep in step.
+}
+
+-- An orchestrator's memory (orchestrators.allium, O13): the log, the notes and
+-- the items that wait for the operator. Every write but waiting-item_resolve
+-- is the orchestrator's own: its epic and host come from its caller identity
+-- (orch/ItsOwnCallerIdentity), never from an argument, and any other caller
+-- is refused with an error saying the tool is an orchestrator's. Decided by
+-- the epic's acting orchestrator while the operator was away; open to the
+-- operator's review.
+rule OrchestratorMemoryViaMcp {
+    when: McpOrchestratorAnswerRecord(caller_identity, task, question, answer, reason)
+       or McpOrchestratorSummaryRecord(caller_identity, text)
+       or McpWaitingItemCreate(caller_identity, task, about, tried, recommendation)
+       or McpEpicNoteCreate(caller_identity, text)
+       or McpEpicNoteUpdate(caller_identity, note, text, done)
+       or McpEpicNoteDelete(caller_identity, note)
+
+    requires: caller_identity.kind = orchestrator
+
+    ensures: OrchestratorMemoryWritten(caller_identity)
+
+    @guidance
+        -- orchestrator-answer_record(task_id, question, answer, reason):
+        -- orch/OrchestratorAnswered. The task must be one its epic covers.
+        -- The answer itself goes to the agent as a message; this records it.
+        -- orchestrator-summary_record(text): orch/OrchestratorSummaryRecorded,
+        -- refused while the epic is not done.
+        -- waiting-item_create(task_id?, about, tried, recommendation):
+        -- orch/WaitingItemRaised, which also writes the passed_on entry.
+        -- epic-note_create(text), epic-note_update(note_id, text?, done?),
+        -- epic-note_delete(note_id): orch/WriteEpicNote, ChangeEpicNote,
+        -- RemoveEpicNote, on its own epic's notes only. An update with
+        -- neither text nor done is refused. epic-note_delete is destructive:
+        -- nothing brings a note back.
+        -- Each reply names what was written by id, so the caller can update
+        -- or resolve it later. Everyone reads the notes and items through
+        -- epic_search's one-epic form (epics.allium: GetEpicViaMcp).
+}
+
+rule ResolveWaitingItemViaMcp {
+    when: McpWaitingItemResolve(item)
+
+    ensures: WaitingItemResolved(item)
+
+    @guidance
+        -- waiting-item_resolve(item_id), from any caller: the operator's own
+        -- session resolves an item as the board's resolve key does, and the
+        -- orchestrator resolves one the operator has answered. Resolving an
+        -- item that is already resolved changes nothing and says so
+        -- (idempotent).
+}
+
+rule ReadOrchestratorLogViaMcp {
+    when: McpOrchestratorLogSearch(epic, task, before, limit)
+
+    ensures: OrchestratorLogRead(epic)
+
+    @guidance
+        -- orchestrator-log_search(epic_id, task_id?, before?, limit?): the
+        -- whole log of an orchestrated epic, newest first, read-only, from
+        -- any caller. task_id keeps the entries that name that task. before
+        -- is an entry id: only older entries are listed, which is how the
+        -- next page is read. limit defaults to 50. One line per entry: id,
+        -- time, host, kind, the task when it names one, the question when it
+        -- has one, the trouble when it has one, and the text. A last line
+        -- gives the before value of the next page when rows were cut.
 }
 
 rule ResumeTaskViaMcp {
@@ -2407,7 +2492,15 @@ surface McpTaskTools {
                       archived?, updated_after?, updated_before?,
                       completed_after?, completed_before?)
         McpQueryUsage(category?, actor?, since?, limit?)
-        McpDispatchTask(task)
+        McpDispatchTask(caller_identity, task, reason?)
+        McpOrchestratorAnswerRecord(caller_identity, task, question, answer, reason)
+        McpOrchestratorSummaryRecord(caller_identity, text)
+        McpOrchestratorLogSearch(epic, task?, before?, limit?)
+        McpWaitingItemCreate(caller_identity, task?, about, tried, recommendation)
+        McpWaitingItemResolve(item)
+        McpEpicNoteCreate(caller_identity, text)
+        McpEpicNoteUpdate(caller_identity, note, text?, done?)
+        McpEpicNoteDelete(caller_identity, note)
         McpResumeTask(task, message?)
         McpWrapUp(task, action)
         McpExitSession(task, token?, action?, pr_url?)
