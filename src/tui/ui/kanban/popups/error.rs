@@ -12,27 +12,6 @@ use crate::palette::{FG, MUTED, RED};
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block};
 use crate::tui::App;
 
-/// The rows a line takes when wrapped at word boundaries to `width`, as the
-/// popup's paragraph wraps it. A word longer than the width is split.
-fn wrapped_rows(line: &str, width: usize) -> usize {
-    let mut rows = 1;
-    let mut used = 0;
-    for word in line.split_whitespace() {
-        let len = word.chars().count();
-        let needed = if used == 0 { len } else { used + 1 + len };
-        if needed <= width {
-            used = needed;
-        } else if len <= width {
-            rows += usize::from(used > 0);
-            used = len;
-        } else {
-            rows += usize::from(used > 0) + (len - 1) / width;
-            used = (len - 1) % width + 1;
-        }
-    }
-    rows
-}
-
 pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &App, area: Rect) {
     let Some(error_msg) = app.error_popup() else {
         return;
@@ -46,23 +25,11 @@ pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &Ap
     } else {
         (area.width * 60 / 100).clamp(30, 60)
     };
-    let inner_width = usize::from(popup_width.saturating_sub(2)).max(1);
-    let message_rows: usize = error_msg
-        .lines()
-        .map(|l| wrapped_rows(l, inner_width))
-        .sum();
-    // Border (2), blank lines (2), the dismiss hint (1).
-    let wanted = u16::try_from(message_rows + 5).unwrap_or(u16::MAX);
-    let popup_height = wanted.clamp(7, area.height.max(7));
-    let popup_area = centered_rect(area, popup_width, popup_height);
-
-    let block = titled_block(RED, BorderType::Thick, " Error ".to_string());
-
     let mut text = vec![Line::from("")];
     text.extend(
         error_msg
             .lines()
-            .map(|l| Line::from(Span::styled(l.to_string(), Style::default().fg(FG)))),
+            .map(|l| Line::from(Span::styled(l, Style::default().fg(FG)))),
     );
     text.extend([
         Line::from(""),
@@ -72,8 +39,6 @@ pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &Ap
         )),
     ]);
 
-    let inner = open_overlay(frame, popup_area, block);
-
     let paragraph = Paragraph::new(text)
         .wrap(Wrap { trim: true })
         .alignment(if multi_line {
@@ -81,6 +46,15 @@ pub(in crate::tui::ui::kanban) fn render_error_popup(frame: &mut Frame, app: &Ap
         } else {
             Alignment::Center
         });
+    // As tall as the wrapped text plus the border, as ratatui wraps it.
+    let wanted = paragraph.line_count(popup_width.saturating_sub(2).max(1)) + 2;
+    let popup_height = u16::try_from(wanted)
+        .unwrap_or(u16::MAX)
+        .clamp(7, area.height.max(7));
+    let popup_area = centered_rect(area, popup_width, popup_height);
+
+    let block = titled_block(RED, BorderType::Thick, " Error ".to_string());
+    let inner = open_overlay(frame, popup_area, block);
 
     frame.render_widget(paragraph, inner);
 }

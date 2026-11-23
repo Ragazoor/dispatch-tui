@@ -542,9 +542,8 @@ impl KeyBinding {
 mod overrides;
 mod table;
 pub use overrides::{
-    is_key_name, is_typed_key, key_not_allowed_in, key_override_path, load_key_table,
-    merge_overrides, namespace_takes_text, suggest_key_name, table_clashes, Clash, KeyLoadError,
-    KeyOverrideProblem, KeyTableLoad, KeyTableReader, KEY_OVERRIDE_FILE_NAME, NAMED_KEYS,
+    is_key_name, load_key_table, KeyLoadError, KeyOverrideProblem, KeyTableLoad, KeyTableReader,
+    KEY_OVERRIDE_FILE_NAME,
 };
 pub use table::KEY_BINDINGS;
 
@@ -578,12 +577,7 @@ pub fn lookup<'a>(
 /// the other ("gg"). A two-character name that is a named key ("Up", "F1" to
 /// "F9") is that key, never a chord.
 pub fn is_chord(key: &str) -> bool {
-    let mut chars = key.chars();
-    let (Some(first), Some(second), None) = (chars.next(), chars.next(), chars.next()) else {
-        return false;
-    };
-    let named = key == "Up" || (first == 'F' && ('1'..='9').contains(&second));
-    !named
+    key.chars().count() == 2 && !overrides::NAMED_KEYS.contains(&key)
 }
 
 /// Whether a press named `key` is the first half of a chord: some row of

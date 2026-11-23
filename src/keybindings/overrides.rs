@@ -144,12 +144,6 @@ pub fn key_not_allowed_in(ns: KeyNamespace, key: &str) -> Option<String> {
 /// The canonical spelling of a near-miss key name ("ctrl+d" is "Ctrl+D",
 /// "escape" is "Esc"), or `None` when there is no obvious one.
 pub fn suggest_key_name(k: &str) -> Option<String> {
-    if let Some((_, key)) = TERMINAL_ALIASES
-        .iter()
-        .find(|(alias, _)| alias.eq_ignore_ascii_case(k))
-    {
-        return Some((*key).to_string());
-    }
     let parts: Vec<&str> = if k.len() > 1 && k.ends_with('+') {
         // "Ctrl++": the key is the plus sign itself.
         let head = &k[..k.len() - 1];
@@ -277,9 +271,16 @@ pub struct KeyLoadError {
     pub action: Option<String>,
     pub context: Option<String>,
     pub message: String,
-    /// The message as the board's popup shows it: a long list of valid names
-    /// cut short. Equal to `message` for every other message.
-    pub popup_message: String,
+    /// The message as the board's popup shows it, when that differs: a long
+    /// list of valid names cut short. See [`KeyLoadError::popup_text`].
+    pub popup_message: Option<String>,
+}
+
+impl KeyLoadError {
+    /// The message as the board's popup shows it.
+    pub fn popup_text(&self) -> &str {
+        self.popup_message.as_deref().unwrap_or(&self.message)
+    }
 }
 
 /// Which process is loading the table (`KeyTableReader`).
@@ -313,7 +314,7 @@ impl KeyTableLoad {
         );
         for e in self.errors.iter().take(POPUP_ERRORS) {
             text.push_str("\n- ");
-            text.push_str(&e.popup_message);
+            text.push_str(e.popup_text());
         }
         if self.errors.len() > POPUP_ERRORS {
             text.push_str(&format!(
@@ -329,35 +330,29 @@ impl KeyTableLoad {
 /// which holds the whole list.
 const POPUP_LIST_NAMES: usize = 5;
 
-/// A message that ends in a list of valid names: whole for the log, and for
-/// the popup with the list cut after [`POPUP_LIST_NAMES`] names.
-fn listing(head: &str, names: &[String]) -> (String, String) {
+/// A message that ends in a list of valid names: whole for the log, and, when
+/// the list is longer than [`POPUP_LIST_NAMES`], cut short for the popup.
+fn listing(head: &str, names: &[String]) -> (String, Option<String>) {
     let whole = format!("{head}{}", names.join(", "));
-    if names.len() <= POPUP_LIST_NAMES {
-        return (whole.clone(), whole);
-    }
-    let short = format!(
-        "{head}{}, … and {} more (all are listed in app.log)",
-        names[..POPUP_LIST_NAMES].join(", "),
-        names.len() - POPUP_LIST_NAMES
-    );
+    let short = (names.len() > POPUP_LIST_NAMES).then(|| {
+        format!(
+            "{head}{}, … and {} more (all are listed in app.log)",
+            names[..POPUP_LIST_NAMES].join(", "),
+            names.len() - POPUP_LIST_NAMES
+        )
+    });
     (whole, short)
 }
 
 /// How many refusals the popup lists before it points to the log.
 const POPUP_ERRORS: usize = 3;
 
-/// The override file of a data directory.
-pub fn key_override_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(KEY_OVERRIDE_FILE_NAME)
-}
-
 /// Build this process's table (`LoadKeyTable`): the default rows with the
 /// accepted entries of `<data_dir>/keybindings.json` applied. A missing file
 /// is the default table. Every error is logged (`KeyLoadErrorsAreLogged`).
 /// The table is leaked: it is built once per process and lives as long as it.
 pub fn load_key_table(data_dir: &Path, reader: KeyTableReader) -> KeyTableLoad {
-    let file = key_override_path(data_dir);
+    let file = data_dir.join(KEY_OVERRIDE_FILE_NAME);
     let (table, errors) = match std::fs::read_to_string(&file) {
         Ok(text) => merge_overrides(&text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (KEY_BINDINGS, Vec::new()),
@@ -391,8 +386,8 @@ fn file_unreadable(message: String) -> KeyLoadError {
         namespace: None,
         action: None,
         context: None,
-        popup_message: message.clone(),
         message,
+        popup_message: None,
     }
 }
 
@@ -404,14 +399,14 @@ struct Entry {
     /// The row of `KEY_BINDINGS` the entry names, once resolved.
     row: Option<usize>,
     keys: &'static [&'static str],
-    /// The problem, its message and the message as the popup shows it.
-    problem: Option<(KeyOverrideProblem, String, String)>,
+    /// The problem, its message and the popup's shorter form of it, if any.
+    problem: Option<(KeyOverrideProblem, String, Option<String>)>,
 }
 
 impl Entry {
     fn refuse(&mut self, problem: KeyOverrideProblem, message: String) {
         if self.problem.is_none() {
-            self.problem = Some((problem, message.clone(), message));
+            self.problem = Some((problem, message, None));
         }
     }
 
@@ -478,11 +473,7 @@ const ECHO_CHARS: usize = 40;
 /// Text from the file as a message repeats it: cut past [`ECHO_CHARS`] so a
 /// long entry cannot crowd the popup.
 fn echo(text: &str) -> String {
-    if text.chars().count() <= ECHO_CHARS {
-        return text.to_string();
-    }
-    let head: String = text.chars().take(ECHO_CHARS).collect();
-    format!("{head}…")
+    crate::text::truncate(text, ECHO_CHARS + 1)
 }
 
 /// A row as an error names it: namespace, action and any context literal.
@@ -759,32 +750,28 @@ fn apply(entries: &[Entry]) -> Vec<KeyBinding> {
 /// until the table has none; return that table.
 fn refuse_clashes(entries: &mut [Entry]) -> &'static [KeyBinding] {
     loop {
+        if entries
+            .iter()
+            .all(|e| e.problem.is_some() || e.row.is_none())
+        {
+            return KEY_BINDINGS;
+        }
         let rows = apply(entries);
         let clashes = table_clashes(&rows);
         if clashes.is_empty() {
-            if entries
-                .iter()
-                .all(|e| e.problem.is_some() || e.row.is_none())
-            {
-                return KEY_BINDINGS;
-            }
             return Box::leak(rows.into_boxed_slice());
         }
-        let mut refused: Vec<(usize, KeyOverrideProblem, String)> = Vec::new();
+        let mut refused_any = false;
         for clash in &clashes {
             let (problem, message) = clash.describe(&rows);
             for row in [clash.a, clash.b] {
-                refused.push((row, problem, message.clone()));
-            }
-        }
-        let mut refused_any = false;
-        for (row, problem, message) in refused {
-            if let Some(e) = entries
-                .iter_mut()
-                .find(|e| e.problem.is_none() && e.row == Some(row))
-            {
-                e.refuse(problem, message);
-                refused_any = true;
+                if let Some(e) = entries
+                    .iter_mut()
+                    .find(|e| e.problem.is_none() && e.row == Some(row))
+                {
+                    e.refuse(problem, message.clone());
+                    refused_any = true;
+                }
             }
         }
         if !refused_any {

@@ -577,10 +577,11 @@ fn the_popup_cuts_only_a_long_list_of_names() {
                 KeyOverrideProblem::UnknownNamespace | KeyOverrideProblem::UnknownAction
             );
             if listing {
-                assert!(e.popup_message.contains("app.log"), "{}", e.popup_message);
-                assert!(e.popup_message.len() < e.message.len());
+                let short = e.popup_message.as_deref().unwrap_or_default();
+                assert!(short.contains("app.log"), "{short}");
+                assert!(short.len() < e.message.len());
             } else {
-                assert_eq!(e.popup_message, e.message, "{}", problem.as_str());
+                assert_eq!(e.popup_message, None, "{}", problem.as_str());
             }
         }
     }

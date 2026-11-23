@@ -547,6 +547,7 @@ impl App {
         &self.input.mode
     }
     /// The table this board looks keys up in.
+    #[cfg(test)]
     pub fn key_table(&self) -> &'static [crate::keybindings::KeyBinding] {
         self.key_table
     }
