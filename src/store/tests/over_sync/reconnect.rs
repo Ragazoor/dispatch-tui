@@ -378,6 +378,19 @@ struct FlakyAdopt {
     fail: std::sync::atomic::AtomicBool,
     /// Fail the stored-identity read the session makes after `connect`.
     fail_read: std::sync::atomic::AtomicBool,
+    /// Fail the host-id read the session makes before it subscribes.
+    fail_host: std::sync::atomic::AtomicBool,
+}
+
+impl FlakyAdopt {
+    async fn new() -> Self {
+        Self {
+            inner: store().await,
+            fail: std::sync::atomic::AtomicBool::new(false),
+            fail_read: std::sync::atomic::AtomicBool::new(false),
+            fail_host: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -386,6 +399,9 @@ impl HostStore for FlakyAdopt {
         self.inner.host_id()
     }
     async fn ensure_host_identity(&self) -> anyhow::Result<(String, Option<String>)> {
+        if self.fail_host.load(std::sync::atomic::Ordering::SeqCst) {
+            anyhow::bail!("host file unreadable");
+        }
         self.inner.ensure_host_identity().await
     }
     async fn rename_host(&self, label: &str) -> anyhow::Result<()> {
@@ -440,11 +456,8 @@ impl SubscriptionStore for FlakyAdopt {
 /// subscribes.
 #[tokio::test]
 async fn an_error_after_accept_is_an_outage_that_is_retried() {
-    let db = FlakyAdopt {
-        inner: store().await,
-        fail: std::sync::atomic::AtomicBool::new(true),
-        fail_read: std::sync::atomic::AtomicBool::new(false),
-    };
+    let db = FlakyAdopt::new().await;
+    db.fail.store(true, std::sync::atomic::Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
         accepted("user-a", "token-a"),
@@ -473,11 +486,9 @@ async fn an_error_after_accept_is_an_outage_that_is_retried() {
 /// the session staying `Connecting` over a live socket.
 #[tokio::test]
 async fn a_failed_identity_read_after_connect_closes_the_connection() {
-    let db = FlakyAdopt {
-        inner: store().await,
-        fail: std::sync::atomic::AtomicBool::new(false),
-        fail_read: std::sync::atomic::AtomicBool::new(true),
-    };
+    let db = FlakyAdopt::new().await;
+    db.fail_read
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let connector = ScriptedConnector::new(vec![
         accepted("user-a", "token-a"),
         accepted("user-a", "token-a"),
@@ -497,5 +508,107 @@ async fn a_failed_identity_read_after_connect_closes_the_connection() {
     assert_eq!(
         session.step(&db, due).await.unwrap(),
         StepOutcome::Connected
+    );
+}
+
+// -- an accepted connection that fails to come up --------------------------
+//
+// `sync.allium: AnAppliedSubscriptionEndsTheOutage`. Acceptance alone does not
+// end an outage: a store that accepts and then fails the come-up (adoption,
+// the host-id read, the subscription) backs off like one that refuses, rather
+// than being retried every RECONNECT_BACKOFF_BASE for as long as it lasts.
+
+/// Run `cycles` failed come-ups back to back, each retried the moment it is
+/// due, and answer the wait the board chose before each retry.
+async fn waits_over_failed_come_ups(
+    session: &mut SyncSession,
+    db: &dyn crate::sync::SyncStore,
+    cycles: usize,
+) -> Vec<Duration> {
+    let mut now = Instant::now();
+    let mut waits = Vec::new();
+    for _ in 0..cycles {
+        assert_eq!(session.step(db, now).await.unwrap(), StepOutcome::Failed);
+        assert_eq!(session.status(), ConnectionStatus::Disconnected);
+        let due = session.connection().next_attempt_at().unwrap();
+        waits.push(due - now);
+        now = due;
+        assert_eq!(session.step(db, now).await.unwrap(), StepOutcome::Retrying);
+    }
+    waits
+}
+
+fn growing_waits() -> Vec<Duration> {
+    vec![
+        RECONNECT_BACKOFF_BASE,
+        RECONNECT_BACKOFF_BASE * 2,
+        RECONNECT_BACKOFF_BASE * 4,
+    ]
+}
+
+#[tokio::test]
+async fn a_store_that_keeps_refusing_the_subscription_is_backed_off() {
+    let db = store().await;
+    let mut session = SyncSession::open("store.example", RefusingSubscriber::new());
+
+    assert_eq!(
+        waits_over_failed_come_ups(&mut session, &db, 3).await,
+        growing_waits(),
+        "an accepted connection whose subscription is refused is the same outage, growing"
+    );
+}
+
+#[tokio::test]
+async fn an_adoption_that_keeps_failing_is_backed_off() {
+    let db = FlakyAdopt::new().await;
+    db.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 3]);
+    let mut session = SyncSession::open("store.example", connector);
+
+    assert_eq!(
+        waits_over_failed_come_ups(&mut session, &db, 3).await,
+        growing_waits()
+    );
+}
+
+#[tokio::test]
+async fn a_host_id_read_that_keeps_failing_is_backed_off() {
+    let db = FlakyAdopt::new().await;
+    db.fail_host
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 3]);
+    let mut session = SyncSession::open("store.example", connector);
+
+    assert_eq!(
+        waits_over_failed_come_ups(&mut session, &db, 3).await,
+        growing_waits()
+    );
+}
+
+/// The other half: once a connection comes all the way up, the outage is over,
+/// and the next one starts from the base again.
+#[tokio::test]
+async fn a_connection_that_comes_all_the_way_up_ends_the_outage() {
+    let db = FlakyAdopt::new().await;
+    db.fail_host
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a"); 4]);
+    let mut session = SyncSession::open("store.example", connector);
+    waits_over_failed_come_ups(&mut session, &db, 3).await;
+
+    db.fail_host
+        .store(false, std::sync::atomic::Ordering::SeqCst);
+    let now = Instant::now();
+    assert_eq!(
+        session.step(&db, now).await.unwrap(),
+        StepOutcome::Connected
+    );
+    assert_eq!(session.connection().attempts(), 0);
+
+    assert!(session.report_drop("socket closed", now));
+    assert_eq!(
+        session.connection().next_attempt_at(),
+        Some(now + RECONNECT_BACKOFF_BASE),
+        "a new outage after a working connection starts short"
     );
 }

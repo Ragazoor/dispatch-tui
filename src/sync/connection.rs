@@ -89,6 +89,10 @@ impl ConnectionStatus {
 pub enum ConnectionEvent {
     /// The store accepted the attempt (`ConnectionAccepted`).
     Accepted,
+    /// The identity settled and the store applied the initial subscription
+    /// (`AnAppliedSubscriptionEndsTheOutage`): the connection is all the way
+    /// up, so the outage is over.
+    SubscriptionApplied,
     /// The attempt was refused, timed out or could not be made
     /// (`ConnectionAttemptFailed`).
     AttemptFailed { reason: String },
@@ -133,9 +137,11 @@ impl BoardConnection {
 
     /// Consecutive failed attempts since the last success.
     ///
-    /// Counts the CURRENT outage: reset on acceptance rather than decayed, so a
-    /// new outage backs off from the start rather than being punished for one
-    /// that is over.
+    /// Counts the CURRENT outage: reset once the initial subscription is
+    /// applied rather than decayed, so a new outage backs off from the start
+    /// rather than being punished for one that is over. NOT reset on
+    /// acceptance: a store that accepts and then fails the come-up would
+    /// otherwise be retried every [`RECONNECT_BACKOFF_BASE`] for ever.
     pub fn attempts(&self) -> u32 {
         self.attempts
     }
@@ -181,9 +187,12 @@ impl BoardConnection {
         match (self.status, event) {
             (S::Connecting, E::Accepted) => {
                 self.status = S::Connected;
-                self.attempts = 0;
                 self.last_error = None;
                 self.last_failure_at = None;
+                true
+            }
+            (S::Connected, E::SubscriptionApplied) => {
+                self.attempts = 0;
                 true
             }
             (S::Connecting, E::AttemptFailed { reason })

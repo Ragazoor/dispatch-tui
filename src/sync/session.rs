@@ -392,6 +392,8 @@ impl SyncSession {
                 self.connector.disconnect().await;
                 return Ok(StepOutcome::Failed);
             }
+            self.connection
+                .apply(ConnectionEvent::SubscriptionApplied, now);
             return Ok(StepOutcome::Connected);
         };
 

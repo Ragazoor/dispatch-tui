@@ -32,8 +32,10 @@ fn a_new_connection_starts_connecting_with_nothing_wrong() {
     assert_eq!(connection.next_attempt_at(), None);
 }
 
+/// `ConnectionAccepted`: connected and no longer saying what went wrong, but
+/// the outage is not over yet — the come-up can still fail.
 #[test]
-fn acceptance_connects_and_clears_the_outage() {
+fn acceptance_connects_but_keeps_counting_the_outage() {
     let now = Instant::now();
     let mut connection = BoardConnection::opening("store.example");
     connection.apply(failed("refused"), now);
@@ -42,12 +44,54 @@ fn acceptance_connects_and_clears_the_outage() {
     assert!(connection.apply(ConnectionEvent::Accepted, now));
 
     assert_eq!(connection.status(), ConnectionStatus::Connected);
+    assert_eq!(connection.attempts(), 1);
+    assert_eq!(connection.last_error(), None);
+}
+
+/// `AnAppliedSubscriptionEndsTheOutage`.
+#[test]
+fn an_applied_subscription_ends_the_outage() {
+    let now = Instant::now();
+    let mut connection = BoardConnection::opening("store.example");
+    connection.apply(failed("refused"), now);
+    connection.apply(ConnectionEvent::RetryDue, now);
+    connection.apply(ConnectionEvent::Accepted, now);
+
+    assert!(connection.apply(ConnectionEvent::SubscriptionApplied, now));
+
+    assert_eq!(connection.status(), ConnectionStatus::Connected);
     assert_eq!(
         connection.attempts(),
         0,
         "an outage that ends is over, not partly over"
     );
-    assert_eq!(connection.last_error(), None);
+}
+
+/// An accepted connection that drops before its subscription is applied is
+/// the same outage, so each cycle waits longer than the last.
+#[test]
+fn accept_then_drop_cycles_grow_the_backoff() {
+    let mut now = Instant::now();
+    let mut connection = BoardConnection::opening("store.example");
+    let mut waits = Vec::new();
+
+    for _ in 0..3 {
+        connection.apply(ConnectionEvent::Accepted, now);
+        connection.apply(dropped("subscription refused"), now);
+        let due = connection.next_attempt_at().unwrap();
+        waits.push(due - now);
+        now = due;
+        connection.apply(ConnectionEvent::RetryDue, now);
+    }
+
+    assert_eq!(
+        waits,
+        vec![
+            RECONNECT_BACKOFF_BASE,
+            RECONNECT_BACKOFF_BASE * 2,
+            RECONNECT_BACKOFF_BASE * 4
+        ]
+    );
 }
 
 /// A failed attempt leaves the connection disconnected and saying why. At
@@ -189,6 +233,17 @@ fn events_that_do_not_match_the_current_state_do_not_fire() {
             },
         ),
         ("connected/accept", connected, ConnectionEvent::Accepted),
+        // A subscription is applied only on a connection that is up.
+        (
+            "connecting/applied",
+            connecting,
+            ConnectionEvent::SubscriptionApplied,
+        ),
+        (
+            "disconnected/applied",
+            disconnected,
+            ConnectionEvent::SubscriptionApplied,
+        ),
         ("connected/fail", connected, failed("x")),
     ];
 
