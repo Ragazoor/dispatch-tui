@@ -380,6 +380,8 @@ struct FlakyAdopt {
     fail_read: std::sync::atomic::AtomicBool,
     /// Fail the host-id read the session makes before it subscribes.
     fail_host: std::sync::atomic::AtomicBool,
+    /// Fail the credential read the session makes before `connect`.
+    fail_token: std::sync::atomic::AtomicBool,
 }
 
 impl FlakyAdopt {
@@ -389,6 +391,7 @@ impl FlakyAdopt {
             fail: std::sync::atomic::AtomicBool::new(false),
             fail_read: std::sync::atomic::AtomicBool::new(false),
             fail_host: std::sync::atomic::AtomicBool::new(false),
+            fail_token: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }
@@ -418,6 +421,9 @@ impl HostStore for FlakyAdopt {
 #[async_trait::async_trait]
 impl IdentityCredentialStore for FlakyAdopt {
     async fn user_identity_token(&self) -> anyhow::Result<Option<String>> {
+        if self.fail_token.load(std::sync::atomic::Ordering::SeqCst) {
+            anyhow::bail!("credential unreadable");
+        }
         self.inner.user_identity_token().await
     }
     async fn adopt_user_identity_with_credential(
@@ -611,4 +617,65 @@ async fn a_connection_that_comes_all_the_way_up_ends_the_outage() {
         Some(now + RECONNECT_BACKOFF_BASE),
         "a new outage after a working connection starts short"
     );
+}
+
+/// `ConnectionAttemptFailed`: an attempt that cannot be made because the
+/// stored credential cannot be read is a failed attempt like any other. It is
+/// backed off and names its reason, rather than leaving the session
+/// `Connecting` and retried every tick.
+#[tokio::test]
+async fn an_unreadable_credential_on_a_reconnect_is_a_failed_attempt() {
+    let db = FlakyAdopt::new().await;
+    let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
+    let mut session = SyncSession::open("store.example", connector.clone());
+    let start = Instant::now();
+    assert_eq!(
+        session.step(&db, start).await.unwrap(),
+        StepOutcome::Connected
+    );
+    session.report_drop("socket closed", start);
+
+    db.fail_token
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let due = start + RECONNECT_BACKOFF_BASE;
+    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+
+    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Failed);
+    assert_eq!(session.status(), ConnectionStatus::Disconnected);
+    assert!(
+        session
+            .connection()
+            .last_error()
+            .is_some_and(|e| e.contains("credential unreadable")),
+        "{:?}",
+        session.connection().last_error()
+    );
+    assert_eq!(
+        session.connection().next_attempt_at(),
+        Some(due + RECONNECT_BACKOFF_BASE * 2),
+        "the second failure of the outage waits longer"
+    );
+    assert_eq!(
+        connector.attempts(),
+        1,
+        "no connect was made without a credential"
+    );
+}
+
+/// The same failure on the first attempt still aborts the launch with the
+/// reason (`FirstConnectionFailureAbortsStartup`).
+#[tokio::test]
+async fn an_unreadable_credential_at_startup_aborts_with_the_reason() {
+    let db = FlakyAdopt::new().await;
+    db.fail_token
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let connector = ScriptedConnector::new(vec![]);
+    let mut session = SyncSession::open("store.example", connector);
+
+    let reason = session
+        .connect_at_startup(&db, Instant::now())
+        .await
+        .unwrap_err();
+
+    assert!(reason.contains("credential unreadable"), "{reason}");
 }

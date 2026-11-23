@@ -396,7 +396,10 @@ rule FirstConnectionFailureAbortsStartup {
         -- ConnectionAttemptFailed covers lands here the same way, and so does a
         -- subscription the store refuses on that first connection
         -- (InitialSubscriptionRefused; after the board has drawn, the same
-        -- event is ASubscriptionTheStoreRefusesIsAnOutage's).
+        -- event is ASubscriptionTheStoreRefusesIsAnOutage's). The connection
+        -- underneath is still marked disconnected with one attempt before the
+        -- launch aborts (src/sync/session.rs::SyncSession::connect_at_startup);
+        -- nothing can see that state, because the process exits.
 }
 
 rule IdentityConflictAtStartupAbortsIt {
@@ -1152,6 +1155,14 @@ rule AWriteWithNoConnectionIsRefused {
         -- learns it did not happen, at the moment it did not happen, and the
         -- operator sees the refusal rather than discovering it later.
         --
+        -- THE REFUSAL FOLLOWS THE INSTALLED TRANSPORT. The transport is
+        -- installed when the store accepts, one local read (this install's
+        -- stored identity) before the board records ConnectionAccepted, so in
+        -- that window a write that supplies no person is sent on the live
+        -- transport and answered, not refused
+        -- (src/sync/sdk_connector/callers.rs::SdkReducerCaller::connection).
+        -- Nothing waits or is queued, so NoWriteIsEverQueued holds.
+        --
         -- WHY NOT A QUEUE, stated once so nobody has to relitigate it. A queued
         -- write is an intent formed against a board state that no longer holds
         -- by the time it lands. The operator moved a card to done because of
@@ -1274,7 +1285,8 @@ rule ConnectionAttemptFailed {
     @guidance
         -- Covers refusal, an unresolvable host, a rejected credential, the
         -- attempt that simply never answered within config.connect_timeout,
-        -- and a failed read of this install's stored identity after the store
+        -- an attempt that could not be made because this install's stored
+        -- credential could not be read, and a failed read of this install's stored identity after the store
         -- answered but before the board accepts. That last one closes the
         -- connection the store opened (src/sync/session.rs::SyncSession::attempt).
         -- They are one state because an operator's next action is the same for

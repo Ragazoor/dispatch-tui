@@ -302,7 +302,22 @@ impl SyncSession {
     }
 
     async fn attempt(&mut self, store: &dyn SyncStore, now: Instant) -> Result<StepOutcome> {
-        let token = store.user_identity_token().await?;
+        // A credential that cannot be read is an attempt that cannot be made:
+        // a failed attempt like any other, backed off and named
+        // (`sync.allium: ConnectionAttemptFailed`). Returned as an error it
+        // would leave the session `Connecting` and retried every tick.
+        let token = match store.user_identity_token().await {
+            Ok(token) => token,
+            Err(error) => {
+                self.connection.apply(
+                    ConnectionEvent::AttemptFailed {
+                        reason: format!("could not read this install's credential: {error:#}"),
+                    },
+                    now,
+                );
+                return Ok(StepOutcome::Failed);
+            }
+        };
         let accepted = match self
             .connector
             .connect(self.connection.server(), token.as_deref())
