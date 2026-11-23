@@ -6,7 +6,8 @@
 #
 # Only the files below may call tmux::kill_window / kill_window_if_present:
 # the tmux module itself, the two helpers' home, the editor window (not a
-# task window) and the split-swap cleanup of a window dispatch just made.
+# task window), the split-swap cleanup of a window dispatch just made, and an
+# epic orchestrator's window (not a task window, and never split).
 # Test code is out of scope.
 #
 # Usage: check-task-window-kills.sh [root]   (root defaults to the repo)
@@ -14,7 +15,7 @@ set -euo pipefail
 root="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 cd "$root"
 
-allowed='^src/(tmux\.rs|dispatch/split_panes\.rs|runtime/editor\.rs):'
+allowed='^src/(tmux\.rs|dispatch/split_panes\.rs|dispatch/orchestrator\.rs|runtime/editor\.rs):'
 hits=$(grep -rnE '(tmux::|\b)kill_window(_if_present)?\(' src --include=*.rs \
   | grep -vE '^[^:]*/tests?(/|\.rs)|tests\.rs:' \
   | grep -vE '^[^:]*:[0-9]+:\s*(//|///)' \

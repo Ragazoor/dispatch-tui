@@ -26,7 +26,8 @@
 --           TheHelperAnswersSessionUnconditionally, and dispatch.allium:
 --           AgentCarriesItsOwnCallerIdentity); the `hook`, `hook-subagent` and
 --           `hook-peer-message` subcommands (see agent-health.allium:
---           HookDelivery); `pr-gate`'s verdict and fail-open (see
+--           HookDelivery) and `hook-orchestrator` (agent-health.allium:
+--           OrchestratorHooks); `pr-gate`'s verdict and fail-open (see
 --           pr-workflow.allium: PrLearningsGate); `statusline` (see
 --           observability.allium: StatusLineDecorator); `verify-feed` (see
 --           feeds.allium: VerifyFeed); what `agent-tree`, `agent-diff` and
@@ -80,7 +81,8 @@ enum ProcessExit {
 --   setting up machinery they cannot use is pure waste — see
 --   observability.allium: StatusLineDecorator's StartsNoAsyncRuntime.
 -- hook: a single-threaded runtime with I/O and timers only. hook,
---   hook-subagent, hook-peer-message and pr-gate: the commands Claude Code
+--   hook-subagent, hook-peer-message, hook-orchestrator and pr-gate: the
+--   commands Claude Code
 --   runs once per tool call of every live session, whose whole body is one
 --   round trip to the running board (agent-health.allium: HookDelivery).
 -- general: the full multi-threaded runtime. Everything else, including any
@@ -846,6 +848,7 @@ surface DispatchCommandLine {
         --   hook, hook-subagent,
         --   hook-peer-message           agent-health.allium: HookDelivery;
         --                               --undelivered: UndeliveredPeerMessage
+        --   hook-orchestrator <name>    agent-health.allium: OrchestratorHooks
         --   pr-gate <id>                pr-workflow.allium: PrLearningsGate
         --   agent-tree <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack
         --   agent-diff <task_id>        agent-tree.allium; PaneRendererGivesTheTerminalBack

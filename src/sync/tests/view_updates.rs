@@ -140,6 +140,28 @@ pins_view_updates!(
 );
 
 pins_view_updates!(
+    an_orchestrator_update_pair_keeps_the_new_row,
+    upsert_orchestrator,
+    retire_orchestrator,
+    |tag: &str| bindings::Orchestrator {
+        id: 4,
+        epic_id: 3,
+        host: "host-a".into(),
+        name: "zlata".into(),
+        tmux_window: tag.into(),
+        started_at: String::new(),
+        restarted_once: false,
+        session_died: false,
+        last_turn_at: String::new(),
+    },
+    |rows: &SharedRows| rows
+        .orchestrators()
+        .into_iter()
+        .find(|o| o.id == 4)
+        .map(|o| o.tmux_window)
+);
+
+pins_view_updates!(
     a_ready_mark_update_pair_keeps_the_new_row,
     upsert_ready_mark,
     retire_ready_mark,
@@ -747,6 +769,7 @@ const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
     ("learning_verdict", "stored raw: no decoder"),
     ("epic_orchestration", "stored raw: no decoder"),
     ("ready_mark", "stored raw: no decoder"),
+    ("orchestrator", "stored raw: decoded on read"),
     ("setting", "stored raw: no decoder"),
 ];
 

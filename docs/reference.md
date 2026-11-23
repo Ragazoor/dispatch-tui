@@ -236,6 +236,7 @@ dispatch hook <id> <kind> [--kind <notification-kind>] [--port <port>]
     [--shells N] [--workflows N] [--monitors N] [--mcp-tasks N]   # stop only: the payload's background work, which keeps the task running (HookStop)
 dispatch hook-subagent <id> <start|stop|clear> [--agent-id <id>] [--session-id <id>] [--port <port>]
 dispatch hook-peer-message <id> --target <session> --body <text> [--port <port>]
+dispatch hook-orchestrator <name> stop [--port <port>]   # an epic orchestrator's Stop: its completed turn (OrchestratorHooks)
 dispatch pr-gate <id> [--port <port>]            # PreToolUse gate on the first PR-creation attempt.
                                                  # Also posts to the board; unlike the three above it
                                                  # fails OPEN when no board answers — it never blocks

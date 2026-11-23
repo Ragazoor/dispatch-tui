@@ -899,6 +899,10 @@ fn hook_entry_point_invocations() -> Vec<(&'static str, Vec<&'static str>)> {
             ],
         ),
         ("pr-gate", vec!["pr-gate", "1"]),
+        (
+            "hook-orchestrator",
+            vec!["hook-orchestrator", "zlata", "stop"],
+        ),
     ]
 }
 
