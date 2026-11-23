@@ -20,7 +20,7 @@ pub(super) async fn covering(
 ) -> Option<(Epic, EpicOrchestration)> {
     let mut next = epic;
     for _ in 0..MAX_CHAIN {
-        let found = state.db.get_epic(next?).await?;
+        let found = state.epic_svc.get_epic(next?).await.ok()?;
         if let Some(on) = state.db.epic_orchestration(found.id).await {
             return Some((found, on));
         }
@@ -73,7 +73,7 @@ pub(super) async fn write_ready(
     }
 }
 
-/// `GetTaskViaMcp`'s [Ready] and [Orchestrated by] lines, each with its
+/// `GetTaskViaMcp`'s `Ready` and `Orchestrated by` lines, each with its
 /// leading newline. Ready is said of a backlog task only.
 pub(super) fn task_lines(
     status: TaskStatus,
