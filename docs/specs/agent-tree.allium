@@ -1237,7 +1237,9 @@ rule DiscardAgentTreePaneOnWindowCleared {
 -- == Companion Pane Startup ==
 --
 -- Each pane's renderer (`dispatch agent-tree <task_id>` for the tree,
--- `dispatch agent-diff <task_id>` for the diff pane) is handed only a task id.
+-- `dispatch agent-diff <task_id>` for the diff pane) is handed a task id and
+-- a data directory; the data directory gives it its log and its keys
+-- (keybindings.allium: PanesLoadTheirOwnTable), never its task.
 -- Before it can run git it has to read that task back, for the two things only
 -- the task knows: its worktree and its base branch. It asks the running board
 -- (BoardPaneView), never the store (PanesReadThroughTheBoard).

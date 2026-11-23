@@ -675,9 +675,13 @@ rule PaneRendererGivesTheTerminalBack {
         -- The error, if there was one, is still reported, after the restore:
         -- the process ends with failure.
         --
-        -- Each renderer is given only a task id. It reads its task through
-        -- the running board (PaneRenderersAskTheBoard), then waits for it as
-        -- agent-tree.allium's "Companion Pane Startup" describes.
+        -- Each renderer is given a task id and a data directory. It reads
+        -- its task through the running board (PaneRenderersAskTheBoard),
+        -- then waits for it as agent-tree.allium's "Companion Pane Startup"
+        -- describes. The data directory is for what is local to the
+        -- machine, not the store: the log it writes to and the key override
+        -- file it loads its keys from (keybindings.allium:
+        -- PanesLoadTheirOwnTable).
 }
 
 rule PaneRenderersAskTheBoard {
