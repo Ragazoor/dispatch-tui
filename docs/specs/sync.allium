@@ -480,6 +480,7 @@ rule SubscribeOnceIdentityIsSettled {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         SubscriptionsAsserted(
             connection: connection,
             owner_board: identity,

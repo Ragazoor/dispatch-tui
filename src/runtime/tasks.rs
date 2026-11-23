@@ -1364,10 +1364,10 @@ async fn step_shared_store(
             settled_identity.set_last_error(session.connection().last_error().map(str::to_string));
         }
         Err(e) => {
-            // Reported and retried on the next tick. A step that
-            // fails on the STORE's account is already an outage the
-            // session recorded; one that fails here is a local read
-            // of the identity, which the next tick repeats.
+            // A backstop. A step records every failure it meets on the
+            // connection as a failed attempt (backed off and shown), so
+            // nothing reaches here from the store or the identity reads;
+            // anything that does is logged and the next tick steps again.
             tracing::warn!("shared store step failed: {e:#}");
         }
     }
