@@ -186,61 +186,11 @@ entity BoardConnection {
     -- precisely what must not exist here: core.allium's shared tables have one
     -- copy, and a second one served during an outage would draw a colleague's
     -- finished work as though it were live. See
-    -- AConnectedBoardDrawsOnlyDeliveredRows below.
+    -- AConnectedBoardDrawsOnlyDeliveredRows under Invariants.
     --
     -- The implementation's counterpart is `SharedRows` (`src/sync/rows.rs`),
     -- held beside the transport. Where it sits does not matter; that it is
     -- emptied with the connection does.
-
-    @invariant AConnectedBoardDrawsOnlyDeliveredRows
-        -- On a board with a connection, every shared row on screen arrived
-        -- through that connection's subscriptions. There is no second reader.
-        --
-        -- ONE SOURCE. Every drawn board has a connection (OpenBoardConnection
-        -- runs before it draws), so there is no second branch. Not "the
-        -- subscription, falling back to local": a shared table has exactly
-        -- one copy, so any other copy is not a cache of the store but
-        -- whatever some install last wrote, which may be months stale and may
-        -- name tasks that no longer exist. Serving it during an outage would
-        -- put a colleague's finished work back on screen as though it were
-        -- live.
-        --
-        -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Drawn" here covers every
-        -- read of a shared row the board's own process makes — an MCP tool
-        -- looking up a task, a setting read back after it was saved, the
-        -- subscribed-epic list, the feed runner's epic list — and not only
-        -- the reads that put cards on screen. Every `store::Store` read
-        -- answers from the connection's `SharedRows`, the rows its writes'
-        -- reducers land in (`store_connection::StoreParts::build`), so a task
-        -- created a moment ago is found.
-        --
-        -- A ROW THAT CANNOT BE UNDERSTOOD IS DROPPED, not defaulted and not
-        -- fatal. A task carrying a status this binary does not know is
-        -- missing from the board rather than sitting on it under a plausible
-        -- wrong one, and the rows beside it are unaffected. A row whose
-        -- status was REMOVED (config.removed_statuses) is dropped too, but
-        -- quietly and by a different rule: see
-        -- RowsWithARemovedStatusAreDropped.
-        --
-        -- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics,
-        -- which constrains the ASK. This constrains the READ, and the pair is
-        -- what makes the containment claim complete: asking only for your own
-        -- rows protects nobody if the reader can also reach around the
-        -- subscription to everyone else's.
-        --
-        -- Not stated as an expression because the two sides — what was
-        -- delivered and what is drawn — are sets of every shared entity at
-        -- once, which this language has no union to name. What is checkable is
-        -- a property of the CODE rather than of a state: exactly one read path
-        -- exists (`crate::store::BoardReads`, whose card reads are the store's
-        -- own read traits), and the `Store` that implements it holds no handle
-        -- to any other store to reach through. `store::tests::over_sync::board_reads`
-        -- asserts it directly, by standing a fully populated store beside one
-        -- whose rows are empty and requiring every read of the second to
-        -- answer empty.
-        --
-        -- There is no install without a connection to except from this: the
-        -- store is mandatory (see this file's header).
 
     -- Whether startup has finished with this connection. False from creation
     -- until the first attempt has been answered and its subscription applied;
@@ -610,6 +560,7 @@ rule SubscribeToThisHostsSettings {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         SettingsSubscriptionAsserted(
             connection: connection,
             host: core/local_host()
@@ -644,6 +595,7 @@ rule SubscribeToThisHostsDispatchRequests {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         DispatchRequestSubscriptionAsserted(
             connection: connection,
             host: core/local_host()
@@ -674,6 +626,7 @@ rule SubscribeToThisHostsSessionRequests {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         SessionRequestSubscriptionAsserted(
             connection: connection,
             host: core/local_host()
@@ -713,6 +666,7 @@ rule SubscribeToThisHostsFeedRequests {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         FeedRequestSubscriptionAsserted(
             connection: connection,
             host: core/local_host()
@@ -749,6 +703,7 @@ rule SubscribeToUserProfiles {
 
     requires: connection.status = connected
 
+    -- observable output; no rule listens
     ensures: UserProfileSubscriptionAsserted(connection: connection)
 
     @guidance
@@ -768,6 +723,7 @@ rule SubscribeToAgents {
 
     requires: connection.status = connected
 
+    -- observable output; no rule listens
     ensures: AgentSubscriptionAsserted(connection: connection)
 
     @guidance
@@ -800,7 +756,8 @@ rule AViewUpdateNeverErasesTheRow {
 
     requires: row_old.id = row_new.id
 
-    ensures: connection.held(row_new.id) = row_new
+    -- held_row (a black box): the row the connection holds under that id.
+    ensures: held_row(connection, row_new.id) = row_new
 
     @guidance
         -- THE DELETE ONLY REMOVES THE ROW IT NAMES. The board removes an id
@@ -830,13 +787,12 @@ rule AViewUpdateNeverErasesTheRow {
 }
 
 rule RegisterHostOnConnect {
-    when: host/UserIdentitySettled(identity)
-
-    let connection = the_board_connection()
+    when: InitialSubscriptionApplied(connection)
 
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         HostRegistrationSentToStore(connection, core/local_host())
 
     @guidance
@@ -853,7 +809,9 @@ rule RegisterHostOnConnect {
         -- whose local write happens before any connection does, so sending it
         -- is a catch-up rather than a forwarding.
         --
-        -- FIRES ON EVERY SETTLE, RECONNECTS INCLUDED, for the same reason
+        -- FIRES ON EVERY CONNECTION THAT COMES UP, RECONNECTS INCLUDED
+        -- (src/runtime/tasks.rs::step_shared_store calls
+        -- src/store_connection/mod.rs::on_store_connected), for the same reason
         -- SubscribeOnceIdentityIsSettled re-asserts subscriptions
         -- unconditionally: a dropped connection does not tell this rule
         -- whether the store's copy of this row is still current — a rename
@@ -874,16 +832,17 @@ rule RegisterHostOnConnect {
         -- store the first time.
         --
         -- ALWAYS AS THE SETTLED IDENTITY, NEVER OWNERLESS. The row is sent
-        -- with the identity this rule's trigger settled as its owner, and a
-        -- connection with no settled identity sends nothing — it waits for
-        -- the settle rather than register the host without an owner. The
-        -- store refuses a NEW ownerless host anyway (core/Host's
+        -- with the identity host/UserIdentitySettled settled as its owner;
+        -- an initial subscription is asked for only after that settle
+        -- (SubscribeOnceIdentityIsSettled), so a connection with no settled
+        -- identity never reaches this rule and never registers the host
+        -- without an owner. The store refuses a NEW ownerless host anyway
+        -- (core/Host's
         -- LocalHostOwnerIsWrittenOnce; store-split.allium, D11): an ownerless
         -- row would be open to whoever registered its public id first.
         --
         -- SENT ONCE THE CONNECTION IS ALL THE WAY UP, not at the instant the
-        -- identity settles: after the initial subscription has been applied.
-        -- A connection whose initial subscription is refused
+        -- identity settles. A connection whose initial subscription is refused
         -- (ASubscriptionTheStoreRefusesIsAnOutage) sends no registration; the
         -- next connection that does come up sends it.
 }
@@ -896,6 +855,7 @@ rule RegisterHostOnRename {
     requires: connection.status = connected
 
     ensures:
+        -- observable output; no rule listens
         HostRegistrationSentToStore(connection, core/local_host())
 
     @guidance
@@ -928,8 +888,8 @@ rule SubscribedRowsArriveUnasked {
     requires: not (is_task_or_epic_row(row) and row_status(row) in config.removed_statuses)
 
     ensures:
+        -- observable output; no rule listens
         SubscribedRowAccepted(connection, row)
-        and BoardRedrawn()
 
     @guidance
         -- THIS IS WHAT REPLACES POLLING, and it is the visible difference a
@@ -951,6 +911,7 @@ rule ADisconnectedBoardDrawsNoSharedRows {
     when: ConnectionDropped(connection, reason)
 
     ensures:
+        -- observable output; no rule listens
         SubscribedRowsDiscarded(connection)
 
     @guidance
@@ -981,6 +942,7 @@ rule RowsWithARemovedStatusAreDropped {
     requires: row_status(row) in config.removed_statuses
 
     ensures:
+        -- observable output; no rule listens
         RowDropped(row)
 
     @guidance
@@ -1038,6 +1000,7 @@ rule BoardWritesThroughTheStore {
              or not mutation.supplies_a_person)
 
     ensures:
+        -- observable output; no rule listens
         MutationSentToStore(connection, mutation)
 
     @guidance
@@ -1097,6 +1060,7 @@ rule CreatesRequireASettledIdentity {
         and not connection.is_identified
 
     ensures:
+        -- observable output; no rule listens
         MutationRefused(connection, mutation, reason: identity_refusal(mutation))
 
     @guidance
@@ -1173,8 +1137,10 @@ rule AWriteWithNoConnectionIsRefused {
     requires:
         connection != null
         and connection.status != connected
+        and not (mutation.is_a_seen_mark and not connection.is_identified)
 
     ensures:
+        -- observable output; no rule listens
         MutationRefused(connection, mutation, reason: connection.last_error)
 
     @guidance
@@ -1213,6 +1179,7 @@ rule StoreRejectsAnInvalidMutation {
     when: StoreRejectedMutation(connection, mutation, reason)
 
     ensures:
+        -- observable output; no rule listens
         MutationRefused(connection, mutation, reason: reason)
 
     @guidance
@@ -1364,6 +1331,7 @@ rule ASubscriptionTheStoreRefusesIsAnOutage {
         connection.attempts = connection.attempts + 1
         connection.last_error = reason
         connection.last_failure_at = now
+        -- observable output; no rule listens
         SubscribedRowsDiscarded(connection)
 
     @guidance
@@ -1488,7 +1456,9 @@ rule StopOnAUserIdentityConflict {
         -- anything to refuse. A drop cannot overtake the conflict either: the
         -- board applies the acceptance and the conflict in one step with no
         -- wait between them, and a `failed` connection ignores every later
-        -- event (src/sync/session.rs::SyncSession::attempt).
+        -- event (src/sync/session.rs::SyncSession::attempt for the one step;
+        -- src/sync/connection.rs::BoardConnection::apply, whose catch-all fires
+        -- nothing, for the later events).
 }
 
 -- == Choosing what to follow ==
@@ -1636,6 +1606,56 @@ rule UnsubscribeFromEpic {
 -- tests check it against the queries the board builds
 -- (src/sync/sdk_connector/queries.rs::subscription_queries).
 
+-- AConnectedBoardDrawsOnlyDeliveredRows:
+-- On a board with a connection, every shared row on screen arrived
+-- through that connection's subscriptions. There is no second reader.
+--
+-- ONE SOURCE. Every drawn board has a connection (OpenBoardConnection
+-- runs before it draws), so there is no second branch. Not "the
+-- subscription, falling back to local": a shared table has exactly
+-- one copy, so any other copy is not a cache of the store but
+-- whatever some install last wrote, which may be months stale and may
+-- name tasks that no longer exist. Serving it during an outage would
+-- put a colleague's finished work back on screen as though it were
+-- live.
+--
+-- EVERY SHARED READ, NOT ONLY THE DRAWING. "Drawn" here covers every
+-- read of a shared row the board's own process makes — an MCP tool
+-- looking up a task, a setting read back after it was saved, the
+-- subscribed-epic list, the feed runner's epic list — and not only
+-- the reads that put cards on screen. Every `store::Store` read
+-- answers from the connection's `SharedRows`, the rows its writes'
+-- reducers land in (`store_connection::StoreParts::build`), so a task
+-- created a moment ago is found.
+--
+-- A ROW THAT CANNOT BE UNDERSTOOD IS DROPPED, not defaulted and not
+-- fatal. A task carrying a status this binary does not know is
+-- missing from the board rather than sitting on it under a plausible
+-- wrong one, and the rows beside it are unaffected. A row whose
+-- status was REMOVED (config.removed_statuses) is dropped too, but
+-- quietly and by a different rule: see
+-- RowsWithARemovedStatusAreDropped.
+--
+-- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics,
+-- which constrains the ASK. This constrains the READ, and the pair is
+-- what makes the containment claim complete: asking only for your own
+-- rows protects nobody if the reader can also reach around the
+-- subscription to everyone else's.
+--
+-- Not stated as an expression because the two sides — what was
+-- delivered and what is drawn — are sets of every shared entity at
+-- once, which this language has no union to name. What is checkable is
+-- a property of the CODE rather than of a state: exactly one read path
+-- exists (`crate::store::BoardReads`, whose card reads are the store's
+-- own read traits), and the `Store` that implements it holds no handle
+-- to any other store to reach through. `store::tests::over_sync::board_reads`
+-- asserts it directly, by standing a fully populated store beside one
+-- whose rows are empty and requiring every read of the second to
+-- answer empty.
+--
+-- There is no install without a connection to except from this: the
+-- store is mandatory (see this file's header).
+
 -- NoWriteIsEverQueued:
 -- No write waits anywhere for a store to come back.
 --
@@ -1660,8 +1680,8 @@ rule UnsubscribeFromEpic {
 -- that.
 --
 -- The far side of the connection is core.allium's SharedStore. It is an actor
--- rather than an unnamed outside, because the three events it delivers are a
--- contract this board depends on and a store that delivers only two of them
+-- rather than an unnamed outside, because the events it delivers are a
+-- contract this board depends on and a store that leaves one of them out
 -- leaves the board in a state with no way out — see
 -- StoreAnnouncesEveryTransition on the surface below.
 
@@ -1818,7 +1838,9 @@ surface BoardWrites {
         -- CreatesRequireASettledIdentity and AWriteWithNoConnectionIsRefused
         -- see every one. No caller writes a shared row any other way. Each
         -- is sent or refused, except a seen mark on an unidentified board,
-        -- which is dropped (CreatesRequireASettledIdentity).
+        -- which is dropped whether or not the board is connected
+        -- (CreatesRequireASettledIdentity; the board drops it before any
+        -- connection check, src/store/queries/tasks.rs::mark_task_seen).
 }
 
 surface ConnectionIndicator {
