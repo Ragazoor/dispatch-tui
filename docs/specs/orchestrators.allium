@@ -363,6 +363,11 @@ rule BoardRunsItsOrchestrators {
         -- is on: a session that ends for lack of work keeps its name for the
         -- next one. window_exists reads this machine's tmux; a failed read
         -- counts as present, as for a task agent's window.
+        --
+        -- A board closes the window of a row it saw on its own machine and
+        -- then sees go (SwitchOrchestratorOff), and no other: a window it
+        -- never saw a row for may be another board's on the same tmux
+        -- server, or one whose row has not arrived yet.
 }
 
 rule OrchestratorWindowGone {
@@ -412,7 +417,8 @@ rule StartOrchestratorSession {
         --
         -- It resumes the conversation this machine last held for the epic
         -- when Claude Code keeps one for that directory, and starts fresh
-        -- otherwise. Either way it gets the prompt (OrchestratorPrompt), so
+        -- otherwise, and always after a session that died: the death may
+        -- have been the conversation's. Either way it gets the prompt (OrchestratorPrompt), so
         -- a fresh start loses nothing that matters (O13).
         --
         -- The session log entry (kind session) comes with the log, in step 5.

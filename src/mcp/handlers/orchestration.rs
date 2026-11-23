@@ -38,7 +38,21 @@ pub(super) async fn ready_marker(
 ) -> Result<(ReadyMarker, Option<String>), ServiceError> {
     match identity {
         CallerIdentity::Session => Ok((ReadyMarker::Operator, None)),
-        CallerIdentity::Orchestrator(name) => Ok((ReadyMarker::Agent, Some(name.clone()))),
+        CallerIdentity::Orchestrator(name) => {
+            if state
+                .db
+                .list_orchestrators()
+                .await
+                .iter()
+                .any(|o| o.name == *name)
+            {
+                Ok((ReadyMarker::Agent, Some(name.clone())))
+            } else {
+                Err(ServiceError::Validation(format!(
+                    "no orchestrator is named {name}; an orchestrator's ready mark names it"
+                )))
+            }
+        }
         CallerIdentity::Task(task) => {
             let agents = state.db.list_agents().await;
             match crate::models::display_agent(agents.iter().filter(|a| a.task_id == *task)) {

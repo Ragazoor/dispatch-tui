@@ -272,7 +272,17 @@ fn scripts_do_not_need_gnu_grep() {
 /// Run `name` as an orchestrator's session would: `DISPATCH_ORCHESTRATOR`
 /// set, no `DISPATCH_TASK_ID`, in a repo whose branch names a task.
 fn run_as_orchestrator(name: &str, input: &str, repo: &Path, dir: &Path) -> (Option<i32>, String) {
-    let (bin, log) = fake_dispatch(dir, 0);
+    run_as_orchestrator_with(name, input, 0, repo, dir)
+}
+
+fn run_as_orchestrator_with(
+    name: &str,
+    input: &str,
+    dispatch_exit: i32,
+    repo: &Path,
+    dir: &Path,
+) -> (Option<i32>, String) {
+    let (bin, log) = fake_dispatch(dir, dispatch_exit);
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let mut cmd = script_command::plugin_script_command(&script(name), &path);
     cmd.current_dir(repo)
@@ -353,4 +363,22 @@ fn the_pr_gate_ignores_an_orchestrator() {
     let (code, calls) = run_as_orchestrator("pr-learnings-hook", &input, &repo, dir.path());
     assert_eq!(code, Some(0));
     assert_eq!(calls.trim(), "");
+}
+
+/// A failed delivery never exits 2, which would make Claude Code refuse the
+/// orchestrator's stop: a `dispatch` that predates `hook-orchestrator` exits
+/// 2 on it.
+#[test]
+fn a_failed_orchestrator_stop_never_blocks_the_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo_on_branch(dir.path(), "7-hotfix");
+    let (code, calls) = run_as_orchestrator_with(
+        "task-status-hook",
+        &payload(&repo, "Stop", ""),
+        2,
+        &repo,
+        dir.path(),
+    );
+    assert_eq!(code, Some(1));
+    assert_eq!(calls.trim(), "hook-orchestrator zlata stop");
 }

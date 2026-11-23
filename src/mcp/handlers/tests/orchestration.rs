@@ -706,3 +706,26 @@ async fn an_orchestrators_ready_mark_names_it() {
         detail(&state, task).await
     );
 }
+
+/// The caller's name must be an orchestrator's: a header carries any string.
+#[tokio::test]
+async fn a_ready_mark_from_an_unknown_orchestrator_is_refused() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    let resp = tool_as(
+        &state,
+        "task_update",
+        json!({ "task_ids": [task.0], "ready": true }),
+        CallerIdentity::Orchestrator("nobody".into()),
+    )
+    .await;
+
+    assert!(is_error(&resp));
+    assert!(
+        extract_response_text(&resp).contains("no orchestrator is named nobody"),
+        "{}",
+        extract_response_text(&resp)
+    );
+}

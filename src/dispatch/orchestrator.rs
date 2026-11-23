@@ -42,6 +42,9 @@ pub struct OrchestratorLaunch<'a> {
     /// Claude Code's user-global configuration (`~/.claude.json`): where the
     /// dispatch MCP entry is read from and where the directory is trusted.
     pub claude_json: &'a Path,
+    /// Whether the conversation Claude Code keeps for the directory may be
+    /// continued. A session after one that died starts fresh.
+    pub may_resume: bool,
 }
 
 /// Open the orchestrator's window and start its session in it.
@@ -57,9 +60,11 @@ pub fn launch_orchestrator(
     let dir = launch.dir.to_string_lossy().into_owned();
     // The board made the directory, so it trusts it; an untrusted directory
     // would park the unattended session on Claude Code's trust dialog.
-    super::trust_at(launch.claude_json, &dir)?;
+    if !super::is_trusted_at(launch.claude_json, &dir).unwrap_or(false) {
+        super::trust_at(launch.claude_json, &dir)?;
+    }
     let config = write_mcp_config(launch);
-    let resume = holds_a_conversation(launch.claude_json, launch.dir);
+    let resume = launch.may_resume && holds_a_conversation(launch.claude_json, launch.dir);
     std::fs::write(launch.dir.join(PROMPT_FILE), launch.prompt)
         .with_context(|| format!("failed to write the prompt in {dir}"))?;
 
@@ -202,9 +207,10 @@ pub fn build_orchestrator_prompt(
         p.push_str("- none\n");
     }
     for t in tasks {
-        let ready = match (t.status, t.ready) {
-            (TaskStatus::Backlog, Some(_)) => ", ready",
-            (TaskStatus::Backlog, None) => ", not ready",
+        let ready = match (t.status, t.ready, orchestration.start_rule) {
+            (TaskStatus::Backlog, Some(_), _)
+            | (TaskStatus::Backlog, None, StartRule::Everything) => ", ready",
+            (TaskStatus::Backlog, None, StartRule::MarkedOnly) => ", not ready",
             _ => "",
         };
         let agent = t

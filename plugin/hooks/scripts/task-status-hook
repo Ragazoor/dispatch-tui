@@ -20,7 +20,10 @@ EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 # task lookup, so its cwd's branch can never reach a task.
 if [ -n "${DISPATCH_ORCHESTRATOR:-}" ]; then
     if [ "$EVENT" = "Stop" ]; then
-        dispatch hook-orchestrator "$DISPATCH_ORCHESTRATOR" stop
+        # Exit 2 from a Stop hook makes Claude Code refuse the stop and go on,
+        # and a `dispatch` that predates the command exits 2 on it: any
+        # failure is reported as 1, which only shows.
+        dispatch hook-orchestrator "$DISPATCH_ORCHESTRATOR" stop || exit 1
     fi
     exit 0
 fi

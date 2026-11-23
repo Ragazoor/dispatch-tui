@@ -1629,8 +1629,7 @@ surface OrchestratorSessionPrompt {
         --     status, sub-status, ready (backlog only), agent name;
         --   the first-turn check (FirstTurnChecksTheBoard): look for what
         --     happened while no session ran before anything else.
-        -- The answer line joins it with step 6, and the notes, the open
-        -- items, the newest log entries and the learnings with step 5.
+        -- Under start rule everything, every backlog task reads ready.
 
     @guarantee ItIsGivenOnEveryStart
         -- A resumed session gets the same prompt as its next message, so the

@@ -55,6 +55,10 @@ fn setup_or_skip() -> Option<Fixture> {
 }
 
 fn launch(f: &Fixture) {
+    launch_with(f, true);
+}
+
+fn launch_with(f: &Fixture, may_resume: bool) {
     dispatch::launch_orchestrator(
         &dispatch::OrchestratorLaunch {
             name: NAME,
@@ -62,6 +66,7 @@ fn launch(f: &Fixture) {
             dir: &f.dir,
             prompt: PROMPT,
             claude_json: &f.claude_json,
+            may_resume,
         },
         &f.server.runner(),
     )
@@ -159,6 +164,25 @@ fn a_kept_conversation_is_continued() {
 
     let line = await_stub_line(&f.server, |l| l.name == "claude").expect("claude started");
     assert!(line.args.contains(" --continue"), "{}", line.args);
+}
+
+#[test]
+fn a_start_after_a_death_does_not_continue() {
+    let Some(f) = setup_or_skip() else { return };
+    let key: String = f
+        .dir
+        .to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+    let projects = f.home.join(".claude").join("projects").join(key);
+    std::fs::create_dir_all(&projects).unwrap();
+    std::fs::write(projects.join("a.jsonl"), "{}\n").unwrap();
+
+    launch_with(&f, false);
+
+    let line = await_stub_line(&f.server, |l| l.name == "claude").expect("claude started");
+    assert!(!line.args.contains("--continue"), "{}", line.args);
 }
 
 #[test]

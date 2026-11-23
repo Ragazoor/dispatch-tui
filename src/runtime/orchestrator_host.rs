@@ -28,9 +28,9 @@ pub(super) enum OrchestratorAction {
     End(Orchestrator),
     /// A wanted orchestrator died twice in a row and waits for the operator.
     GiveUp(Orchestrator),
-    /// An orchestrator window no live row of this machine holds (its switch
-    /// went off).
-    CloseOrphan(TmuxWindow),
+    /// The window of a row this board saw on this machine that has gone (its
+    /// switch went off).
+    CloseGone(TmuxWindow),
 }
 
 /// The ids of `root` and every epic below it.
@@ -57,7 +57,10 @@ fn has_open_work(epics: &[Epic], tasks: &[Task], epic: EpicId) -> bool {
 
 /// Decide this tick's actions for `host`. `windows` is every tmux window
 /// name on this machine, or `None` when tmux could not be asked: then no
-/// window counts as lost and none as an orphan.
+/// window counts as lost. `seen_here` is the epics of the rows this board
+/// saw on this host at its last tick, so the window of one that has gone is
+/// closed (`SwitchOrchestratorOff`); a window this board never saw a row for
+/// is not its to close.
 pub(super) fn plan_orchestrators(
     host: &str,
     epics: &[Epic],
@@ -65,6 +68,7 @@ pub(super) fn plan_orchestrators(
     tasks: &[Task],
     orchestrators: &[Orchestrator],
     windows: Option<&HashSet<String>>,
+    seen_here: &BTreeSet<EpicId>,
 ) -> Vec<OrchestratorAction> {
     let mut actions = Vec::new();
     for on in orchestrations {
@@ -75,7 +79,6 @@ pub(super) fn plan_orchestrators(
             actions.push(OrchestratorAction::Ensure(on.epic_id));
         }
     }
-    let mut live_windows = HashSet::new();
     for o in orchestrators.iter().filter(|o| o.host == host) {
         let lost = match (&o.tmux_window, windows) {
             (Some(w), Some(names)) => !names.contains(w.as_str()),
@@ -91,25 +94,25 @@ pub(super) fn plan_orchestrators(
             if o.restarted_once && died {
                 actions.push(OrchestratorAction::GiveUp(o.clone()));
             } else {
-                actions.push(OrchestratorAction::Start(o.clone()));
+                // The start sees the death this tick found, so it can start
+                // fresh after one.
+                actions.push(OrchestratorAction::Start(Orchestrator {
+                    session_died: died,
+                    ..o.clone()
+                }));
             }
         } else if !wanted && live {
             actions.push(OrchestratorAction::End(o.clone()));
         }
-        // A row's own window is never an orphan: a live one is kept or ended
-        // by the row, and a start opens it.
-        live_windows.insert(TmuxWindow::for_orchestrator(o.epic_id).as_str().to_string());
     }
-    if let Some(names) = windows {
-        let mut orphans: Vec<&String> = names
+    for epic in seen_here {
+        let still_here = orchestrators
             .iter()
-            .filter(|n| TmuxWindow::is_orchestrator_window(n) && !live_windows.contains(n.as_str()))
-            .collect();
-        orphans.sort();
-        for name in orphans {
-            if let Some(w) = TmuxWindow::parse(name) {
-                actions.push(OrchestratorAction::CloseOrphan(w));
-            }
+            .any(|o| o.host == host && o.epic_id == *epic);
+        if !still_here {
+            actions.push(OrchestratorAction::CloseGone(TmuxWindow::for_orchestrator(
+                *epic,
+            )));
         }
     }
     actions
@@ -125,6 +128,9 @@ pub(super) struct OrchestratorHost {
     /// The rows already logged as waiting for the operator, so the log says
     /// it once per bout.
     given_up: Arc<std::sync::Mutex<HashSet<i64>>>,
+    /// The epics of the rows on this host at the last tick
+    /// (`plan_orchestrators`' `seen_here`).
+    seen_here: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
 }
 
 impl OrchestratorHost {
@@ -140,6 +146,7 @@ impl OrchestratorHost {
             data_dir,
             claude_json,
             given_up: Arc::new(std::sync::Mutex::new(HashSet::new())),
+            seen_here: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
         }
     }
 
@@ -167,6 +174,18 @@ impl OrchestratorHost {
             }
         }
         let orchestrators = db.list_orchestrators().await;
+        let seen_here = std::mem::replace(
+            &mut *self.seen_here.lock().unwrap_or_else(|e| e.into_inner()),
+            orchestrators
+                .iter()
+                .filter(|o| o.host == host)
+                .map(|o| o.epic_id)
+                .collect(),
+        );
+        let here = orchestrators.iter().any(|o| o.host == host);
+        if orchestrations.is_empty() && !here && seen_here.is_empty() {
+            return;
+        }
         let tasks = db.list_all_tasks_with_epic_id().await;
         let runner = self.runner.clone();
         let windows = tokio::task::spawn_blocking(move || tmux::list_all_window_names(&*runner))
@@ -181,6 +200,7 @@ impl OrchestratorHost {
             &tasks,
             &orchestrators,
             windows.as_ref(),
+            &seen_here,
         );
         for action in actions {
             self.apply(&host, action, &epics, &orchestrations, &tasks)
@@ -244,7 +264,7 @@ impl OrchestratorHost {
                     );
                 }
             }
-            OrchestratorAction::CloseOrphan(window) => {
+            OrchestratorAction::CloseGone(window) => {
                 let runner = self.runner.clone();
                 let name = window.as_str().to_string();
                 let closed = tokio::task::spawn_blocking(move || {
@@ -252,7 +272,7 @@ impl OrchestratorHost {
                 })
                 .await;
                 if matches!(closed, Ok(Ok(()))) {
-                    tracing::info!(window = %name, "closed an orchestrator window with no orchestrator");
+                    tracing::info!(window = %name, "closed the window of an orchestrator that was switched off");
                 }
             }
         }
@@ -287,6 +307,9 @@ impl OrchestratorHost {
         let dir = crate::dispatch::orchestrator_dir(&self.data_dir, o.epic_id);
         let claude_json = self.claude_json.clone();
         let name = o.name.clone();
+        // A session that died may have died of its conversation; the next one
+        // starts fresh, and the prompt carries what it needs (O13).
+        let may_resume = !o.session_died;
         let launched = tokio::task::spawn_blocking(move || {
             crate::dispatch::launch_orchestrator(
                 &crate::dispatch::OrchestratorLaunch {
@@ -295,6 +318,7 @@ impl OrchestratorHost {
                     dir: &dir,
                     prompt: &prompt,
                     claude_json: &claude_json,
+                    may_resume,
                 },
                 &*runner,
             )
@@ -392,7 +416,7 @@ mod tests {
         rows: &[Orchestrator],
         names: Option<&HashSet<String>>,
     ) -> Vec<OrchestratorAction> {
-        plan_orchestrators(HOST, epics, switches, tasks, rows, names)
+        plan_orchestrators(HOST, epics, switches, tasks, rows, names, &BTreeSet::new())
     }
 
     #[test]
@@ -476,10 +500,11 @@ mod tests {
 
         let actions = plan(&epics, &[switch(1)], &tasks, &rows, Some(&windows(&[])));
 
-        assert_eq!(
-            actions,
-            vec![WindowLost(rows[0].clone()), Start(rows[0].clone())]
-        );
+        let died = Orchestrator {
+            session_died: true,
+            ..rows[0].clone()
+        };
+        assert_eq!(actions, vec![WindowLost(rows[0].clone()), Start(died)]);
     }
 
     #[test]
@@ -535,18 +560,37 @@ mod tests {
     }
 
     #[test]
-    fn a_window_with_no_live_row_here_is_closed() {
-        let names = windows(&["orch-7", "orch-1", "task-3", "orchard", "TUI"]);
+    fn the_window_of_a_row_seen_here_that_went_is_closed() {
+        let names = windows(&["orch-7", "orch-1"]);
         let epics = [EpicBuilder::new(1).build()];
         let tasks = [task(10, 1, TaskStatus::Running)];
         let rows = [live(row(5, 1, HOST))];
+        let seen = BTreeSet::from([EpicId(1), EpicId(7)]);
 
-        let actions = plan(&epics, &[switch(1)], &tasks, &rows, Some(&names));
+        let actions = plan_orchestrators(
+            HOST,
+            &epics,
+            &[switch(1)],
+            &tasks,
+            &rows,
+            Some(&names),
+            &seen,
+        );
 
         assert_eq!(
             actions,
-            vec![CloseOrphan(TmuxWindow::for_orchestrator(EpicId(7)))]
+            vec![CloseGone(TmuxWindow::for_orchestrator(EpicId(7)))]
         );
+    }
+
+    /// Another board on the same tmux server, or this board before its rows
+    /// arrive, sees windows it never saw a row for: it closes none of them.
+    #[test]
+    fn a_window_this_board_never_saw_a_row_for_is_left_alone() {
+        let names = windows(&["orch-7", "orch-1"]);
+        let epics = [EpicBuilder::new(1).build()];
+
+        assert!(plan(&epics, &[], &[], &[], Some(&names)).is_empty());
     }
 
     #[test]
