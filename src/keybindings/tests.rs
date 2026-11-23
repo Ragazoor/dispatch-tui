@@ -738,17 +738,6 @@ fn the_help_overlay_title_names_its_own_keys() {
     );
 }
 
-/// The tmux.global toggle row names the key the runtime actually binds.
-#[test]
-fn the_tmux_toggle_row_names_the_bound_key() {
-    let want = format!("Prefix+{}", crate::runtime::AGENT_TREE_TOGGLE_KEY);
-    assert!(
-        default_bindings_in(KeyNamespace::TmuxGlobal)
-            .any(|b| b.action == "toggle_agent_tree" && b.keys.contains(&want.as_str())),
-        "{want}"
-    );
-}
-
 /// The exit keys the startup
 /// screen answers are the `exit_pane` row's.
 #[test]
@@ -765,16 +754,49 @@ fn the_startup_screens_exit_keys_are_the_exit_pane_rows_keys() {
     }
 }
 
-/// The tmux.global jump-back row names the key the runtime binds.
+/// `TmuxGlobalRowsTrackTheirBindings`: each tmux.global row's default key,
+/// in tmux's spelling, is the key the runtime binds by default.
 #[test]
-fn the_tmux_jump_back_row_names_the_bound_key() {
-    let mut chars = crate::runtime::JUMP_BACK_KEY.chars();
-    let first = chars.next().unwrap().to_ascii_uppercase();
-    let want = format!("Prefix+{first}{}", chars.as_str());
-    assert!(
-        default_bindings_in(KeyNamespace::TmuxGlobal)
-            .any(|b| b.action == "jump_to_dispatch" && b.keys.contains(&want.as_str())),
-        "{want}"
+fn the_tmux_rows_name_the_keys_the_runtime_binds_by_default() {
+    use crate::runtime::{PrefixKeys, AGENT_TREE_TOGGLE_KEY, JUMP_BACK_KEY};
+    for (action, bound) in [
+        ("jump_to_dispatch", JUMP_BACK_KEY),
+        ("toggle_agent_tree", AGENT_TREE_TOGGLE_KEY),
+    ] {
+        let row = default_bindings_in(KeyNamespace::TmuxGlobal)
+            .find(|b| b.action == action)
+            .expect(action);
+        let tmux_keys: Vec<_> = row.keys.iter().map(|k| tmux_key_name(k)).collect();
+        assert_eq!(tmux_keys, [Some(bound.to_string())], "{action}");
+    }
+    assert_eq!(PrefixKeys::from_table(KEY_BINDINGS), PrefixKeys::default());
+}
+
+/// `TmuxGlobalRowsTrackTheirBindings` under a table with both rows
+/// overridden: the runtime binds the file's keys.
+#[test]
+fn the_runtime_binds_the_overridden_tmux_keys() {
+    let load = loaded_table(
+        KeyTableReader::Board,
+        r#"[{"namespace": "tmux.global", "action": "jump_to_dispatch", "keys": ["Prefix+j"]},
+            {"namespace": "tmux.global", "action": "toggle_agent_tree", "keys": ["Prefix+Ctrl+T"]}]"#,
+    );
+    assert_eq!(
+        crate::runtime::PrefixKeys::from_table(load.table),
+        crate::runtime::PrefixKeys {
+            jump_back: "j".to_string(),
+            agent_tree_toggle: "C-t".to_string(),
+        }
+    );
+}
+
+/// A tmux.global row whose key is not a tmux key binds the default.
+#[test]
+fn a_tmux_row_without_a_tmux_key_binds_its_default() {
+    let table = table_with_keys(KeyNamespace::TmuxGlobal, "toggle_agent_tree", &["Ctrl+T"]);
+    assert_eq!(
+        crate::runtime::PrefixKeys::from_table(table),
+        crate::runtime::PrefixKeys::default()
     );
 }
 

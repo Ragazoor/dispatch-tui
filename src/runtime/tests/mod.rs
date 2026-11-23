@@ -51,13 +51,19 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
         // `config.board_window_name`.
         MockProcessRunner::ok_with_stdout(b""), // rename: list-panes -s
         MockProcessRunner::ok(),                // rename-window
+        MockProcessRunner::ok(),                // list-keys: nothing stale
         MockProcessRunner::ok(),                // bind_key (space)
         MockProcessRunner::ok(),                // bind_key (agent-tree toggle)
     ])
     .with_queued_window_lookup();
-    setup_tmux_for_tui("work", Some(&test_pane_id("%3")), &mock);
+    setup_tmux_for_tui(
+        "work",
+        Some(&test_pane_id("%3")),
+        &PrefixKeys::default(),
+        &mock,
+    );
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 4);
+    assert_eq!(calls.len(), 5);
     assert_eq!(
         calls[0].1,
         vec![
@@ -82,16 +88,17 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     // without it a window whose name merely starts with the TUI window's name
     // could absorb the jump. See the `TmuxWindowTargetedExactly` invariant in
     // docs/specs/dispatch.allium.
+    assert_eq!(calls[2].1, vec!["list-keys", "-T", "prefix"]);
     assert_eq!(
-        calls[2].1,
+        calls[3].1,
         vec![
             "bind-key",
-            "space",
+            "Space",
             &format!("select-window -t ={TUI_WINDOW_NAME}")
         ]
     );
     assert_eq!(
-        calls[3].1,
+        calls[4].1,
         vec!["bind-key", AGENT_TREE_TOGGLE_KEY, AGENT_TREE_TOGGLE_COMMAND]
     );
 }
@@ -103,13 +110,14 @@ async fn setup_tmux_for_tui_binds_keys_but_renames_nothing_without_a_self_pane()
     // what the next launch retires by. The keybindings are session-wide and do
     // not depend on the pane, so they are still set.
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // list-keys
         MockProcessRunner::ok(), // bind_key (space)
         MockProcessRunner::ok(), // bind_key (agent-tree toggle)
     ])
     .with_queued_window_lookup();
-    setup_tmux_for_tui("work", None, &mock);
+    setup_tmux_for_tui("work", None, &PrefixKeys::default(), &mock);
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 3);
     assert!(
         !calls
             .iter()
@@ -134,11 +142,12 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
         "work",
         Some(&own),
         Some(&test_tmux_window("my-shell")),
+        &PrefixKeys::default(),
         &mock,
     );
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 4);
-    assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
+    assert_eq!(calls[0].1, vec!["unbind-key", "Space"]);
     assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
     // Only `my-shell`, the *new* name, stays a name; the target is the
     // board's own pane.
@@ -150,18 +159,19 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
 #[tokio::test]
 async fn a_signalled_board_unbinds_the_keys_it_bound() {
     let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
-    let bound = std::sync::atomic::AtomicBool::new(true);
+    let bound = OnceLock::new();
+    bound.set(moved_keys()).unwrap();
     unbind_keys_on_termination(&bound, &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
-    assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
+    assert_eq!(calls[0].1, vec!["unbind-key", "j"]);
+    assert_eq!(calls[1].1, vec!["unbind-key", "C-t"]);
 }
 
 #[tokio::test]
 async fn a_board_signalled_before_binding_unbinds_nothing() {
     let mock = MockProcessRunner::new(vec![]);
-    let bound = std::sync::atomic::AtomicBool::new(false);
+    let bound = OnceLock::new();
     unbind_keys_on_termination(&bound, &mock);
     assert!(mock.recorded_calls().is_empty());
 }
@@ -172,11 +182,17 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
         MockProcessRunner::ok(), // unbind_key (space)
         MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
     ]);
-    teardown_tmux_for_tui("work", Some(&test_pane_id("%7")), None, &mock);
+    teardown_tmux_for_tui(
+        "work",
+        Some(&test_pane_id("%7")),
+        None,
+        &moved_keys(),
+        &mock,
+    );
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
-    assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
+    assert_eq!(calls[0].1, vec!["unbind-key", "j"]);
+    assert_eq!(calls[1].1, vec!["unbind-key", "C-t"]);
 }
 
 #[tokio::test]
@@ -185,8 +201,67 @@ async fn teardown_tmux_for_tui_without_own_pane_leaves_the_name_alone() {
         MockProcessRunner::ok(), // unbind_key (space)
         MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
     ]);
-    teardown_tmux_for_tui("work", None, Some(&test_tmux_window("my-shell")), &mock);
+    teardown_tmux_for_tui(
+        "work",
+        None,
+        Some(&test_tmux_window("my-shell")),
+        &PrefixKeys::default(),
+        &mock,
+    );
     assert_eq!(mock.recorded_calls().len(), 2, "no pane, no rename");
+}
+
+/// Prefix keys an override file moved off both defaults.
+fn moved_keys() -> PrefixKeys {
+    PrefixKeys {
+        jump_back: "j".to_string(),
+        agent_tree_toggle: "C-t".to_string(),
+    }
+}
+
+// keybindings.allium: TmuxKeysComeFromTheTable, NoStalePrefixKeySurvivesAStart.
+#[tokio::test]
+async fn setup_tmux_for_tui_moves_a_stale_binding_to_the_tables_key() {
+    let listing = format!(
+        "bind-key    -T prefix x       {}\n\
+         bind-key    -T prefix y       {AGENT_TREE_TOGGLE_COMMAND}\n\
+         bind-key    -T prefix z       select-window -t =other\n",
+        jump_back_command()
+    );
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(listing.as_bytes()), // list-keys
+        MockProcessRunner::ok(),                               // unbind x
+        MockProcessRunner::ok(),                               // unbind y
+        MockProcessRunner::ok(),                               // bind j
+        MockProcessRunner::ok(),                               // bind C-t
+    ])
+    .with_queued_window_lookup();
+    setup_tmux_for_tui("work", None, &moved_keys(), &mock);
+    let calls: Vec<Vec<String>> = mock.recorded_calls().into_iter().map(|c| c.1).collect();
+    assert_eq!(
+        calls,
+        vec![
+            vec!["list-keys", "-T", "prefix"],
+            vec!["unbind-key", "x"],
+            vec!["unbind-key", "y"],
+            vec!["bind-key", "j", &jump_back_command()],
+            vec!["bind-key", "C-t", AGENT_TREE_TOGGLE_COMMAND],
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_failed_listing_still_binds_the_keys() {
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("no server"), // list-keys
+        MockProcessRunner::ok(),              // bind j
+        MockProcessRunner::ok(),              // bind C-t
+    ])
+    .with_queued_window_lookup();
+    setup_tmux_for_tui("work", None, &moved_keys(), &mock);
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[1].1, vec!["bind-key", "j", &jump_back_command()]);
 }
 
 /// One in-memory store, shared by every service the fixture builds.

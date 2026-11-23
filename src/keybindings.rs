@@ -543,8 +543,8 @@ mod overrides;
 mod table;
 pub use overrides::{
     check_overrides, is_key_name, load_key_table, read_override_entries, set_key_overrides,
-    KeyChange, KeyLoadError, KeyOverrideProblem, KeySetError, KeySetOutcome, KeyTableLoad,
-    KeyTableReader, KEY_OVERRIDE_FILE_NAME,
+    tmux_key_name, KeyChange, KeyLoadError, KeyOverrideProblem, KeySetError, KeySetOutcome,
+    KeyTableLoad, KeyTableReader, KEY_OVERRIDE_FILE_NAME, NAMED_KEYS,
 };
 pub use table::KEY_BINDINGS;
 

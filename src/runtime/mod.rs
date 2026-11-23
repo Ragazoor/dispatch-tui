@@ -9,7 +9,7 @@ use ratatui::Terminal;
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -33,25 +33,10 @@ const QUIT_RESTORE_TIMEOUT: Duration = Duration::from_secs(2);
 /// path that retires it — see [`crate::startup::BOARD_WINDOW_NAME`].
 const TUI_WINDOW_NAME: TmuxWindow = crate::startup::BOARD_WINDOW_NAME;
 
-/// Key (after the tmux prefix) that toggles a companion agent-tree pane's
-/// visibility in whichever agent window it's pressed in. Matches
-/// config.agent_tree_toggle_key in docs/specs/agent-tree.allium.
-pub(crate) const AGENT_TREE_TOGGLE_KEY: &str = "e";
-
-/// The tmux key bound (after the prefix) to jump back to the board window.
-pub(crate) const JUMP_BACK_KEY: &str = "space";
-
-/// Command bound to [`AGENT_TREE_TOGGLE_KEY`]. `#{window_name}` is expanded
-/// by tmux itself, before invoking the shell, to the name of whichever window
-/// was focused when the key was pressed — so `dispatch toggle-agent-tree-pane`
-/// is handed the target window without this process ever having to ask tmux
-/// which window is focused. `-b` backgrounds the shell job so the keypress
-/// doesn't block the tmux client.
-const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
-    "run-shell -b \"",
-    crate::process::dispatch_program!(),
-    " toggle-agent-tree-pane '#{window_name}'\""
-);
+mod prefix_keys;
+pub use prefix_keys::{bind_prefix_keys, jump_back_command, unbind_prefix_keys, PrefixKeys};
+#[cfg(test)]
+pub(crate) use prefix_keys::{AGENT_TREE_TOGGLE_COMMAND, AGENT_TREE_TOGGLE_KEY, JUMP_BACK_KEY};
 
 use crate::embeddings::EmbeddingService;
 use crate::models::{PaneId, TaskId, TmuxWindow, WorkPackageId};
@@ -119,7 +104,12 @@ fn publish_board_port(session: &str, port: u16, runner: &dyn ProcessRunner) {
 /// session comes from the probe `run_tui` already makes, and reading
 /// `$TMUX_PANE` here would leave every test at the mercy of an environment the
 /// harness shares across threads.
-fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn ProcessRunner) {
+fn setup_tmux_for_tui(
+    session: &str,
+    self_pane: Option<&PaneId>,
+    keys: &PrefixKeys,
+    runner: &dyn ProcessRunner,
+) {
     // The rename must target this process's own pane, and only that. Every
     // fallback resolves to the session's *active* pane instead — `-t ""` and
     // `current_pane_id` alike (`tmux::self_pane_id`) — so without `$TMUX_PANE`
@@ -141,35 +131,19 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&PaneId>, runner: &dyn Pr
     } else {
         tracing::warn!("no $TMUX_PANE: leaving this window's name alone");
     }
-    // `=` anchors the target to an exact name match. tmux otherwise resolves a
-    // `-t <name>` by prefix, so a window whose name merely starts with
-    // TUI_WINDOW_NAME could absorb this jump. Unlike every other window target
-    // in the codebase this one cannot go through `tmux::window_target`: the
-    // binding is a string tmux executes later, and a pane ID captured now would
-    // be stale by then. The sigil does work for `select-window` specifically
-    // (verified against tmux 3.5a; it does not for `send-keys` or
-    // `set-option -w`). See `tmux::window_target` for the full picture.
-    let _ = tmux::bind_key(
-        JUMP_BACK_KEY,
-        &format!("select-window -t ={TUI_WINDOW_NAME}"),
-        runner,
-    );
-    let _ = tmux::bind_key(AGENT_TREE_TOGGLE_KEY, AGENT_TREE_TOGGLE_COMMAND, runner);
-}
-
-/// Remove the server-wide key bindings [`wire_tmux_for_tui`] made.
-fn unbind_board_keys(runner: &dyn ProcessRunner) {
-    let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
-    let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
+    bind_prefix_keys(keys, runner);
 }
 
 /// The signalled exit's share of the tmux teardown (`startup.allium`:
 /// `ASignalledBoardRunsItsExit`): unbind the board's keys, but only once it
 /// has bound them, so a board signalled while starting leaves another
 /// board's bindings alone.
-pub(super) fn unbind_keys_on_termination(keys_bound: &AtomicBool, runner: &dyn ProcessRunner) {
-    if keys_bound.load(Ordering::SeqCst) {
-        unbind_board_keys(runner);
+pub(super) fn unbind_keys_on_termination(
+    keys_bound: &OnceLock<PrefixKeys>,
+    runner: &dyn ProcessRunner,
+) {
+    if let Some(keys) = keys_bound.get() {
+        unbind_prefix_keys(keys, runner);
     }
 }
 
@@ -178,9 +152,10 @@ fn teardown_tmux_for_tui(
     session: &str,
     self_pane: Option<&PaneId>,
     original_name: Option<&TmuxWindow>,
+    keys: &PrefixKeys,
     runner: &dyn ProcessRunner,
 ) {
-    unbind_board_keys(runner);
+    unbind_prefix_keys(keys, runner);
     if let Some(name) = original_name {
         // Targets this board's own pane, like the outbound rename. A lookup of
         // the name `TUI` is server-wide: with two boards in two sessions it
@@ -455,7 +430,7 @@ pub async fn run_tui(
     // launch, and a named board's own record goes when this function does.
     forget_stale_store_record_for(&target, data_dir);
     let _record_guard = StoreRecordGuard::for_target(&target, data_dir);
-    let keys_bound = Arc::new(AtomicBool::new(false));
+    let keys_bound = Arc::new(OnceLock::new());
     clean_up_on_termination(
         target.managed().cloned(),
         target.is_named().then(|| data_dir.to_path_buf()),
@@ -484,8 +459,9 @@ pub async fn run_tui(
 
     let mut terminal = enter_tui_terminal()?;
     let tmux_runner = runtime.runner.clone();
-    let tmux_wiring = wire_tmux_for_tui(&server, port, &*tmux_runner);
-    keys_bound.store(true, Ordering::SeqCst);
+    let prefix_keys = PrefixKeys::from_table(app.key_table());
+    let tmux_wiring = wire_tmux_for_tui(&server, port, &prefix_keys, &*tmux_runner);
+    let _ = keys_bound.set(prefix_keys.clone());
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -534,6 +510,7 @@ pub async fn run_tui(
         &tmux_wiring.session,
         tmux_wiring.self_pane.as_ref(),
         tmux_wiring.original_window_name.as_ref(),
+        &prefix_keys,
         &*tmux_runner,
     );
 
@@ -578,7 +555,12 @@ struct TmuxWiring {
 /// Set up the tmux keybinding (Prefix+Space → jump back to this window) and
 /// publish the store address and board port. Best-effort: failures don't
 /// prevent the TUI from starting.
-fn wire_tmux_for_tui(server: &str, port: u16, tmux_runner: &dyn ProcessRunner) -> TmuxWiring {
+fn wire_tmux_for_tui(
+    server: &str,
+    port: u16,
+    keys: &PrefixKeys,
+    tmux_runner: &dyn ProcessRunner,
+) -> TmuxWiring {
     // One probe for the session and the window name together, rather than one
     // each: they are read for the same purpose and a window renamed between two
     // calls would be described by neither answer. See
@@ -591,7 +573,7 @@ fn wire_tmux_for_tui(server: &str, port: u16, tmux_runner: &dyn ProcessRunner) -
     let session = here
         .as_ref()
         .map_or(String::new(), |c| c.session_name.clone());
-    setup_tmux_for_tui(&session, self_pane.as_ref(), tmux_runner);
+    setup_tmux_for_tui(&session, self_pane.as_ref(), keys, tmux_runner);
     publish_store_server(&session, server, tmux_runner);
     publish_board_port(&session, port, tmux_runner);
     TmuxWiring {

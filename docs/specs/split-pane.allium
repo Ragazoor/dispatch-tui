@@ -1184,7 +1184,7 @@ rule JumpBackToTuiWindow {
         --   tmux bind-key space "select-window -t =TUI"
         -- The TUI window is renamed to the fixed "TUI" constant at startup so
         -- the binding can target it by name. Both the binding and the rename
-        -- are torn down on exit (unbind-key space; rename restored).
+        -- are torn down on exit (unbind-key Space; rename restored).
         -- Space is the DEFAULT key. The key bound is the key of the
         -- tmux.global jump_to_dispatch row of the board's key table, which a
         -- user's override may have changed (keybindings.allium:
@@ -1210,7 +1210,10 @@ rule JumpBackToTuiWindow {
         -- identity captured at registration time would be stale by then.
         --
         -- Installed by src/runtime/mod.rs::setup_tmux_for_tui and removed by
-        -- src/runtime/mod.rs::teardown_tmux_for_tui. Best-effort: a failing tmux call does not prevent the TUI starting.
+        -- src/runtime/mod.rs::teardown_tmux_for_tui, both through
+        -- src/runtime/prefix_keys.rs::bind_prefix_keys and
+        -- src/runtime/prefix_keys.rs::unbind_prefix_keys. Best-effort: a
+        -- failing tmux call does not prevent the TUI starting.
         --
         -- Surfaced in the in-TUI help overlay ([?]) and in keybinding_search
         -- as a row of the tmux.global group, marked as handled by tmux,

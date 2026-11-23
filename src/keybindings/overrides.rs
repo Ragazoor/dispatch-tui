@@ -100,6 +100,41 @@ pub fn is_key_name(k: &str) -> bool {
     is_single_key(k) || (is_chord(k) && k.chars().all(|c| is_character(&c.to_string())))
 }
 
+/// A tmux.global key in tmux's own spelling (`TmuxKeysComeFromTheTable`):
+/// the part after "Prefix+", a named key by tmux's name for it, "Ctrl+X" as
+/// "C-x" and "Alt+X" as "M-x". `None` when `key` is not "Prefix+" and one key.
+pub fn tmux_key_name(key: &str) -> Option<String> {
+    let rest = key.strip_prefix(TMUX_PREFIX)?;
+    if !is_single_key(rest) {
+        return None;
+    }
+    let (modifier, base) = MODIFIERS
+        .iter()
+        .find_map(|m| rest.strip_prefix(m).map(|base| (*m, base)))
+        .unwrap_or(("", rest));
+    let tmux_modifier = match modifier {
+        "Ctrl+Alt+" => "C-M-",
+        "Ctrl+" => "C-",
+        "Alt+" => "M-",
+        _ => "",
+    };
+    let tmux_base = match base {
+        "Esc" => "Escape".to_string(),
+        "BackTab" => "BTab".to_string(),
+        "Backspace" => "BSpace".to_string(),
+        "Delete" => "DC".to_string(),
+        "Insert" => "IC".to_string(),
+        "PageUp" => "PPage".to_string(),
+        "PageDown" => "NPage".to_string(),
+        // tmux reads a bare `;` argument as the end of a command.
+        ";" => "\\;".to_string(),
+        named if is_named_key(named) => named.to_string(),
+        c if !modifier.is_empty() => c.to_lowercase(),
+        c => c.to_string(),
+    };
+    Some(format!("{tmux_modifier}{tmux_base}"))
+}
+
 /// A key typed as data in a text namespace: a character or Space.
 pub fn is_typed_key(k: &str) -> bool {
     is_character(k) || k == "Space"

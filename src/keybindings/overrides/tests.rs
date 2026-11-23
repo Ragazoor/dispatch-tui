@@ -694,3 +694,33 @@ fn any_override_file_gives_a_well_formed_table() {
         assert!(errors.len() <= entries.len());
     }
 }
+
+/// `TmuxKeysComeFromTheTable`: a tmux.global key in tmux's spelling.
+#[test]
+fn a_tmux_key_is_written_in_tmuxs_spelling() {
+    for (key, tmux) in [
+        ("Prefix+e", Some("e")),
+        ("Prefix+E", Some("E")),
+        ("Prefix+#", Some("#")),
+        ("Prefix+;", Some("\\;")),
+        ("Prefix+Space", Some("Space")),
+        ("Prefix+Esc", Some("Escape")),
+        ("Prefix+BackTab", Some("BTab")),
+        ("Prefix+Backspace", Some("BSpace")),
+        ("Prefix+Delete", Some("DC")),
+        ("Prefix+Insert", Some("IC")),
+        ("Prefix+PageUp", Some("PPage")),
+        ("Prefix+PageDown", Some("NPage")),
+        ("Prefix+F5", Some("F5")),
+        ("Prefix+Ctrl+X", Some("C-x")),
+        ("Prefix+Alt+B", Some("M-b")),
+        ("Prefix+Ctrl+Alt+K", Some("C-M-k")),
+        ("Prefix+Ctrl+Up", Some("C-Up")),
+        ("e", None),
+        ("Prefix+", None),
+        ("Prefix+gg", None),
+        ("Prefix+Hyper+e", None),
+    ] {
+        assert_eq!(tmux_key_name(key).as_deref(), tmux, "{key}");
+    }
+}

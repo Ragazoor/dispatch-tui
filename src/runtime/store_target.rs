@@ -133,7 +133,7 @@ pub(super) fn abort_managed_startup(
 pub(super) fn clean_up_on_termination(
     store: Option<Arc<crate::spacetime::managed_store::ManagedStore>>,
     record_db: Option<std::path::PathBuf>,
-    keys_bound: Arc<std::sync::atomic::AtomicBool>,
+    keys_bound: Arc<std::sync::OnceLock<super::PrefixKeys>>,
 ) {
     use tokio::signal::unix::{signal, SignalKind};
     let (Ok(mut hangup), Ok(mut terminate)) = (

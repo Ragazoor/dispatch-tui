@@ -1107,6 +1107,65 @@ pub fn set_session_environment(
     Ok(())
 }
 
+/// One binding of tmux's prefix table: the key as `bind-key`/`unbind-key`
+/// take it as an argument, and the command as `list-keys` prints it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrefixBinding {
+    pub key: String,
+    pub command: String,
+}
+
+/// Every binding of the prefix table.
+pub fn prefix_bindings(runner: &dyn ProcessRunner) -> Result<Vec<PrefixBinding>> {
+    let listing = run_checked_stdout(runner, &["list-keys", "-T", "prefix"], "list-keys")?;
+    Ok(parse_prefix_bindings(&listing))
+}
+
+/// Parse `list-keys -T prefix` lines (`bind-key [-r] -T prefix <key> <command>`).
+/// tmux prints a key with a backslash before a character its config syntax
+/// treats specially; as an argument only `\;` keeps it, since a bare `;` ends
+/// the command.
+pub(crate) fn parse_prefix_bindings(listing: &str) -> Vec<PrefixBinding> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut rest = line.trim_start();
+            let mut table = None;
+            while table.is_none() {
+                let (token, after) = split_token(rest)?;
+                rest = after;
+                if token == "-T" {
+                    let (name, after) = split_token(rest)?;
+                    table = Some(name);
+                    rest = after;
+                }
+            }
+            if table != Some("prefix") {
+                return None;
+            }
+            let (printed, command) = split_token(rest)?;
+            let key = match printed.strip_prefix('\\') {
+                Some(";") => printed,
+                Some(unescaped) if !unescaped.is_empty() => unescaped,
+                _ => printed,
+            };
+            Some(PrefixBinding {
+                key: key.to_string(),
+                command: command.trim().to_string(),
+            })
+        })
+        .collect()
+}
+
+/// The first whitespace-separated token of `s` and what follows it.
+fn split_token(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    if s.is_empty() {
+        return None;
+    }
+    Some(s.split_at(s.find(char::is_whitespace).unwrap_or(s.len())))
+}
+
 /// Remove a tmux key binding (previously registered with `bind-key`).
 pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(runner, &["unbind-key", key], "unbind-key")?;

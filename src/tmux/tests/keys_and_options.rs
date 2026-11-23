@@ -398,3 +398,28 @@ fn focus_events_write_appends_after_a_commented_line_and_keeps_mode() {
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o640);
 }
+
+#[test]
+fn parse_prefix_bindings_reads_key_and_command() {
+    let listing = "bind-key    -T prefix Space   select-window -t =TUI\n\
+bind-key -r -T prefix C-Up    resize-pane -U\n\
+bind-key    -T prefix \\#      select-window -t =TUI\n\
+bind-key    -T prefix \\;      last-pane\n\
+bind-key    -T root   e       send-keys x\n\
+bind-key    -T prefix e       run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"";
+    let got: Vec<(String, String)> = parse_prefix_bindings(listing)
+        .into_iter()
+        .map(|b| (b.key, b.command))
+        .collect();
+    let want = [
+        ("Space", "select-window -t =TUI"),
+        ("C-Up", "resize-pane -U"),
+        ("#", "select-window -t =TUI"),
+        ("\\;", "last-pane"),
+        (
+            "e",
+            "run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"",
+        ),
+    ];
+    assert_eq!(got, want.map(|(k, c)| (k.to_string(), c.to_string())));
+}
