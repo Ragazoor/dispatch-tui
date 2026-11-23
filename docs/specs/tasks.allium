@@ -20,6 +20,7 @@ use "./core.allium" as core
 use "./board-layout.allium" as board_layout
 use "./settings.allium" as settings
 use "./store-split.allium" as split
+use "./orchestrators.allium" as orch
 
 -- The one board-wide multi-selection every batch rule in this file
 -- consumes. See "Multi-Selection".
@@ -1725,7 +1726,8 @@ rule BookmarkEndsWithTheTaskFinishing {
 -- (orchestrators.allium, O5).
 
 rule MarkTaskReady {
-    when: TaskMarkedReady(task, marked_by, agent_name?)
+    -- From the board and MCP surfaces in orchestrators.allium.
+    when: orch/TaskMarkedReady(task, marked_by, agent_name?)
 
     requires: exists task
     requires: task.status = backlog
@@ -1755,7 +1757,7 @@ rule MarkTaskReady {
 }
 
 rule ClearReadyMark {
-    when: TaskReadyCleared(task)
+    when: orch/TaskReadyCleared(task)
 
     requires: exists task
 

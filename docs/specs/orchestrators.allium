@@ -1115,13 +1115,14 @@ surface OrchestratorNotifications {
 
 -- Each of these is true once its build step lands, and moves to its owner
 -- then:
---   - core.allium: the entities above. The Agent entity and agents.allium
---     stay as they are, for task agents only (OrchestratorIdentity).
+--   - core.allium: the entities above (EpicOrchestration and ReadyMark are
+--     there already). The Agent entity and agents.allium stay as they are,
+--     for task agents only (OrchestratorIdentity).
 --   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
 --     toggle key and header indicator, the chain that started the next
 --     subtask when a session closed, its failure report and the stalled-chain
---     mark on a card. Also the re-parent and delete effects, and the epic
---     edit form's orchestrator section.
+--     mark on a card. Also the epic edit form's orchestrator section. (The
+--     re-parent and delete effects on the switch are there already.)
 --   - store-split.allium: the chain's request origin goes, and
 --     RequestDispatch gains the limit. schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.

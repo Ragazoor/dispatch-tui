@@ -1111,7 +1111,8 @@ rule ReparentingKeepsOneOrchestratorOnAPath {
                     orch/OrchestratorSwitchedOff(e)
 
     @guidance
-        -- In the same write as the move. A move to the root, or under an
+        -- In the same write as the move. The reply to the move says which
+        -- orchestrators were switched off. A move to the root, or under an
         -- epic nothing above orchestrates, switches nothing off.
 }
 

@@ -360,3 +360,50 @@ fn leaving_backlog_drops_the_mark_and_coming_back_does_not_restore_it() {
     );
     assert!(ready(&store, untouched).is_some());
 }
+
+#[test]
+fn a_feed_dropping_a_ready_task_takes_its_mark_with_it() {
+    let store = Store::new();
+    let row = Epic {
+        title: "Feed".into(),
+        feed_command: "echo []".into(),
+        ..blank_epic()
+    };
+    store
+        .call("alice", |ctx| create_epic(ctx, row))
+        .expect("create_epic");
+    let epic = store.db().epics().iter().map(|e| e.id).max().unwrap();
+    store.register_host_for(HOST_A, "alice");
+    let ingest = |items: Vec<FeedIngestItem>| {
+        store
+            .call("alice", |ctx| {
+                ingest_feed(ctx, epic, items, false, "creator".into(), HOST_A.into())
+            })
+            .expect("ingest_feed");
+    };
+    ingest(vec![FeedIngestItem {
+        item: FeedTaskUpsertItem {
+            external_id: "pr-1".into(),
+            title: "pr 1".into(),
+            description: String::new(),
+            repo_path: "/repo".into(),
+            status: "backlog".into(),
+            sub_status: "none".into(),
+            base_branch: "main".into(),
+            tag: "chore".into(),
+            labels: "[]".into(),
+            sort_order: None,
+            url: String::new(),
+            url_type: String::new(),
+            wrap_up_mode: String::new(),
+        },
+        signals: vec![],
+    }]);
+    let task = store.max_task_id();
+    mark(&store, task, "operator", "").expect("mark");
+
+    ingest(vec![]);
+
+    assert!(store.db().tasks().id().find(task).is_none(), "the stale task is gone");
+    assert!(ready(&store, task).is_none());
+}
