@@ -300,7 +300,7 @@
 --     host's initial subscription rows when the board starts, and a row
 --     already running when its host restarts is not resumed: the starting
 --     board fails it ("host restarted")
---     (HostRestartFailsInterruptedSessionRequests). For a session_exit or
+--     (HostRestartFailsInterruptedSessionRequests). For an exit_session or
 --     close row the starting board then still kills the window the row
 --     names, best effort (pr-workflow.allium: ExitSessionTeardown).
 --   - W9, deletion. As D8: deleting a task fails its open session request
@@ -365,7 +365,7 @@
 --     the restart sweep and the task-deletion failure apply to close rows as
 --     to exit_session rows. An OPEN session or dispatch request on the task
 --     is failed "task closed" in the same transaction rather than refusing
---     the close (CloseFailsOpenRequests): a stuck session_wrap-up must not block
+--     the close (CloseFailsOpenRequests): a stuck wrap_up row must not block
 --     closing, and W1's one-open-row rule holds because the old row is
 --     failed before the close row is written. EveryExitSessionHadAWrapUp
 --     applies to exit_session rows only. The tool waits for nothing.
@@ -2273,9 +2273,10 @@ invariant CloseRowsCarryNoTokenAndNoChain {
 -- nothing and provisions nothing. Only the board whose claim of the
 -- row was accepted (HostClaimsDispatch) provisions it; a second board
 -- on the same host, or a redelivered row, is refused by the state
--- check. And a row that has finished cannot be reported on again, so a
--- worktree provisioned after its request timed out is never recorded
--- on the task. Not an expression because it constrains the order of
+-- check. And a row that has finished takes no new report (only an exact
+-- repeat of its dispatched report, which writes nothing:
+-- HostRepeatsDispatchedReport), so a worktree provisioned after its
+-- request timed out is never recorded on the task. Not an expression because it constrains the order of
 -- writes, not any single state.
 
 -- OnlyTheClaimedSessionRequestIsServed:
@@ -2283,8 +2284,9 @@ invariant CloseRowsCarryNoTokenAndNoChain {
 -- claim of the row was accepted (HostClaimsSessionRequest) runs the
 -- rebase or the teardown; a second board on the same host, or a
 -- redelivered row, is refused by the state check. A row that has
--- finished cannot be reported on again, so a rebase that finished
--- after its row timed out issues no token. Not an expression because
+-- finished takes no new report (only a repeat of its done report, which
+-- writes nothing: HostRepeatsSessionRequestDone), so a rebase that
+-- finished after its row timed out issues no token. Not an expression because
 -- it constrains the order of writes, not any single state.
 
 -- FeedTeardownRequestsAreForTheHoldingHost:

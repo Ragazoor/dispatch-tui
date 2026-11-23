@@ -190,6 +190,10 @@ rule StartAgentOnFreshLaunch {
                 tmux_window: null,
                 last_pre_tool_use_at: now
             )
+    -- Every subagent entry of the task goes, whichever agent it names.
+    ensures:
+        for entry in core/SubagentEntries where task = task:
+            not exists entry
 
     @guidance
         -- The new agent starts without a window and turns live when
@@ -204,7 +208,11 @@ rule StartAgentOnFreshLaunch {
         -- core's defaults: no live subagents and no pending Stop (an assigned
         -- agent has never run, AssignedAgentHasNoSession). The agent it
         -- replaces lets go of its window, subagent entries and any deferred
-        -- Stop as it ends (EndedAgentLetsGoOfItsSession).
+        -- Stop as it ends (EndedAgentLetsGoOfItsSession). The claim also
+        -- deletes every subagent entry of the task, whatever agent it names
+        -- (spacetime/module/src/dispatch_request.rs::create_dispatch_request).
+        -- Only the replaced agent's entries can exist then, so this is a
+        -- safety net: the task starts its new session with no subagents.
         --
         -- Every claim gets an agent, whichever path wrote the request: the
         -- request_dispatch reducer and the epic chain inside

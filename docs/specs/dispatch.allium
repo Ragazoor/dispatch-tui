@@ -42,9 +42,9 @@ contract DispatchRequestServing {
         -- A fresh dispatch clears every core/SubagentEntry left over from a
         -- prior run of this task (a backlog task should never carry live
         -- subagents from before) and resets live_subagents to 0. The
-        -- module does this in the claim's own transaction
-        -- (agents.allium: StartAgentOnFreshLaunch), not ProvisionDispatch. stop_pending
-        -- is cleared too, but the HookSubagentStop drain path does NOT run
+        -- module does this in the claim's own transaction (agents.allium:
+        -- StartAgentOnFreshLaunch, EndedAgentLetsGoOfItsSession), not
+        -- ProvisionDispatch. stop_pending is cleared too, but the HookSubagentStop drain path does NOT run
         -- there even if it was set: the claim moves the task into Running,
         -- and draining to Review in the same write would leave a task
         -- freshly-dispatched-and-in-Review. The dispatch is the more
