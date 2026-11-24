@@ -866,8 +866,11 @@ surface WrapUpSession {
         -- When the task's prompt names an orchestrator, the agent sends it a
         -- short outcome report after the commit and before the closing
         -- sequence: what it delivered, on which path, and what is left open
-        -- (orchestrators.allium: QuestionsHaveOneShape). Without one it sends
-        -- nothing. The report is a message and changes nothing in the store.
+        -- (orchestrators.allium: QuestionsHaveOneShape). On the pr path it is
+        -- sent once the PR exists (DraftPullRequestOpened) and names the PR's
+        -- URL, so the orchestrator learns where the work went. Without an
+        -- orchestrator it sends nothing. The report is a message and changes
+        -- nothing in the store.
 
     @guarantee RateBeforeClosing
         -- Before session_wrap-up is called, the agent rates knowledge it acted

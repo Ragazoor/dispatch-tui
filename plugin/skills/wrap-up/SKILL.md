@@ -62,11 +62,11 @@ If `task_search` printed a `Verify command:` line, then on the rebase and pr pat
 
 Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `session_wrap-up` refuses a dirty worktree.
 
-If your task's prompt names an orchestrator, send it a short outcome report now, as a message: what you delivered, on which path, and what is left open.
-
 ## Step 7: The closing sequence
 
-Run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
+If your task's prompt names an orchestrator, send it a short outcome report first, as a message: what you delivered, on which path, and what is left open. On the pr path, send it once the PR exists and name its URL.
+
+Then run these back to back in one turn; any pause risks going idle with `{base_branch}` already fast-forwarded and the task still in its old status.
 
 1. **Rate retrieved knowledge** in one `learning_rate` call: each entry you acted on and have not rated yet (`helped` or `wrong`), and every entry from "## Validated knowledge for this task" that did not fit this task `not_applicable`. Those verdicts are how the store learns to stop injecting an entry here. The `learnings` skill has the details.
 2. **`session_wrap-up(task_id, action)`.** It returns an **Exit token**. If it refuses — uncommitted changes, a rebase conflict — show the user the exact message. For a dirty tree, commit (Step 6) and call `session_wrap-up` again; for a conflict, suggest resolution steps. Any other refusal (a backlog or review-tagged task, no worktree, the main checkout not on `{base_branch}`): show the exact message and stop. Do not call `session_exit` without a token.

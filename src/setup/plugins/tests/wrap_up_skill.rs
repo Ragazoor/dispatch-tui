@@ -258,6 +258,10 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
             "If your task's prompt names an orchestrator, send it a short outcome report",
         ),
         (
+            "ReportsTheOutcomeToItsOrchestrator",
+            "On the pr path, send it once the PR exists and name its URL",
+        ),
+        (
             "PathIsTheOperatorsChoice",
             "even work that looks like a PR may want a rebase",
         ),
