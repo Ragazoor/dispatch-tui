@@ -570,8 +570,15 @@ rule OrchestratorStartsATask {
         -- The limit is every start's, whoever asks (O7; store-split.allium:
         -- RequestDispatch). Ready is not: the store never checks the mark,
         -- and the operator starts any backlog task with the usual key, marked
-        -- or not. The three requires above are the orchestrator's own
-        -- discipline, from its prompt, and no store check.
+        -- or not. Ready stays the orchestrator's own discipline, from its
+        -- prompt. Backlog is a store check through RequestDispatch. The
+        -- covering requires is a store check on the orchestrator's own start
+        -- only ("task <id> is not in epic <id>, which <name> orchestrates"),
+        -- because the start writes its log entry in the same transaction and
+        -- must not write it under another epic; the operator's and other
+        -- agents' starts are not checked. Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
         --
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on

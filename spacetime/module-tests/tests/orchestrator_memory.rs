@@ -132,6 +132,24 @@ fn a_start_needs_a_reason_and_a_known_orchestrator() {
 }
 
 #[test]
+fn an_orchestrator_cannot_start_a_task_outside_its_epic() {
+    let store = Store::new();
+    let (epic, _, o) = setup(&store);
+    let other_epic = store.create_epic("alice", "Other", false);
+    let outside = store.create("alice", epic_task("x", other_epic, "backlog"));
+
+    let why = store
+        .call("alice", |ctx| {
+            orchestrator_request_dispatch(ctx, outside, HOST.into(), o.name.clone(), "r".into())
+        })
+        .unwrap_err();
+
+    assert!(why.contains(&format!("task {outside} is not in epic {epic}")), "{why}");
+    assert_eq!(store.task(outside).status, "backlog");
+    assert!(log(&store, epic).is_empty());
+}
+
+#[test]
 fn an_answer_is_logged_on_its_task() {
     let store = Store::new();
     let (epic, task, o) = setup(&store);

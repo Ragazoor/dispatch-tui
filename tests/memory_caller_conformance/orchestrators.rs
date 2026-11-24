@@ -730,6 +730,41 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
         both!(raise_orchestrator_down_item(id, host)).expect("down");
         both!(raise_orchestrator_down_item(id, host)).expect("down, asked again");
 
+        // A start of a task outside the epic is refused on both sides.
+        let outside_epic = bindings::Epic {
+            title: "Outside".into(),
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let other = real.create_epic(outside_epic.clone()).await.unwrap();
+        assert_eq!(other, mem.create_epic(outside_epic).await.unwrap());
+        wait_for!(rows_real.epic(other).is_some());
+        let outside = create_task_both(
+            &real,
+            &mem,
+            &rows_real,
+            &rows_mem,
+            bindings::Task {
+                created_by: identity.clone(),
+                ..blank_task_in_epic(other.0)
+            },
+        )
+        .await;
+        let wanted = format!("task {} is not in epic {}", outside.0, epic.0);
+        for (caller, name) in [
+            (&real as &dyn ReducerCaller, o_real.name.clone()),
+            (&mem as &dyn ReducerCaller, o_mem.name.clone()),
+        ] {
+            match caller
+                .orchestrator_request_dispatch(outside, host.clone(), name, "r".into())
+                .await
+                .unwrap()
+            {
+                ReducerOutcome::Refused(why) => assert!(why.contains(&wanted), "{why}"),
+                other => panic!("an outside start must be refused: {other:?}"),
+            }
+        }
+
         // A start writes its reason in the request's transaction; a blank
         // reason is refused before anything is written.
         let blank = String::from(" ");

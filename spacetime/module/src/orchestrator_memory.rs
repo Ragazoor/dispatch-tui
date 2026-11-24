@@ -95,6 +95,7 @@ pub fn check_orchestrator_start(
             o.host
         ));
     }
+    covered_task(r, &o, task_id)?;
     let reason = required("the reason", reason)?;
     Ok(log_entry(&o, LOG_STARTED_TASK, task_id, &reason))
 }
