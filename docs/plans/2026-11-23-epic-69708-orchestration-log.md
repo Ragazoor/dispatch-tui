@@ -208,3 +208,28 @@ No reply needed if all is well.
 - 06:15 UTC: alina2 reports the operator's decision SameRulesAsAPerson: the orchestrator may start a ready phoenix task and a task before its scheduled time. Head 3f3cb5ca, verify green, not wrapped up. Raised with the operator: under start rule "everything" a phoenix task's fresh copy counts as ready at once, so an orchestrator could restart it without end.
 - 06:30 UTC: step 8 landed on main as one squashed commit 524965c3 after the operator's approval. All ten steps are on main. Left: fixture rotation to rules 71 on main; trial #99398; research #99395 paused; the running board is still the old build, so its chain may start another backlog task when alina2's session closes.
 - 07:00 UTC: the operator is back; nika2 (#99395) landed. Stopped the 15-minute check (cron c8f585a7).
+
+
+## Fix tasks proposed after the trial (not created; the user has not said go)
+
+From hoa3's trial report (task #99398), my reading of the orchestrator prompt, and hoa3's review of the list on 2026-11-24.
+
+1. **Keep unanswered questions open.** A waiting item must not close when its task finishes unless the operator answered it. Store rule `FinishedTaskResolvesItsItems` in `spacetime/module/src/orchestrator_memory.rs`: a module change, a `RULES_VERSION` bump and the memory_caller mirror. hoa3 recommends: an item about work beyond its task is raised with no task, so the task's end cannot close it.
+2. **Stop false stale alarms.** An agent inside one long Bash call (a 10+ minute verify run) fires no hook, and stale reads the time since the last tool call. Most likely host side (`src/runtime/`), not a store rule. Check that first.
+3. **A resumed review task goes to running, then stale.** The orchestrator did not resume #99403: no transcript holds a `task_resume` call for it. Both resumes (07:55:39 and 08:08:12 UTC) came through the board's resume path, most likely from a message the operator sent. Resume moves a review task to running by design (`dispatch.allium`). The orchestrator then pings it and the agent wraps up again. Ask the operator about 07:55 first.
+4. **Epic status stays backlog while tasks run.** By design (`spacetime/module/src/support.rs::derive_epic_status`, `epics.allium` RecalculateEpicStatus). A question for the user, not a fix task.
+5. **Orchestrator prompt and launch** (`src/dispatch/orchestrator.rs::build_orchestrator_prompt`):
+   - guidelines, not bans: no raw tmux, no git or gh writes, stay out of the checkouts. The tmux rule is only in the repo `CLAUDE.md`, which the orchestrator never loads;
+   - no dispatch tool shows what an agent is doing (`ListAgents` gives busy or idle, `task_search` the sub-status). Add a read tool for an agent's last screen lines, or tell the orchestrator to ask the agent by message;
+   - give it the repo path. It went into the main checkout to run `git fetch` and `gh pr view` while it judged a PR;
+   - say that a task that waits for a person is not trouble, and that a long check run is normal;
+   - do not load the task agent skills (wrap-up, retro, pull-request);
+   - notes must not spread credential recipes (an orchestrator note led an agent to print a token into its transcript).
+6. **Wrap-up skill.** An argument counts as the chosen path only when a person gave it, not when the agent passes one itself; that is why the path question never reached the orchestrator. On the rebase path, the outcome report goes out after `session_wrap-up`, not before.
+7. **Repo-local skills that create tasks** (`.claude/skills`, for example brainstorm-features) do not know about orchestrators. Separate from 6: other files.
+
+Order: only 1 (and 4, if kept) change store rules and must run one at a time. The rest can run beside them.
+
+Still open from the trial and not in this list: the covered prompt is fixed at dispatch, and the learning tools need a task id.
+
+Also dispatched on 2026-11-24, standalone: #99414 (guido), errors from the renamed pr-learnings hook.
