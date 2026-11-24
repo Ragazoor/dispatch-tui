@@ -567,6 +567,10 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_orchestrator_turn_completed(name)
     }
 
+    async fn restart_orchestrator(&self, id: i64, host: String) -> Result<ReducerOutcome> {
+        self.apply_restart_orchestrator(id, host)
+    }
+
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome> {
         self.apply_patch_task(id, patch)
     }

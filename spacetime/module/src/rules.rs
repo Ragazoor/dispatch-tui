@@ -368,8 +368,13 @@ use super::*;
 /// on an older build lacks the reducer and does not write the entry in its
 /// mirror.
 ///
+/// Bumped: `restart_orchestrator` gives a down orchestrator a fresh restart
+/// when the operator asks (`orchestrators.allium:
+/// OperatorRestartsADownOrchestrator`). A board on an older build lacks the
+/// reducer.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 69;
+pub const RULES_VERSION: i64 = 70;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

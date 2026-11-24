@@ -738,6 +738,8 @@ pub trait OrchestratorStore: Send + Sync {
     async fn end_orchestrator_session(&self, id: i64, host: &str, died: bool) -> Result<()>;
     /// `OrchestratorTurnClearsTheRestartFlag`.
     async fn orchestrator_turn_completed(&self, name: &str) -> Result<()>;
+    /// `OperatorRestartsADownOrchestrator`.
+    async fn restart_orchestrator(&self, id: i64, host: &str) -> Result<()>;
 }
 
 /// Read-only epic queries. Held (via [`TaskReadStore`]) by non-service consumers.

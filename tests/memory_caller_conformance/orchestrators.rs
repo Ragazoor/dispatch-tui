@@ -385,6 +385,16 @@ fn memory_caller_runs_orchestrator_sessions_like_the_real_module() {
         let refused = both!(start_orchestrator_session(id, host, false)).expect("died twice");
         assert!(refused.contains("died twice in a row"), "{refused}");
 
+        // The operator's ask gives a fresh restart; a live one is refused.
+        assert_eq!(both!(restart_orchestrator(id, host)), None);
+        let asked = Some((host.clone(), String::new(), false, true, false));
+        assert_eq!(orchestrator_of(&rows_mem, epic), asked);
+        wait_for!(orchestrator_of(&rows_real, epic) == asked);
+        assert_eq!(both!(start_orchestrator_session(id, host, false)), None);
+        let refused = both!(restart_orchestrator(id, host)).expect("live");
+        assert!(refused.contains("already running"), "{refused}");
+        assert_eq!(both!(end_orchestrator_session(id, host, true)), None);
+
         // A turn gives the restart back.
         let name_real = rows_real.orchestrators()[0].name.clone();
         let name_mem = rows_mem.orchestrators()[0].name.clone();

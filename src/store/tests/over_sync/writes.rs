@@ -474,6 +474,14 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::OrchestratorTurnCompleted(name))
     }
 
+    async fn restart_orchestrator(
+        &self,
+        _id: i64,
+        _host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("restart_orchestrator"))
+    }
+
     async fn patch_task(
         &self,
         id: TaskId,

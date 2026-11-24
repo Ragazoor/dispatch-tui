@@ -129,6 +129,7 @@ pub mod request_feed_refresh_reducer;
 pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
 pub mod resolve_waiting_item_reducer;
+pub mod restart_orchestrator_reducer;
 pub mod retired_feed_item_type;
 pub mod rules_version_table;
 pub mod rules_version_type;
@@ -347,6 +348,7 @@ pub use request_feed_refresh_reducer::request_feed_refresh;
 pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use resolve_waiting_item_reducer::resolve_waiting_item;
+pub use restart_orchestrator_reducer::restart_orchestrator;
 pub use retired_feed_item_type::RetiredFeedItem;
 pub use rules_version_table::*;
 pub use rules_version_type::RulesVersion;
@@ -771,6 +773,10 @@ pub enum Reducer {
     ResolveWaitingItem {
         id: i64,
     },
+    RestartOrchestrator {
+        id: i64,
+        host: String,
+    },
     SaveRepoPath {
         path: String,
         last_used: String,
@@ -1039,6 +1045,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::ResolveWaitingItem { .. } => "resolve_waiting_item",
+            Reducer::RestartOrchestrator { .. } => "restart_orchestrator",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedAgents { .. } => "seed_agents",
@@ -1663,6 +1670,13 @@ Reducer::RaiseOrchestratorDownItem{
                 id,
 }             => __sats::bsatn::to_vec(&resolve_waiting_item_reducer::ResolveWaitingItemArgs {
                 id: id.clone(),
+}),
+            Reducer::RestartOrchestrator{
+                id,
+                host,
+}             => __sats::bsatn::to_vec(&restart_orchestrator_reducer::RestartOrchestratorArgs {
+                id: id.clone(),
+                host: host.clone(),
 }),
             Reducer::SaveRepoPath{
                 path,

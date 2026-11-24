@@ -202,6 +202,35 @@ fn a_completed_turn_gives_the_restart_back() {
 }
 
 #[test]
+fn the_operators_restart_gives_a_down_orchestrator_a_fresh_restart() {
+    let store = Store::new();
+    let epic = orchestrated(&store);
+    ensure(&store, epic, HOST).unwrap();
+    let id = row_on(&store, epic, HOST).id;
+    start(&store, id).unwrap();
+    end(&store, id, true).unwrap();
+    start(&store, id).unwrap();
+    end(&store, id, true).unwrap();
+    assert!(start(&store, id).is_err(), "down");
+
+    store
+        .call("alice", |ctx| restart_orchestrator(ctx, id, HOST.to_string()))
+        .expect("restart");
+    assert!(!row_on(&store, epic, HOST).restarted_once);
+    start(&store, id).expect("starts again");
+    assert!(row_on(&store, epic, HOST).restarted_once, "the death still counts");
+
+    let why = store
+        .call("alice", |ctx| restart_orchestrator(ctx, id, HOST.to_string()))
+        .unwrap_err();
+    assert!(why.contains("already running"), "{why}");
+    let why = store
+        .call("alice", |ctx| restart_orchestrator(ctx, id, OTHER.to_string()))
+        .unwrap_err();
+    assert!(why.contains("cannot start or end it"), "{why}");
+}
+
+#[test]
 fn a_turn_for_an_unknown_name_is_refused() {
     let store = Store::new();
     orchestrated(&store);

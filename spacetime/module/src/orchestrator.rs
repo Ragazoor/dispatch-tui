@@ -138,6 +138,23 @@ pub fn check_orchestrator_turn(r: &impl StoreReads, name: &str) -> Result<Orches
     })
 }
 
+/// `OperatorRestartsADownOrchestrator`: the row once the operator has asked
+/// for a down orchestrator to start again, which gives it a fresh restart.
+pub fn check_restart_orchestrator(
+    r: &impl StoreReads,
+    id: i64,
+    host: &str,
+) -> Result<Orchestrator, String> {
+    let row = own_orchestrator(r, id, host)?;
+    if !row.tmux_window.is_empty() {
+        return Err(format!("the orchestrator of epic {} is already running", row.epic_id));
+    }
+    Ok(Orchestrator {
+        restarted_once: false,
+        ..row
+    })
+}
+
 /// The orchestrators of the epics `who` holds, which include every one on
 /// a host they own.
 pub fn orchestrators_of_held(r: &impl StoreReads, who: &str) -> Vec<Orchestrator> {
@@ -198,6 +215,14 @@ pub fn orchestrator_turn_completed(ctx: &ReducerContext, name: String) -> Result
         last_turn_at: now(ctx),
         ..row
     });
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn restart_orchestrator(ctx: &ReducerContext, id: i64, host: String) -> Result<(), String> {
+    require_acting_for(ctx, &host)?;
+    let row = check_restart_orchestrator(ctx, id, &host)?;
+    ctx.db.orchestrators().id().update(row);
     Ok(())
 }
 

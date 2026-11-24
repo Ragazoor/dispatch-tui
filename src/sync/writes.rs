@@ -254,6 +254,8 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     /// `orchestrators.allium: OrchestratorTurnClearsTheRestartFlag`.
     async fn orchestrator_turn_completed(&self, name: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OperatorRestartsADownOrchestrator`.
+    async fn restart_orchestrator(&self, id: i64, host: String) -> Result<ReducerOutcome>;
     async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
     /// `tasks.allium: UpdateTaskIsOneTransaction`: the relink and the
     /// patch in one reducer call. `epic_id` is `None` to leave the epic alone.

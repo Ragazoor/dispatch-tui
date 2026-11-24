@@ -99,6 +99,24 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    pub(super) fn apply_restart_orchestrator(
+        &self,
+        id: i64,
+        host: String,
+    ) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        if let Err(why) = self.acting_for(&tables, &host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        match module::check_restart_orchestrator(&*tables, id, &host) {
+            Ok(row) => {
+                self.write_orchestrator(&mut tables, row);
+                Ok(ReducerOutcome::Applied(vec![]))
+            }
+            Err(why) => Ok(ReducerOutcome::Refused(why)),
+        }
+    }
+
     fn write_orchestrator(&self, tables: &mut Tables, row: module::Orchestrator) {
         tables.orchestrators.insert(row.id, row.clone());
         self.rows.upsert_orchestrator(&row.into());

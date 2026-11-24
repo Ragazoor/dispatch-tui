@@ -199,6 +199,13 @@ impl super::super::OrchestratorStore for Store {
             .applied()
     }
 
+    async fn restart_orchestrator(&self, id: i64, host: &str) -> Result<()> {
+        self.caller
+            .restart_orchestrator(id, host.to_string())
+            .await?
+            .applied()
+    }
+
     async fn orchestrator_turn_completed(&self, name: &str) -> Result<()> {
         self.caller
             .orchestrator_turn_completed(name.to_string())
