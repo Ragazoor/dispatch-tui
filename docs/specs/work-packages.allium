@@ -33,12 +33,14 @@
 --     number of packages.
 --   - The cards in a package view are the linked items themselves: a linked
 --     task is a task card, a linked epic is an epic card that Space enters.
---     Linked epics are not opened up into their subtasks, except by the flat
---     lens: every board lens applies in a package view as it does on the
---     main board (PackageViewCards).
---   - Package cards sit on the main board only. A package cannot hold a
---     package, and no package card appears inside an epic view or another
---     package view.
+--     Linked epics are not opened up into their subtasks, except in the
+--     flattened columns: Running, Review and Done show the tasks under a
+--     linked epic as on the main board, and the only-active lens applies
+--     too. The orchestrators lens reads as flat here (PackageViewCards).
+--   - Package cards sit on the main board only, and not in its
+--     orchestrator view (board-layout.allium: "Orchestrator View"). A
+--     package cannot hold a package, and no package card appears inside an
+--     epic view or another package view.
 --   - The card stays in Backlog until the work is finished, then it is in
 --     Done (PackageCardPlacement); the user deletes the package when they no
 --     longer want it. There is no archive.
@@ -643,9 +645,9 @@ surface PackageViewCards {
         for task in package.linked_tasks where view.task_is_visible(task):
             task.status
         for epic in package.linked_epics where view.epic_is_visible(epic):
-            -- Placed exactly as on the main board: one card per column its
-            -- subtree has visible work in, Backlog when it has none, and
-            -- only in columns the lens does not flatten.
+            -- Placed exactly as on the main board: in Backlog when its
+            -- subtree has visible backlog work or no visible work at all,
+            -- in Done when all its visible work is done.
             for column in { backlog, running, review, done } where view.appears_in(epic, column) and view.renders_epics(column):
                 column
             -- In a flattened column the epic's contents stand in for it:

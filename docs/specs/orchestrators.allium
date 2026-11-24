@@ -90,6 +90,13 @@
 -- mcp-task-tools.allium's (OrchestratorMemoryViaMcp: orchestrator_restart).
 -- OperatorRestartsADownOrchestrator, NotifyEpicFinished and the
 -- notification of OrchestratorPassesOnToTheOperator are built.
+-- Built (step 10): the lens order and the orchestrator view. The surface
+-- OrchestratorView below is built: the lenses, the view's cards and the
+-- reach of every epic without the epic-grouped lens are board-layout.allium's
+-- ("Board Lens", "Orchestrator View", "Epic Card Placement"), the card's
+-- look board-visuals.allium's ("Orchestrator card"), its keys
+-- keybindings.allium's (on_orchestrator_card). The open question on
+-- reaching every epic is closed there.
 -- Undecided, for the operator: learning_search, learning_record and
 -- learning_rate take a task, and an orchestrator has none, so it cannot yet
 -- rate or record a learning as GivenItsLearnings says. See the open question
@@ -1280,13 +1287,21 @@ surface OrchestratorView {
         -- Tab steps flat, flat and active only, orchestrators, and wraps;
         -- BackTab steps back. Every board start opens on flat. The
         -- epic-grouped lens is gone, and with it an epic card in several
-        -- columns.
+        -- columns (board-layout.allium: "Board Lens", "Epic Card
+        -- Placement"). The view is the main board's: inside an epic or
+        -- package view the orchestrators lens reads as flat, and leaving
+        -- the view shows the orchestrator view again. Its badge, [orch],
+        -- shows in every view. Decided by the epic's acting orchestrator
+        -- while the operator was away; open to the operator's review.
 
     @guarantee OneCardPerOrchestratedEpic
         -- The view holds one card for each orchestrated epic the board
         -- filter admits, for this machine's orchestrator, and nothing else:
         -- no task cards and no other epics. An orchestrated epic whose
-        -- orchestrator has no row here yet shows as resting.
+        -- orchestrator has no row here yet shows as resting. The search
+        -- narrows the cards by the epic's own title or id, nothing else
+        -- (board-layout.allium: BoardView.orchestrator_cards). Within a
+        -- column the cards follow the epics' card order, with no sections.
 
     @guarantee EpicCardInOrchestratorView
         -- The card's column, first match:
@@ -1305,8 +1320,14 @@ surface OrchestratorView {
         -- log line, cut to fit. Down is drawn as an alarm, like crashed.
 
     @guarantee KeysOnTheCard
-        -- Enter opens the epic view, flattened, with the epic's tasks. The
-        -- orchestrator key opens the orchestrator's window.
+        -- Enter and Space open the epic view, flattened, with the epic's
+        -- tasks. The orchestrator key opens the orchestrator's window, as
+        -- OrchestratorKey does in the epic view. The edit key opens the
+        -- epic's edit form, where the switch, the start rule and the limit
+        -- live. The cursor keys move; every other card key does nothing
+        -- here (keybindings.allium: on_orchestrator_card). Space and the
+        -- edit key decided by the epic's acting orchestrator while the
+        -- operator was away; open to the operator's review.
 }
 
 -- The epic view's part (O14, O15).
@@ -1419,15 +1440,10 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes (RequestDispatch
 --     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - board-layout.allium, board-visuals.allium and keybindings.allium: the
---     lens order and the orchestrator view. (The header, the ready marker,
---     the keys and the agent list's row are there already.)
 
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------
-
-open question "With the epic-grouped lens gone, an epic is entered from one of its task cards or from its card in Backlog. Is every epic still reachable: one with no tasks, and a sub-epic whose tasks are all outside backlog and hidden by a filter?"
 
 open question "The limit counts running tasks per machine, since each machine has its own orchestrator. Two machines can then run twice the limit for one epic. Is that wanted, or should the limit hold across machines?"
 

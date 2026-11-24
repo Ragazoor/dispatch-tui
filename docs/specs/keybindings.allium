@@ -458,17 +458,23 @@ enum KeyReceiver { dispatch | tmux }
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
 --   does nothing; so do U, R and I outside an epic view.
---   O (open_orchestrator) has no context: it acts in an epic view and on a
---   task card of a covered epic (orchestrators.allium: OrchestratorKey),
+--   O (open_orchestrator) has no context: it acts in an epic view, on a
+--   task card of a covered epic (orchestrators.allium: OrchestratorKey) and
+--   on an orchestrator card (orchestrators.allium: KeysOnTheCard),
 --   and anywhere else it changes nothing and says where it works.
 -- board.normal, cursor-level (Enter, Space, i, m, w, b, H, L). The cursor is on at
--- most one of the first five (a select-all row is not a card or header);
+-- most one of the first six (a select-all row is not a card or header);
 -- off_epic_card is the complement of on_epic_card:
 --   on_column_select_all      "on a column's select-all row"    Enter: select_all
 --   on_folded_section         "on a folded section header"      Enter / Space:
 --                                                                toggle_section_collapse
 --   on_folded_epic_group      "on a folded epic group"          Enter / Space:
 --                                                                toggle_epic_fold
+--   on_orchestrator_card      "on an orchestrator card" (the    Enter / Space: enter_epic
+--                              orchestrator view's card,         (the epic itself, no
+--                              board-layout.allium:              descent)
+--                              "Orchestrator View"; not an
+--                              epic card)
 --   on_epic_card              "on an epic card"                 Space: enter_epic;
 --                                                                Enter: jump_to_deepest_epic;
 --                                                                m: reparent_epic; H/L;
@@ -502,7 +508,9 @@ enum KeyReceiver { dispatch | tmux }
 --   on_epic_card are mutually exclusive by definition. off_epic_card overlaps
 --   the other cursor-level literals, but no key uses it together with them.
 --   H/L on a work package card move nothing: a package has no status, and
---   the press records nothing.
+--   the press records nothing. Nor do they on an orchestrator card, and no
+--   other cursor-level key acts there but Enter, Space, e (edit_task: the
+--   epic's edit form) and O (board-layout.allium: "Orchestrator View").
 -- board.normal, Space on a task card (the activation ladder, highest first;
 -- each literal holds only when none above it does). "Window" means the task
 -- has an agent tmux window; "stuck" is the third rung of the windowless
@@ -561,7 +569,7 @@ enum KeyContext {
     search_active | inside_nested_view | inside_epic_view | nested_view_no_search | top_level |
     with_selection |
     on_column_select_all | on_folded_section | on_folded_epic_group |
-    on_epic_card | on_work_package_card | on_task_card | on_flattened_task_card |
+    on_orchestrator_card | on_epic_card | on_work_package_card | on_task_card | on_flattened_task_card |
     on_unflattened_task_card | off_epic_card |
     on_directory | on_file |
     task_on_other_machine | task_pinned_in_split | task_window_split_open |

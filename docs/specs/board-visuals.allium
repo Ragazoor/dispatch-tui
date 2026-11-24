@@ -754,6 +754,29 @@ use "./work-packages.allium" as wp
 -- Decided by the epic's acting orchestrator while the operator was away;
 -- open to the operator's review.
 
+-- == Orchestrator card ==
+--
+-- The orchestrator view's card (board-layout.allium: "Orchestrator View";
+-- orchestrators.allium: CardAnswersDoINeedToLook). It is drawn as an epic
+-- card is ("Epic cards": the PURPLE stripe, the bold title, the cursor
+-- frame), since it is one epic seen through its orchestrator. Its lines:
+--   - the title line: the epic's title, cut to fit;
+--   - the state line: the orchestrator's state (working, idle, resting,
+--     down), then "N waiting" for the items that wait for the operator,
+--     absent at zero, then the agents running here out of the limit as
+--     "2/3";
+--   - the counts line: backlog, ready, running, review and done task counts
+--     of the epic's subtree (ready counts the backlog tasks with a ready
+--     mark, as the ready marker does), each in the identity hue of the column it
+--     counts, as an epic card's progress counts are;
+--   - the log line: the newest log entry of the epic, MUTED, cut to fit;
+--     absent with no entry.
+-- The waiting count is the loudest thing on the card: YELLOW and bold, as
+-- in the epic view's header. Working is CYAN, idle and resting MUTED. Down
+-- is an alarm, like crashed: RED and bold, and the stripe draws in RED.
+-- Decided by the epic's acting orchestrator while the operator was away;
+-- open to the operator's review.
+
 -- == Phoenix marker ==
 --
 -- A task with phoenix = true carries a recycling glyph (♻ U+267B) on its

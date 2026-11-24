@@ -4,7 +4,8 @@
 -- Scope: The board's structural layout — which navigation column and which
 --        section a card lands in, how the cursor moves through them, the
 --        flattened rendering mode, the vertical bands of the board frame,
---        the board lens, and the filters that narrow what a column renders.
+--        the board lens and the orchestrator view, and the filters that
+--        narrow what a column renders.
 -- Includes: Board Columns (the navigation index space, review-section order,
 --           row navigation and the `gg` chord), the board's view
 --           (BoardView: visibility, epic card placement, flattening, column
@@ -12,7 +13,8 @@
 --           config), collapsed sections
 --           (SectionRef, CollapsedSections), epic folding
 --           (EpicFoldRef, FoldedEpics), board vertical layout, the
---           board lens (BoardLens: the only-active filter and flattening),
+--           board lens (BoardLens: the only-active filter and the
+--           orchestrator view), which cards the orchestrator view holds,
 --           hidden epics and work packages (BoardHides), the board-filter
 --           overlay layout, the board search filter, cursor selection preservation, and the shared
 --           single-line text buffer the input panel edits (TextInputField).
@@ -44,9 +46,11 @@ given {
 -- cards into sections *within* a column, under a header naming the section
 -- (see core.allium, "Column Sections", and "Column Section Layout" below).
 --
--- An epic card is not placed that way, and is not placed once: it appears in
--- every column where the epic's subtree has visible work, so one epic can hold
--- a card in all four at the same time. See "Epic Card Placement" below.
+-- An epic card is not placed that way: it sits in Backlog, the one column
+-- that is never flattened, or in Done once its work is finished, and
+-- Running, Review and Done show the epic's tasks themselves. See "Epic Card Placement" below. Under the
+-- orchestrators lens the main board's columns hold orchestrator cards and
+-- nothing else (see "Orchestrator View").
 --
 -- Navigation column indices are 1-based: 1–4, the h/l cursor positions.
 -- Index 0 is not a column at all, and handlers handed it return without
@@ -105,7 +109,7 @@ given {
 --   - At nav index 4 (Done), l/Right is a no-op (already at rightmost edge).
 --   - A task card's column is determined by task.status alone; which section
 --     it sits in within that column is BoardView.section_of. An epic
---     card's columns come from BoardView.appears_in instead.
+--     card sits in Backlog or, finished, in Done (BoardView.appears_in).
 --   - Switching into a different, non-empty navigation column (via h/l or
 --     Left/Right) always places the cursor on the first card (row 0) —
 --     never a row remembered from a previous visit to that column — and
@@ -174,23 +178,25 @@ given {
 -- Epic Card Placement
 ------------------------------------------------------------
 
--- A task card sits in exactly one column. An epic card sits in every column
--- where the epic has work.
+-- A task card sits in exactly one column. An epic card sits in Backlog, or
+-- in Done once its work is finished, and in no other column.
 --
--- Intent: an epic is not in one state, it is a spread of states. Placing its
--- card by the epic's own recorded status picked one of them and hid the rest,
--- so an epic with three tasks awaiting review read as "running" and the Review
--- column gave no sign that the epic had anything waiting there. The board's job
--- is to answer "what is in review right now", and an epic whose review work is
--- invisible there is a wrong answer. Drawing the card once per column it has
--- work in puts the spread itself on screen, and the columns an epic is absent
--- from become as informative as the ones it fills.
+-- Intent: Backlog is the one column read at the epic level, where work is
+-- planned and ordered, and the one column no lens flattens ("Flattened
+-- Mode"). Running, Review and Done answer questions about tasks ("what runs",
+-- "what waits for me", "what finished"), so they show the tasks themselves,
+-- grouped under epic headers. The epic-grouped lens, which drew an epic card
+-- in every column its subtree had work in, is gone: the orchestrator view
+-- replaced it (orchestrators.allium, O14).
 --
--- Which columns:
---   - A column renders an epic's card when at least one visible task in the
---     epic's subtree — the epic's own tasks and those of every descendant
---     sub-epic, recursively — holds that column's status. Subtree, not direct
---     tasks: the epic card already reports its whole subtree's progress (see
+-- Which epics draw a card: on the main board the root epics, in an epic view
+-- the viewed epic's direct sub-epics, in a package view the linked epics
+-- (work-packages.allium: PackageViewCards).
+--
+-- When Backlog draws the card:
+--   - When at least one visible task in the epic's subtree is in backlog. The
+--     subtree is the epic's own tasks and those of every descendant sub-epic,
+--     recursively: the epic card reports its whole subtree's progress (see
 --     epics.allium, "Epic progress"), and a parent whose work all sits one
 --     level down would otherwise place no card at all.
 --   - Visible means the task survives the same predicates every other card on
@@ -202,9 +208,7 @@ given {
 --     entering the card would be a dead end, because the work that justified
 --     it is not there to be found.
 --   - The epic's own recorded status places no card. That status is a summary
---     of the very same tasks (see epics.allium, EpicStatusRecalculation), so a
---     column drawn from it would either repeat one the tasks already earned or
---     contradict them.
+--     of the very same tasks (see epics.allium, EpicStatusRecalculation).
 --   - An epic with no visible task anywhere in its subtree draws its card in
 --     Backlog, whatever its recorded status. A freshly created epic is empty by
 --     definition, and an epic that vanishes until someone gives it a task
@@ -217,34 +221,51 @@ given {
 --     task. An empty epic passes the repo filter, so it stays reachable. An
 --     epic the user is finished with is deleted (epics.allium: DeleteEpic),
 --     not kept in a hidden state.
---   - The rule is the same for a sub-epic card inside an epic view: it appears
---     in every column where its own subtree has visible work.
---   - It reaches only the columns that render epic cards at all (see
---     BoardView.renders_epics). A flattened column surfaces the descendant
---     tasks themselves and draws no epic card, so nothing here applies there.
+--   - Done draws the card when the epic's visible work is finished: it has
+--     visible subtree tasks and every one is done. The card sits beside its
+--     flattened done tasks, at its own completion time ("Done Column
+--     Ordering"), and carries every epic-card key, so a finished epic can be
+--     deleted, moved back, reparented or linked from the board. Decided by
+--     zlata2, the epic's acting orchestrator, while the operator was away;
+--     open to the operator's review.
+--   - An epic whose visible work has all started and is not finished (its
+--     tasks only in Running or Review) draws no card. Its tasks are on the
+--     board, and Enter on any of them reaches the epic (below). The
+--     epic-card keys (x, H/L, m, w) have no board path for it until a task
+--     returns to backlog or the epic finishes; see the open question at the
+--     end of this file.
 --
--- What each copy shows:
---   - Every copy of one epic's card carries the same progress counts: the whole
---     subtree, not the slice sitting in that column. The card is one epic seen
---     from several places, and counts that changed per column would read as
---     several epics.
---   - The section a copy lands in is derived from that column's own visible
---     subtree tasks, not from the epic's board-wide substatus. A copy in Review
---     sits under the section its review tasks earn; a blocked task over in
---     Running has no say over it. The substatus-to-section mapping is unchanged
---     (see "Column Section Layout").
---   - The substatus label the card carries is derived the same per-column way,
---     for the same reason the section is: a card in the Running column labelled
---     "done" would contradict the column it is sitting in. The label follows the
---     copy; the counts do not.
+-- What the card shows: its progress counts are the whole subtree's. Its
+-- substatus label is derived from the visible subtree tasks in the card's
+-- column (placing_tasks_in), not from the epic's board-wide substatus.
+--
+-- == Every epic stays reachable ==
+--
+-- With the epic-grouped lens gone, an epic is entered from its card in
+-- Backlog or from one of its task cards. Every epic the board shows any work
+-- of can still be entered:
+--   - An epic with no visible task: its Backlog card (the fallback above).
+--   - An epic with unstarted work: its Backlog card.
+--   - An epic whose visible work has all started: Enter on any of its task
+--     cards in Running, Review or Done jumps to its epic, through every
+--     ancestor (epics.allium: JumpToTaskEpic). A finished epic also has its
+--     card in Done, and its done tasks lead to it too. A done task
+--     never ages out of the board: it leaves only by a person's delete
+--     (tasks.allium: ArchiveDeletedTask), and an epic left with no task falls
+--     back to a Backlog card.
+--   - A sub-epic: the same, inside its parent's epic view.
+--   - An epic whose work a filter hides: the repo filter, a hide and the
+--     search hide the epic's card as they did under the epic-grouped lens, so
+--     nothing the board reached before is out of reach now. The only-active
+--     filter narrows only flat_active, and flat is one key away.
+-- This closes orchestrators.allium's open question on reaching every epic.
+-- Decided by zlata2, the epic's acting orchestrator, while the operator was
+-- away; open to the operator's review.
 --
 -- Interaction:
---   - Every copy is a full epic card: selectable, and entering any of them
---     opens the same epic view. Nothing tells the copies apart but the column
---     they are in.
---   - Cursor position is per column, as it is for every other card, so the
---     cursor's memory of "the epic card in Review" and "the epic card in
---     Running" are two independent positions.
+--   - Space on an epic card enters the epic one level; Enter jumps to the
+--     deepest epic holding the work of the card's column (epics.allium:
+--     JumpToDeepestEpic).
 
 
 ------------------------------------------------------------
@@ -253,9 +274,9 @@ given {
 
 -- The Done column is read newest-first: the thing that finished a minute ago
 -- is the thing the user is looking for, and yesterday's work belongs below it.
--- Every transition into done stamps the card with core/Task.completed_at (or
--- core/Epic.completed_at) — a real wallclock timestamp in milliseconds, not a
--- rank — and the column sorts on it DESCENDING.
+-- Every transition into done stamps the task with core/Task.completed_at — a
+-- real wallclock timestamp in milliseconds, not a rank — and the column sorts
+-- on it DESCENDING.
 --
 -- The field is the Done column's own, kept apart from sort_order, which
 -- carries manual and feed ordering. Sharing one field between the two would
@@ -269,34 +290,24 @@ given {
 -- So sort_order means one thing: no status transition reads or writes it, in
 -- either direction.
 --
--- An epic card in Done need not be a done epic. It is drawn there because part
--- of its subtree finished (see "Epic Card Placement"). So in the Done column,
--- and only there, an epic card sorts by BoardView.done_sort_key: its
--- own completed_at when it has one, else the freshest completion among the
--- tasks that placed it in this column. A still-running epic takes the second
--- branch and sits next to the work that put it there. A finished epic takes
--- the first, and is dated by its own completion.
+-- Done is flattened under every lens ("Epic Card Placement"), and it draws
+-- no epic header: a header is emitted inside a section run and Done has no
+-- sections. The grouping survives as card order alone — an epic's tasks stay
+-- adjacent — and that group's position follows the newest-first principle,
+-- for the same reason: the group holding the freshest task is the group the
+-- user wants at the top.
+--
+-- A finished epic's card sits in Done too, and sorts by
+-- BoardView.done_sort_key: its own completed_at when it has one, else the
+-- freshest completion among its visible done tasks. It goes ahead of the
+-- first task group whose key is older than its own, so it sits beside the
+-- work that finished it.
 --
 -- Scope, deliberately narrow:
 --   - Done only. Backlog, Running and Review keep the generic
 --     `sort_order ?? id` key: those columns carry manual ordering and sections,
 --     and nothing is stamped on the way into them.
---   - The subtree slice is the column's own (placing_tasks_in), not the whole
---     subtree. A card in Done ordered by a task that finished elsewhere would
---     be ordered by work the column is not showing.
---   - Only tasks feed the derived half of the key. A done SUB-epic's own
---     completed_at is not consulted: the sub-epic earned it from the very
---     tasks already counted here, so reading both would double-count without
---     adding a card the walk had missed.
---   - Sections come first, as in every column. The key orders cards within a
---     section run; it never moves a card across one.
---
--- In a FLATTENED Done column the epic draws no card at all (see
--- "Flattened Mode"), and no epic header either: a header is emitted inside a
--- section run and Done has no sections. The grouping survives as card order
--- alone — an epic's tasks stay adjacent — and that group's position follows the
--- same principle, for the same reason: the group holding the freshest task is
--- the group the user wants at the top.
+--   - Sections come first, as in every column. Done has none.
 --
 -- An epicless task in a flattened Done column is a one-card group, dated by
 -- its own completed_at alongside the epic groups. Elsewhere in a flattened
@@ -306,30 +317,25 @@ given {
 -- finished a minute ago below every epic group would be the same defect this
 -- section exists to fix.
 --
--- It is NOT BoardView.done_sort_key, though. A flattened group is keyed
--- on a task's DIRECT epic, so its key is the freshest completion among the
--- column's tasks that name that epic — never a descendant's, and never the
--- epic's own completed_at. A sub-epic's tasks form their own group with their
--- own key, so a parent ranked over the whole subtree would claim a position
--- earned by a group sitting elsewhere in the column. The subtree-wide
--- done_sort_key is the hierarchical path's answer, where the epic draws one
--- card standing in for the whole subtree.
+-- A group is keyed on a task's DIRECT epic, so its key is the freshest
+-- completion among the column's tasks that name that epic — never a
+-- descendant's, and never the epic's own completed_at. A sub-epic's tasks
+-- form their own group with their own key, so a parent ranked over the whole
+-- subtree would claim a position earned by a group sitting elsewhere in the
+-- column.
 --
 -- Manual reorder in Done. Moving a card by hand swaps the two cards'
 -- completed_at values and persists them (tasks.allium, ReorderItem). This
 -- works for a TASK card and for an EPIC card alike: both own the field the
 -- column reads. For an epic the write lands on core/Epic.completed_at,
 -- done_sort_key prefers it over the derived subtask key, and the card moves.
--- Without its own field an epic card's key would come from its subtasks
--- alone, and a swap would persist a value nothing renders.
 --
 -- Two costs, both accepted. The swap rewrites a factual timestamp, so after a
 -- reorder the field no longer says when the work finished — that is the user
 -- explicitly overriding the recorded order, which is the only thing a manual
 -- reorder can mean here. And an epic's override is not permanent:
 -- EpicStatusRecalculation (epics.allium) rewrites epic.completed_at when the
--- epic itself transitions into done, discarding an override made earlier. A
--- real completion outranks an earlier hand-placement.
+-- epic itself transitions into done, discarding an override made earlier.
 --
 -- A card with no completed_at at all sorts last, below every dated card, and
 -- is refused a manual reorder — there is no value to swap. It is specified
@@ -340,12 +346,11 @@ given {
 -- Flattened Mode
 ------------------------------------------------------------
 
--- The task board has two rendering modes: the default hierarchical mode
--- and a flattened mode that surfaces every descendant task of the
--- current scope directly into its status column, bypassing the
--- epic/sub-epic grouping. Flattening does not reach every column: the
--- Backlog column is exempt and always renders hierarchically (see
--- Rendering).
+-- The Running, Review and Done columns are flattened under every lens: each
+-- surfaces every descendant task of the current scope directly into its
+-- status column, bypassing the epic/sub-epic grouping. The Backlog column is
+-- exempt and always renders hierarchically (see Rendering). The orchestrator
+-- view on the main board draws no task column at all ("Orchestrator View").
 --
 -- Intent: when work is spread across nested epics, users often need to
 -- see at a glance which tasks are running, blocked, awaiting review or
@@ -388,7 +393,8 @@ given {
 --   - In a flattened column, task cards appear in their normal visual
 --     column, determined by (task.status, task.sub_status), exactly as in
 --     hierarchical mode, and no epic card is rendered there — neither
---     root epics on the board nor sub-epics inside an epic view.
+--     root epics on the board nor sub-epics inside an epic view — except a
+--     finished epic's card in Done ("Epic Card Placement").
 --   - Epic membership is carried by the epic-header rule below, not by
 --     the task card itself: a flattened task card renders exactly as it
 --     does in hierarchical mode, with no epic badge of its own.
@@ -471,22 +477,19 @@ given {
 --     freshest-first group order and draws no indent.
 --
 -- State model:
---   - Flattened is derived from the board lens (BoardLens.flattened): it
---     holds under the `flat` and `flat_active` lenses. See "Board Lens".
---   - The lens is preserved as the user navigates into sub-epics and
---     back out: drilling down or exiting an epic does not change it.
---   - It is session-scoped and does not persist across app restarts.
+--   - Flattening is not a lens choice: every lens reads Running, Review and
+--     Done flat (BoardView.flattens). The epic-grouped lens that drew them
+--     hierarchically is gone (see "Board Lens").
 --
 -- Interaction:
 --   - Task-card actions (dispatch, go-into-task, expand-description)
 --     behave identically in both modes. A flattened task card always
 --     acts on the task itself, never on its ancestor epic.
 --   - Epic cards stay visible and selectable in Backlog, the one unflattened
---     column, so an epic with unstarted work can be entered without leaving
---     flattened mode. An epic whose subtree holds no visible backlog task
---     draws no card anywhere in flattened mode, because its other columns are
---     all flattened; to navigate into it the user first turns flattened mode
---     off, and every epic card becomes visible and selectable again.
+--     column, so an epic with unstarted work can be entered from its card. An
+--     epic whose subtree holds no visible backlog task draws no card; Enter
+--     on any of its task cards reaches it (see "Every epic stays
+--     reachable").
 
 
 -- == Epic View Panel Title ==
@@ -514,11 +517,10 @@ given {
 -- == Column Section Layout ==
 
 -- Which columns have sections (BoardView.has_sections), and which section a
--- card lands in (BoardView.section_of). An epic card lands in a section too,
--- so an epic and a task in the same state group together rather than the
--- epic floating above every header; a copy's section is read off its own
--- column's placing tasks ("Epic Card Placement"). An epic in a column with no
--- sections has no section, exactly as a task there has none. The
+-- card lands in (BoardView.section_of). An epic card sits in Backlog or
+-- Done, which have no sections, so it has no section, exactly as a task
+-- there has none.
+-- The
 -- ColumnSection values themselves, including the three derived ones, are in
 -- core.allium, "Column Sections".
 -- == Collapsed Sections ==
@@ -668,9 +670,7 @@ given {
 -- section of that column stays as it was. The user folds a group where it
 -- is in the way, and the work in another section is a different pile with a
 -- different next step. The same epic folds independently in each column it
--- appears in too, on the same reasoning epic card placement already gives
--- it one independent card, and one independent cursor position, per column
--- (see "Epic Card Placement").
+-- has a group in too, on the same reasoning.
 --
 -- So a fold follows the section, not the task: a task whose sub-status
 -- changes leaves its folded group and draws in its new section under that
@@ -810,9 +810,8 @@ given {
 -- == Board Lens ==
 
 -- The board has two independent controls over what it shows:
---   - The LENS says HOW the board is read: every card, or only the cards with
---     a live session; grouped under epics, or flattened. Only-active always
---     comes with flattening (see "Dropped lens" below). One key cycles it.
+--   - The LENS says HOW the board is read: every task, only the tasks with a
+--     live session, or the orchestrators. One key cycles it.
 --   - The board FILTER says WHICH work is on the board at all: repos, epics
 --     and work packages. It is set in the board-filter overlay (`f`, below).
 --
@@ -824,19 +823,24 @@ given {
 -- and BackTab (Shift+Tab) steps it back, so every lens is at most two presses
 -- away.
 --
--- The three lenses, in cycle order:
---   everything   → every card the board filter admits (the default)
---   flat         → the flattened rendering (see "Flattened Mode")
---   flat_active  → flattened, and only tasks with a live session
---                  (current_window set)
--- Forward wraps from flat_active to everything; backward wraps the other way.
+-- The three lenses, in cycle order (orchestrators.allium: LensOrder, O14):
+--   flat           → every card the board filter admits, Running, Review and
+--                    Done flattened (see "Flattened Mode"); the default
+--   flat_active    → flat, and only tasks with a live session
+--                    (current_window set)
+--   orchestrators  → on the main board, the orchestrator view: one card per
+--                    orchestrated epic and nothing else (see "Orchestrator
+--                    View"). Inside an epic or package view it reads as flat.
+-- Forward wraps from orchestrators to flat; backward wraps the other way.
 --
--- Dropped lens: there is no `active` lens, only-active with the columns still
--- grouped under epics. The operator does not use only-active without
--- flattening, so it would cost a Tab press on every cycle for nothing.
+-- Dropped lenses: there is no epic-grouped lens, which drew an epic card in
+-- every column its subtree had work in. The orchestrator view replaced it
+-- (O14), and every epic stays reachable without it ("Every epic stays
+-- reachable"). There is no `active` lens either, only-active with the
+-- columns grouped under epics.
 --
--- The lens reaches inside a package view as it does everywhere else: both
--- halves apply there (work-packages.allium: PackageViewCards).
+-- The lens reaches inside a package view as it does everywhere else: the
+-- only-active half applies there (work-packages.allium: PackageViewCards).
 --
 -- What `flat_active` narrows: only tasks with a live session (current_window
 -- set) are visible (BoardView.task_is_visible), in addition to the board filter. It
@@ -845,15 +849,54 @@ given {
 --
 -- State model:
 --   - One lens per board, preserved as the user navigates into sub-epics and
---     back out.
---   - Session-scoped: every app start begins at `everything`.
---   - The lens shows as the status bar's existing badges: `[flat]` for
---     flat, both `[active]` and `[flat]` for flat_active. `everything` shows
---     neither.
+--     back out. Under the orchestrators lens, entering an epic shows it flat
+--     and leaving it shows the orchestrator view again.
+--   - Session-scoped: every app start begins at `flat`.
+--   - The lens shows as status bar badges: `[flat]` for flat, both
+--     `[active]` and `[flat]` for flat_active, `[orch]` for orchestrators.
+--     The badge names the lens, not the rendering: `[orch]` stays inside an
+--     epic view, where that lens reads as flat. Decided by zlata2, the
+--     orchestrators epic's acting orchestrator, while the operator was away;
+--     open to the operator's review.
 --
 -- No MCP tool reads or sets the lens. It is the operator's reading of their
 -- own board for one session, needs nothing from the shared store (store-split
 -- S1 keeps it in the TUI), and no agent sees that board.
+
+-- == Orchestrator View ==
+
+-- The orchestrators lens on the main board (orchestrators.allium:
+-- OrchestratorView, whose guarantees say what the card shows and which
+-- column it sits in). It answers "which of my orchestrated epics needs me",
+-- one card per epic, without the operator opening each epic.
+--
+-- Which cards (BoardView.orchestrator_cards):
+--   - One per orchestrated epic, at any depth (O3), for this machine's
+--     orchestrator of it, and nothing else: no task cards, no other epic
+--     cards, no package cards, no section headers and no epic headers.
+--   - The board filter applies to the epic card as to any epic card: a
+--     hidden epic, or one under a hidden ancestor, draws none, and so does
+--     one the repo filter does not admit (BoardView.epic_admitted).
+--   - The search narrows the cards by the epic's own title or id
+--     (own_match), and nothing else: a task's match does not keep a card.
+--   - An orchestrated epic whose orchestrator has no row on this machine yet
+--     shows as resting.
+--   - Within a column the cards follow the epics' card order: sort_order,
+--     else id. The columns have no sections.
+--
+-- Keys on a card (orchestrators.allium: KeysOnTheCard; keybindings.allium,
+-- on_orchestrator_card): Enter and Space open the epic view, which this lens
+-- reads flat; e opens the epic's edit form, where the orchestrator's
+-- switch, start rule and limit live; O opens this machine's orchestrator's
+-- window. The cursor keys move as on any card. Every other card key does
+-- nothing there: a card cannot be selected, moved, reordered, reparented,
+-- linked, folded or deleted from this view. Decided by zlata2 while the
+-- operator was away; open to the operator's review.
+--
+-- The cards are a rendered answer like every other card: they follow the
+-- orchestrator rows, the open items and the tasks on every board reload, and
+-- the cursor follows its card's epic between columns ("Cursor Selection
+-- Preservation").
 
 -- == Hidden Epics and Work Packages ==
 
@@ -1098,12 +1141,12 @@ given {
 --   position is resolved by locating the anchor item in the new item list.
 --
 --   If the anchor item is found: the cursor moves to the item's new column and row,
---   following the item if it changed columns. An epic or package card can sit in
---   several columns at once ("Epic Card Placement"); while the current column
---   still holds a copy, the cursor stays on that copy, so a refresh never moves
---   it to another column's copy of the same card. Only when the current column
---   no longer holds one does it follow the card to the leftmost column that
---   does.
+--   following the item if it changed columns. Should a card ever sit in
+--   several columns at once, the cursor stays on the copy in the current
+--   column while there is one, and only then follows the card to the
+--   leftmost column that holds it. An orchestrator card is anchored by its
+--   epic, so it follows its epic between columns as its orchestrator's state
+--   changes ("Orchestrator View").
 --
 --   If the anchor item is not present (deleted or moved outside board scope): the cursor
 --   clamps to the nearest valid position in the current column.
@@ -1190,7 +1233,7 @@ value EpicFoldRef {
 -- Enumerations
 ------------------------------------------------------------
 
-enum Lens { everything | flat | flat_active }
+enum Lens { flat | flat_active | orchestrators }
 
 ------------------------------------------------------------
 -- Board View
@@ -1271,7 +1314,8 @@ entity BoardView {
     -- Whether an epic card is drawn at all. Which columns it is drawn in is
     -- appears_in.
     epic_is_visible(epic):
-        not hides.epic_is_hidden(epic)
+        not orchestrator_view
+        and not hides.epic_is_hidden(epic)
         and epic_admitted(epic)
         and epic_matches_search(epic)
 
@@ -1283,23 +1327,27 @@ entity BoardView {
 
     has_placing_tasks(epic): placing_tasks(epic).count > 0
 
-    -- A column draws the epic's card when some placing task holds its
-    -- status. An epic with no placing task at all falls back to Backlog, so
-    -- it stays reachable. Only a column that renders epic cards draws it.
+    -- Backlog draws the epic's card when some placing task is in backlog.
+    -- An epic with no placing task at all falls back to Backlog, so it stays
+    -- reachable. Done draws it when every placing task is done. No other
+    -- column draws an epic card.
     appears_in(epic, status):
-        placing_tasks(epic).any(t => t.status = status)
-        or (not has_placing_tasks(epic) and status = backlog)
+        (status = backlog
+            and (placing_tasks(epic).any(t => t.status = backlog)
+                or not has_placing_tasks(epic)))
+        or (status = done
+            and has_placing_tasks(epic)
+            and placing_tasks(epic).all(t => t.status = done))
 
-    -- The placing tasks one column's copy is derived from. Its section and
-    -- its substatus label come from these and nothing else: the epic
-    -- substatus (epics.allium, "Epic substatus") computed over this slice,
-    -- mapped as in section_of's note below.
+    -- The placing tasks the card's substatus label is derived from: the
+    -- epic substatus (epics.allium, "Epic substatus") computed over this
+    -- slice.
     placing_tasks_in(epic, column): placing_tasks(epic) where status = column
 
-    -- The key an epic's card sorts by in the Done column, read descending
-    -- ("Done Column Ordering"). The epic's own completion time wins when it
-    -- has one; otherwise the most recent completion in the column's own
-    -- slice of the subtree. Null when neither exists, and a null key sorts
+    -- The key a finished epic's card sorts by in the Done column, read
+    -- descending ("Done Column Ordering"). The epic's own completion time
+    -- wins when it has one; otherwise the most recent completion among its
+    -- done placing tasks. Null when neither exists, and a null key sorts
     -- last.
     done_sort_key(epic):
         epic.completed_at ?? latest_completion(placing_tasks_in(epic, done))
@@ -1313,10 +1361,11 @@ entity BoardView {
 
     -- Flattening is decided per column, never once for the board. A column
     -- is its task status (see "Board Columns").
-    flattens(status): lens.flattened and status not in unflattened_statuses
+    flattens(status): status not in unflattened_statuses
 
-    -- A column renders epic cards unless it is being flattened.
-    renders_epics(status): not flattens(status)
+    -- A column renders epic cards unless it is being flattened; Done, though
+    -- flattened, renders a finished epic's card (appears_in).
+    renders_epics(status): not flattens(status) or status = done
 
     -- What hierarchical mode shows in a column: on the main board, tasks
     -- with no epic; in an epic view, the viewed epic's own direct tasks.
@@ -1330,7 +1379,8 @@ entity BoardView {
     -- view, an unflattened one only what hierarchical mode shows there. A
     -- package view's cards are work-packages.allium's PackageViewCards.
     in_scope(task, status):
-        task_is_visible(task)
+        not orchestrator_view
+        and task_is_visible(task)
         and (current_epic = null or task in current_epic.subtree_tasks)
         and (flattens(status) or directly_under(task))
 
@@ -1338,6 +1388,25 @@ entity BoardView {
     -- A package view's columns are work-packages.allium's PackageViewCards;
     -- their sections lay out the same EpicGroupTree, with no top.
     column_tasks(status): filter(tasks, t => t.status = status and in_scope(t, status))
+
+    -- == The orchestrator view ("Orchestrator View") ==
+
+    -- The orchestrators lens on the main board. Inside an epic or package
+    -- view that lens reads as flat.
+    orchestrator_view: is_board and lens.lens = orchestrators
+
+    -- The epics that draw an orchestrator card: each orchestrated epic at
+    -- any depth that the board filter admits and whose own title or id
+    -- matches the search. Its column is orchestrators.allium's
+    -- EpicCardInOrchestratorView.
+    orchestrator_cards:
+        if orchestrator_view:
+            filter(epics, e =>
+                is_orchestrated(e)
+                and not hides.epic_is_hidden(e)
+                and epic_admitted(e)
+                and (search_query = "" or own_match(e.title, e.id, search_query)))
+        else: {}
 
     -- == Column sections ("Column Section Layout") ==
 
@@ -1406,6 +1475,8 @@ entity BoardView {
         -- own_match(title, id, query): board_search_filter's predicate.
         -- latest_completion(tasks): the greatest completed_at among the
         -- tasks, null when none has one.
+        -- is_orchestrated(epic): the epic has a core/EpicOrchestration
+        -- (orchestrators.allium: orchestration_of(epic) != null).
         -- epics_of(tasks): the epics the tasks name directly, a task with
         -- no epic adding none.
 }
@@ -1470,17 +1541,17 @@ entity FoldedEpics {
 entity BoardLens {
     lens: Lens
 
-    -- The two switches the rest of this file reads. Derived, never set on
-    -- their own: the lens is the only state.
+    -- The switch the rest of this file reads. Derived, never set on its
+    -- own: the lens is the only state. The orchestrator view is
+    -- BoardView.orchestrator_view, since it also needs the main board.
     only_active: lens = flat_active
-    flattened: lens = flat or lens = flat_active
 
-    next: if lens = everything: flat
-          else if lens = flat: flat_active
-          else: everything
+    next: if lens = flat: flat_active
+          else if lens = flat_active: orchestrators
+          else: flat
 
-    previous: if lens = everything: flat_active
-              else if lens = flat: everything
+    previous: if lens = flat: orchestrators
+              else if lens = orchestrators: flat_active
               else: flat
 }
 
@@ -1648,9 +1719,10 @@ surface BoardViewBadges {
     facing _: core/Operator
 
     exposes:
-        -- `[flat]` under either flattened lens, and `[active]` as well under
-        -- flat_active ("Board Lens").
-        board_view.lens.flattened
+        -- `[flat]` under flat and flat_active, `[active]` as well under
+        -- flat_active, `[orch]` under orchestrators, in every view ("Board
+        -- Lens").
+        board_view.lens.lens
         board_view.lens.only_active
         -- `[hidden: N epics, M packages]` while either count is non-zero
         -- ("Hidden Epics and Work Packages").
@@ -1717,3 +1789,11 @@ surface TextInputField {
         -- shared UI helpers, described in docs/conventions.md ("Single-line
         -- text-field caret"), not domain logic.
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+-- Raised by zlata2, the orchestrators epic's acting orchestrator, while the
+-- operator was away ("Epic Card Placement").
+open question "An epic with tasks only in Running or Review has no card, so the epic-card keys (x, H/L, m, w) have no board path for it until a task returns to backlog or the epic finishes. Is MCP enough, or should the epic view's keys fall back to the viewed epic as e does?"
