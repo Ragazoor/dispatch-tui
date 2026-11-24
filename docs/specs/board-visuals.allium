@@ -742,6 +742,18 @@ use "./work-packages.allium" as wp
 -- Cards for which the viewing person has no row are unmarked, whatever
 -- another person has bookmarked.
 
+-- == Ready marker ==
+--
+-- A backlog task with a core/ReadyMark (orchestrators.allium:
+-- ReadyShowsOnTheCard) carries "✓ ready" in CYAN on its indicator line,
+-- after the status and age and before the label badges. When an agent set
+-- the mark it reads "✓ ready · <agent name>". Only a real mark shows: a task
+-- that counts as ready only because its orchestrator starts everything is
+-- unmarked. Like the other title-line and indicator glyphs it is an
+-- attribute of the card: it touches neither the stripe nor the frame.
+-- Decided by the epic's acting orchestrator while the operator was away;
+-- open to the operator's review.
+
 -- == Phoenix marker ==
 --
 -- A task with phoenix = true carries a recycling glyph (♻ U+267B) on its

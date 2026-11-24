@@ -46,7 +46,7 @@
 --     prefers reading gets the whole story.
 --   - The README links to the guide.
 --   - The guide answers only to the keys its tour teaches (see
---     GuideKeyRunsItsDeclaredAction), plus z, U and Space's other card
+--     GuideKeyRunsItsDeclaredAction), plus z, U, Y and Space's other card
 --     actions, so the banner fits on one line. Keys that only show a toast
 --     or that a first visit does not need (n, E, D, [ ] gg G, L, H) are left
 --     out. A key joins only when the tour gains a step that uses it.
@@ -388,7 +388,8 @@ surface OnboardingGuidePage {
         -- The page carries a plain-text walkthrough of the same tour in its
         -- HTML, readable with JavaScript off, so an agent reading the file
         -- or a visitor who prefers reading gets the whole story: the board
-        -- and its columns; sub-statuses; epics and auto-dispatch; work
+        -- and its columns; sub-statuses; epics, auto-dispatch and an epic's
+        -- orchestrator with its ready mark; work
         -- packages; agents working in worktrees and tmux windows; skills,
         -- the knowledge base and the MCP tools at a high level; and a link
         -- to install via the README.

@@ -254,6 +254,8 @@ contract KeybindingDriftGate {
 --   board_confirm_trust_repo              board.confirm.trust_repo
 --   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
 --   board_confirm_delete_work_package     board.confirm.delete_work_package
+--   board_confirm_start_orchestrator      board.confirm.start_orchestrator
+--   board_confirm_resolve_item            board.confirm.resolve_item
 --   board_key_editor             board.key_editor             the key editor (opened from the help overlay; KeyEditor)
 --   board_key_editor_search      board.key_editor_search      typing the key editor's row search
 --   board_key_capture            board.key_capture            the key editor waiting for the key press to stage
@@ -399,6 +401,7 @@ enum KeyNamespace {
     board_confirm_delete_repo_path | board_confirm_trust_repo |
     board_confirm_trust_repo_quick_dispatch |
     board_confirm_delete_work_package |
+    board_confirm_start_orchestrator | board_confirm_resolve_item |
     board_key_editor | board_key_editor_search | board_key_capture |
     board_confirm_discard_key_edits |
     agent_tree_tree | agent_tree_commits | agent_tree_agents | agent_diff |
@@ -438,7 +441,7 @@ enum KeyReceiver { dispatch | tmux }
 --                              (any view)
 --   inside_nested_view        "inside an epic or work package   q: exit_epic; Q: exit_all_epics
 --                              view" (search active or not)
---   inside_epic_view          "inside an epic view"             U, R
+--   inside_epic_view          "inside an epic view"             U, R, I: resolve_waiting_item
 --                              (search active or not; a subset
 --                              of inside_nested_view)
 --   nested_view_no_search     "inside an epic or work package   Esc: exit_epic
@@ -454,7 +457,10 @@ enum KeyReceiver { dispatch | tmux }
 --   (search_active, nested_view_no_search, with_selection) are each mutually
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
---   does nothing; so do U and R outside an epic view.
+--   does nothing; so do U, R and I outside an epic view.
+--   O (open_orchestrator) has no context: it acts in an epic view and on a
+--   task card of a covered epic (orchestrators.allium: OrchestratorKey),
+--   and anywhere else it changes nothing and says where it works.
 -- board.normal, cursor-level (Enter, Space, i, m, w, b, H, L). The cursor is on at
 -- most one of the first five (a select-all row is not a card or header);
 -- off_epic_card is the complement of on_epic_card:
@@ -472,7 +478,11 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                m: move_task_to_epic (the whole
 --                                                                selection when tasks are selected);
 --                                                                w: link_work_package;
---                                                                b: toggle_bookmark
+--                                                                b: toggle_bookmark;
+--                                                                Y: toggle_ready (sets or clears
+--                                                                the ready mark on a backlog task;
+--                                                                any other task card says only a
+--                                                                backlog task can be marked ready)
 --   on_flattened_task_card    "on a task card in a flattened    Enter: jump_to_task_epic
 --                              column" (BoardView.flattens;      (does nothing when the task
 --                              a subset of on_task_card)         has no epic)

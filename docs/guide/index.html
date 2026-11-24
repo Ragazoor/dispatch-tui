@@ -299,6 +299,8 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
    "description": "Report that there is no worktree to resume; move the task to Backlog and re-dispatch"},
   {"namespace": "board.normal", "action": "toggle_auto_dispatch", "keys": ["U"], "when": "epicView", "label": "auto-dispatch",
    "description": "Toggle auto-dispatch for the epic you are inside: chain the next backlog subtask when one finishes"},
+  {"namespace": "board.normal", "action": "toggle_ready", "keys": ["Y"], "when": "taskCard", "label": "ready",
+   "description": "Mark the backlog task ready for its epic's orchestrator to start, or clear the mark. A ready card says so, and names the agent when an agent marked it"},
   {"namespace": "board.normal", "action": "toggle_help", "keys": ["?"], "when": "any", "label": "help",
    "description": "Toggle the help overlay"},
   {"namespace": "board.detail", "action": "close_detail", "keys": ["q", "Esc", "Enter"], "when": "any", "label": "close",
@@ -402,6 +404,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 
     <h3>Epics keep a huge backlog in order</h3>
     <p>An epic groups tasks, and it can hold other epics. An epic's card shows up in every column where it has work, so you see its spread at a glance. <kbd>Space</kbd> steps into it, <kbd>q</kbd> steps out, <kbd>Q</kbd> goes straight back to the top. Inside an epic, <kbd>U</kbd> turns on auto-dispatch: when one subtask finishes, the next one starts by itself, on a branch that already holds the work before it.</p>
+    <p>An epic can also have an orchestrator: an agent of its own that starts the epic's ready tasks, answers their agents' questions and tells you when a person is needed. <kbd>Y</kbd> on a backlog card marks it ready. In the real TUI, <kbd>O</kbd> opens the orchestrator's window (or offers to switch one on), the epic view's header shows what it did and what waits for you, and <kbd>I</kbd> resolves an item that waited for you.</p>
 
     <h3>Work packages cut across epics</h3>
     <p>An epic says what the work <i>is</i>. A work package says what you are working on <i>now</i>, such as this week's release or an on-call week. It links to tasks and epics wherever they live in the tree. It has no status of its own: an item is done when the item is done. <kbd>Space</kbd> on a package card opens it as its own board.</p>
@@ -447,6 +450,7 @@ const EPIC_ROWS = [
   [3160, null, "Tech debt", "shop-api", "Small things that make everything else slower."],
 ];
 const AUTO = new Set([3101]);
+const READY = new Set();
 
 // Tasks: [id, epic, status, sub_status, tag, title, flags, age]
 // status: B backlog, R running, V review, D done.  flags: w window, t worktree, p pull request
@@ -787,6 +791,12 @@ const ACTIONS = {
     if (AUTO.has(id)) AUTO.delete(id); else AUTO.add(id);
     toast(`Auto-dispatch ${AUTO.has(id) ? "on" : "off"} for ${epics.get(id).title}`);
   },
+  toggle_ready() {
+    const t = current().task;
+    if (t.status !== "backlog") { toast("Only a backlog task can be marked ready."); return; }
+    if (READY.has(t.id)) READY.delete(t.id); else READY.add(t.id);
+    toast(READY.has(t.id) ? `#${t.id} is ready: an orchestrator may start it.` : `#${t.id} is no longer ready.`);
+  },
   toggle_help() { state.overlay = "help"; $("t-help-body").scrollTop = 0; },
   close_detail() { state.overlay = null; },
   scroll_detail_down() { $("t-detail-body").scrollTop += 40; },
@@ -905,7 +915,8 @@ function cardHtml(r, sel, ci) {
   const mark = t.status === "done" ? "✓" : t.window ? "●" : t.worktree ? "○" : "·";
   const extra = t.window ? "" : t.worktree && t.status !== "backlog" ? " detached" : "";
   const pr = t.pr ? ` PR #${t.pr}` : "";
-  return `<div class="${cls.join(" ")}"><div class="ttl"><span class="id">#${t.id}</span> ${esc(t.title)}</div><div class="meta">${mark} ${t.age} <span class="tag">[${t.tag}]</span>${pr}${extra}</div></div>`;
+  const ready = t.status === "backlog" && READY.has(t.id) ? " ✓ ready" : "";
+  return `<div class="${cls.join(" ")}"><div class="ttl"><span class="id">#${t.id}</span> ${esc(t.title)}</div><div class="meta">${mark} ${t.age} <span class="tag">[${t.tag}]</span>${pr}${extra}${ready}</div></div>`;
 }
 
 function trail() {

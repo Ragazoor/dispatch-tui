@@ -33,8 +33,8 @@
 -- (mcp-task-tools.allium: UpdateTaskViaMcp, CreateTaskViaMcp,
 -- GetTaskViaMcp, ListTasksViaMcp; epics.allium: UpdateEpicViaMcp,
 -- GetEpicViaMcp). epic_update's reply to a move names the switches it
--- turned off; the board's own move (ReparentEpicFromTui) does not yet, and
--- waits for step 9. Built (step 3): the session. The Orchestrator entity and
+-- turned off, and so does the board's own move (epics.allium:
+-- ReparentEpicFromTui). Built (step 3): the session. The Orchestrator entity and
 -- its invariants are in core.allium; BoardRunsItsOrchestrators,
 -- OrchestratorWindowGone, StartOrchestratorSession,
 -- OrchestratorTurnClearsTheRestartFlag and EndOrchestratorSession below are
@@ -81,11 +81,15 @@
 -- is woken for and reminded of by each machine's orchestrator, with only
 -- the open-item guard against a second item (LongWaitInReview). Decided by
 -- the epic's acting orchestrator while the operator was away.
--- Left for the steps that own them, so none is missed:
---   - step 9: EpicFinishedNotified from EndOrchestratorSession, the
---     desktop notification of a raised item, and OrchestratorRestartAsked
---     (the orchestrator key on a down orchestrator). Until then switching
---     the orchestrator off and on is the only way out of down.
+-- Built (step 9): the board's part beside the lenses. The surfaces
+-- OrchestratorInEpicView and OrchestratorNotifications below are built:
+-- the header is epics.allium's (OrchestratorHeader), the edit form's
+-- section epics.allium's (EditEpic), the ready marker board-visuals.allium's
+-- ("Ready marker"), the three keys keybindings.allium's (Y, O, I), the
+-- agent list's row agent-tree.allium's, and the restart's tool
+-- mcp-task-tools.allium's (OrchestratorMemoryViaMcp: orchestrator_restart).
+-- OperatorRestartsADownOrchestrator, NotifyEpicFinished and the
+-- notification of OrchestratorPassesOnToTheOperator are built.
 -- Undecided, for the operator: learning_search, learning_record and
 -- learning_rate take a task, and an orchestrator has none, so it cannot yet
 -- rate or record a learning as GivenItsLearnings says. See the open question
@@ -271,16 +275,23 @@ rule ChangeOrchestratorSettings {
     when: OrchestratorSettingsChanged(epic, start_rule?, max_parallel?)
 
     requires: orchestration_of(epic) != null
-    requires: max_parallel = null or max_parallel >= 1
+    requires: max_parallel = null or max_parallel >= 0
 
     ensures:
         if start_rule != null: orchestration_of(epic).start_rule = start_rule
     ensures:
-        if max_parallel != null: orchestration_of(epic).max_parallel = max_parallel
+        if max_parallel = 0: orchestration_of(epic).max_parallel = null
+    ensures:
+        if max_parallel != null and max_parallel >= 1:
+            orchestration_of(epic).max_parallel = max_parallel
 
     @guidance
         -- A lower limit stops no task that already runs; it only holds back
-        -- the next start.
+        -- the next start. A limit of 0 sets the epic's limit back to the
+        -- default (core/config.orchestrator_max_parallel), so the edit
+        -- form's empty limit can undo a limit it set. Decided by the epic's
+        -- acting orchestrator while the operator was away; open to the
+        -- operator's review.
 }
 
 rule SwitchOrchestratorOff {
@@ -1220,6 +1231,9 @@ surface OrchestratorMcpTools {
         OrchestratorActedOnTrouble(orchestrator, task, trouble, text)
         WaitingItemRaised(epic, host, task?, about, tried, recommendation)
         WaitingItemResolved(item)
+        -- orchestrator_restart: this machine's orchestrator of the epic,
+        -- when it is down (OperatorRestartsADownOrchestrator).
+        OrchestratorRestartAsked(orchestrator)
         EpicNoteWritten(epic, text)
         EpicNoteChanged(note, text?, done?)
         EpicNoteRemoved(note)
@@ -1315,25 +1329,53 @@ surface OrchestratorInEpicView {
 
     @guarantee HeaderShowsTheOrchestrator
         -- In an orchestrated epic's view, and in the view of any epic below
-        -- it, the header shows the orchestrator's name and state, the open
-        -- items with what each is about, and the newest
-        -- config.orchestrator_log_shown log entries, newest first.
+        -- it, the header shows the orchestrator's name and state, the start
+        -- rule, the agents running out of the limit, the open items with
+        -- what each is about, and the newest config.orchestrator_log_shown
+        -- log entries, newest first. The start rule is shown so the
+        -- operator sees why unmarked tasks start under everything. The
+        -- layout is epics.allium's OrchestratorHeader. Decided by the epic's
+        -- acting orchestrator while the operator was away; open to the
+        -- operator's review.
 
     @guarantee OrchestratorKey
-        -- One key, in the epic view and on any task card of a covered epic.
-        -- With an orchestrator: it opens that orchestrator's window, starting
-        -- its session first when it is down. Without one: it asks "Start an
+        -- One key, O, in the epic view and on any task card of a covered
+        -- epic. With an orchestrator: it opens this machine's orchestrator's
+        -- window, starting its session first when it is down
+        -- (OrchestratorRestartAsked, then the session starts at once, not
+        -- at the board's next check). Without one: it asks "Start an
         -- orchestrator for this epic? [y/n]" and y switches it on. Where an
-        -- epic above or below already has one it opens that one instead of
-        -- asking.
+        -- epic above already has one it opens that one instead of asking.
+        -- Below: on a task card it opens covering(task)'s; otherwise
+        -- exactly one orchestrator below opens, and several give a status
+        -- line naming them and open nothing. Elsewhere the key changes
+        -- nothing and says where it works. Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
+
+    @guarantee ResolveKey
+        -- One key, I, in the epic view: it asks "Resolve item #N: <about>?
+        -- [y/n]" for the oldest open item of the epic's orchestrator, the
+        -- first one the header lists, and y resolves it
+        -- (WaitingItemResolved). A second press asks for the next. With no
+        -- open item it says so. Decided by the epic's acting orchestrator
+        -- while the operator was away; open to the operator's review.
 
     @guarantee SwitchingOffIsNotAKey
         -- The epic's edit form has an orchestrator section: on or off, the
-        -- start rule and the limit. There is no one-key switch-off.
+        -- start rule and the limit (epics.allium: EditEpic). There is no
+        -- one-key switch-off.
 
     @guarantee ReadyShowsOnTheCard
-        -- A ready backlog card carries a ready marker; when an agent set
-        -- it, the marker names that agent.
+        -- A backlog card with a core/ReadyMark carries a ready marker; when
+        -- an agent set it, the marker names that agent. The marker shows a
+        -- real mark only, never counts_as_ready, so under start rule
+        -- everything the header's start rule says why unmarked tasks start.
+        -- The ready key, Y, sets or clears the mark on a backlog task card
+        -- in any view, as the operator; on any other task card it changes
+        -- nothing and says that only a backlog task can be marked ready.
+        -- Decided by the epic's acting orchestrator while the operator was
+        -- away; open to the operator's review.
 
     @guarantee OrchestratorLeadsItsGroupInTheAgentList
         -- In the agent list an orchestrator is the first row of its epic's
@@ -1350,6 +1392,14 @@ surface OrchestratorNotifications {
         -- when an orchestrated epic finishes. Both follow
         -- notifications_enabled. Nothing the orchestrator handles by itself
         -- notifies.
+
+    @guarantee EachOnItsOwnMachine
+        -- An item notifies on the board of the item's host only, once per
+        -- item. The items already open when the board starts are its
+        -- baseline and do not notify. A finished epic notifies on the board
+        -- whose orchestrator ended on it (EndOrchestratorSession). Decided
+        -- by the epic's acting orchestrator while the operator was away;
+        -- open to the operator's review.
 }
 
 ------------------------------------------------------------
@@ -1363,14 +1413,14 @@ surface OrchestratorNotifications {
 --   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
 --     toggle key and header indicator, the chain that started the next
 --     subtask when a session closed, its failure report and the stalled-chain
---     mark on a card. Also the epic edit form's orchestrator section. (The
---     re-parent and delete effects on the switch are there already.)
+--     mark on a card. (The re-parent and delete effects on the switch and
+--     the edit form's orchestrator section are there already.)
 --   - store-split.allium: the chain's request origin goes (RequestDispatch
 --     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - board-layout.allium, board-visuals.allium, agent-tree.allium and
---     keybindings.allium: the lens order, the orchestrator view, the header,
---     the ready marker and the two keys.
+--   - board-layout.allium, board-visuals.allium and keybindings.allium: the
+--     lens order and the orchestrator view. (The header, the ready marker,
+--     the keys and the agent list's row are there already.)
 
 ------------------------------------------------------------
 -- Open Questions

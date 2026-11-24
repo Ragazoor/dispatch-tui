@@ -1631,6 +1631,31 @@ rule ResolveWaitingItemViaMcp {
         -- (idempotent).
 }
 
+rule RestartOrchestratorViaMcp {
+    when: McpOrchestratorRestart(epic)
+
+    -- orchestrator_here(epic) is a black box: this machine's
+    -- core/Orchestrator of orchestrators.allium's covering(epic), or null.
+    let orchestrator = orchestrator_here(epic)
+
+    requires: orchestrator != null
+    requires: not orchestrator.is_live
+
+    ensures: orch/OrchestratorRestartAsked(orchestrator)
+
+    @guidance
+        -- orchestrator_restart(epic_id), from any caller: the agent twin of
+        -- the board's orchestrator key on a down orchestrator. epic_id is the
+        -- orchestrated epic or any epic it covers. It gives this machine's
+        -- orchestrator a fresh restart (orchestrators.allium:
+        -- OperatorRestartsADownOrchestrator), and the board starts the
+        -- session at its next check. A live orchestrator, an epic no
+        -- orchestrator covers, and one with no orchestrator on this machine
+        -- are refused, each in plain words. The reply names the epic and
+        -- the orchestrator. Decided by the epic's acting orchestrator while
+        -- the operator was away; open to the operator's review.
+}
+
 rule ReadOrchestratorLogViaMcp {
     when: McpOrchestratorLogSearch(epic, task, before, limit)
 
@@ -2512,6 +2537,7 @@ surface McpTaskTools {
         McpOrchestratorLogSearch(epic, task?, before?, limit?)
         McpWaitingItemCreate(caller_identity, task?, about, tried, recommendation)
         McpWaitingItemResolve(item)
+        McpOrchestratorRestart(epic)
         McpEpicNoteCreate(caller_identity, text)
         McpEpicNoteUpdate(caller_identity, note, text?, done?)
         McpEpicNoteDelete(caller_identity, note)

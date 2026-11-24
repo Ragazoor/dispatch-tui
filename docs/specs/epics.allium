@@ -94,6 +94,25 @@ rule EditEpic {
     -- Status, plan_path, sort_order and auto_dispatch are not editable
     -- via the epic editor.
     --
+    -- == The orchestrator section ==
+    -- Three more sections: ORCHESTRATOR (on | off), START_RULE
+    -- (marked_only | everything) and MAX_PARALLEL (an integer of at least
+    -- 1; empty is the default limit). They open with the epic's switch as
+    -- it stands: off with the default rule and an empty limit when the epic
+    -- has no orchestrator of its own. A save that changes them writes the
+    -- switch after the fields above, as its own write: on from off is
+    -- orchestrators.allium's OrchestratorSwitchedOn, off from on its
+    -- OrchestratorSwitchedOff, and a changed rule or limit on an epic that
+    -- stays on its OrchestratorSettingsChanged (an emptied limit is sent as
+    -- 0, back to the default). The rule and limit of an epic that stays off
+    -- are not sent. A refused switch write (an orchestrator above or below)
+    -- is reported as an error and leaves the fields above saved. An
+    -- unparseable value is a parse error, reported with the others, and
+    -- leaves the switch as it was. This section is the only way the board
+    -- switches an orchestrator off (orchestrators.allium:
+    -- SwitchingOffIsNotAKey). Decided by the epic's acting orchestrator
+    -- while the operator was away; open to the operator's review.
+    --
     -- The interval grammar and the interval FLOOR are enforced in different
     -- places, and this section is where a user meets the seam. The grammar
     -- only parses, so "10s" is a SUCCESSFUL parse — no parse error is
@@ -961,12 +980,13 @@ rule UpdateEpicViaMcp {
         -- == The orchestrator arguments ==
         -- orchestrator is a boolean, start_rule one of marked_only |
         -- everything (an enum in the schema), max_parallel an integer of at
-        -- least 1. orchestrator = true on an epic that is already on is
+        -- least 0. orchestrator = true on an epic that is already on is
         -- refused with the store's wording, not turned into a settings
-        -- change. The limit cannot yet be set back to the default
-        -- (core/config.orchestrator_max_parallel); the tool description says
-        -- so. Decided by the epic's orchestrator agent (task 99386) while the
-        -- operator was away.
+        -- change. max_parallel 0 sets the limit back to the default
+        -- (core/config.orchestrator_max_parallel) in a settings change and
+        -- is refused when switching on; the tool description says so.
+        -- Decided by the epics' acting orchestrator while the operator was
+        -- away.
         --
         -- == The reply to a move names the switches it turned off ==
         -- A call that sets parent_epic_id reads, before the move, which epics
@@ -1165,6 +1185,12 @@ rule ReparentEpicFromTui {
         -- a repo-group sub-epic can be selected and only then rejected.
         -- updated_at is refreshed automatically by the database layer on
         -- any patch_epic call; the assertion above documents the intent.
+        --
+        -- A move that switched orchestrators off
+        -- (ReparentingKeepsOneOrchestratorOnAPath) says so on the status
+        -- line, one clause per switch: "Switched off the orchestrator of
+        -- epic <id> (<title>): epic <id> above it has one", the words
+        -- UpdateEpicViaMcp's reply uses.
 }
 
 -- EpicReparented(epic, new_parent): an epic's parent changed. Raised by every
@@ -2159,7 +2185,7 @@ surface EpicBoard {
         -- The form leaves sort_order and both feed fields unset. An empty title
         -- or a cancelled description editor creates nothing.
         CreateEpic(title, description, sort_order?, parent?)
-        -- [e] on an epic card (EditEpic).
+        -- [e] on an epic card (EditEpic), its orchestrator section included.
         EditEpic(epic)
         -- [L] and [H] on an epic card (MoveEpicForward, MoveEpicBackward).
         MoveEpicStatus(epic, direction)
@@ -2371,6 +2397,46 @@ surface AppendOnlyEpicIndicator {
         -- function that draws the dispatch-mode, feed-role and grouping slots,
         -- so all four share one line and its width handling rather than
         -- competing for space from separate call sites.
+}
+
+-- The orchestrator's part of an epic view (orchestrators.allium:
+-- HeaderShowsTheOrchestrator). A band of its own between the summary row
+-- and the columns (board-layout.allium: board_vertical_layout), drawn only
+-- in the view of an epic an orchestrator covers. Decided by the epic's
+-- acting orchestrator while the operator was away; open to the operator's
+-- review.
+surface OrchestratorHeader {
+    facing _: core/Operator
+
+    context epic: core/Epic
+
+    exposes:
+        epic.title
+
+    @guarantee FirstRowSaysWhoAndHow
+        -- "orchestrator <name> · <state> · <start rule> · <running>/<limit>"
+        -- for this machine's orchestrator of the covering epic, then
+        -- "· <n> waiting" when items are open. The state is working, idle,
+        -- resting or down, as epic_search says it; down is drawn as an
+        -- alarm, like crashed. With no row on this machine yet it reads
+        -- "orchestrator: resting". In a sub-epic's view it names the epic
+        -- the orchestrator covers from.
+
+    @guarantee ThenItemsThenLog
+        -- One row per open item of the covering epic, oldest first ("#<id>
+        -- task #<n>: <about>" or "#<id> the epic: <about>"), the row the
+        -- resolve key acts on first. Then the newest log entries, newest
+        -- first, up to orchestrators.allium's config.orchestrator_log_shown,
+        -- each cut to the width.
+
+    @guarantee NeverCrowdsTheColumns
+        -- The band takes at most a third of the board's height. Log rows
+        -- are cut first, then item rows, and a last "+N more" row says how
+        -- many are not shown. The columns resize on the same frame.
+
+    @guarantee OnlyInACoveredEpicsView
+        -- No band on the main board, in a package view, or in the view of
+        -- an epic no orchestrator covers.
 }
 
 ------------------------------------------------------------

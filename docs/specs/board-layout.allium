@@ -773,7 +773,10 @@ given {
 -- board_vertical_layout:
 --   The board frame is split top to bottom into five bands: the top
 --   indicator bar, the summary row, the kanban board (columns), the input
---   panel, and the status bar.
+--   panel, and the status bar. In the view of an epic an orchestrator
+--   covers, a sixth band sits between the summary row and the columns:
+--   the orchestrator header (epics.allium: OrchestratorHeader), whose
+--   height comes out of the columns'.
 --
 --   The indicator bar, summary row and status bar are each exactly one row.
 --   The kanban board and the input panel share whatever vertical space is

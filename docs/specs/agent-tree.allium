@@ -228,6 +228,10 @@ value PaneView {
     -- the two lists above. Zero from a board that predates the filter, which
     -- left none out.
     hidden_agents: Integer
+    -- This machine's live orchestrators whose epic the board's epic hide-list
+    -- admits (OrchestratorsAreThisMachinesLiveOnes). Empty from a board that
+    -- predates them: the pane then lists task agents alone.
+    orchestrators: [core/Orchestrator]
 }
 
 -- The board's answer to a pane's resume request (BoardPaneView.resume_agent).
@@ -292,6 +296,18 @@ contract BoardPaneView {
         -- live_agents holds exactly the tasks is_live_agent holds for in the
         -- board's rows — the Running or Review column with a tmux window
         -- recorded — and no others. The pane does not re-derive it.
+
+    @invariant OrchestratorsAreThisMachinesLiveOnes
+        -- orchestrators holds exactly the orchestrators in the board's rows
+        -- that run on this machine (core/Orchestrator.host is this host) and
+        -- are live (core/Orchestrator.is_live), whose epic the board holds and
+        -- whose epic, or an ancestor of it, is not on the epic hide-list
+        -- (board-layout.allium: BoardHides). An orchestrator has no repo, so
+        -- the repo filter never leaves one out. One left out by the
+        -- hide-list is not counted in hidden_agents, which counts task
+        -- agents only. An orchestrator with no window is not listed: there
+        -- is nothing to jump to. Another machine's orchestrator is not
+        -- listed either: its window is in that machine's tmux.
 
     @invariant ListsFollowTheBoardFilter
         -- live_agents and detached_agents hold only the tasks the board's
@@ -562,6 +578,13 @@ entity AgentTreePane {
     -- live, which is almost always. It is listed, marked, and not jumpable —
     -- see JumpToAgentWindow.
     listed_agents: [core/Task]
+
+    -- The orchestrators the agents section lists, each as the first row of
+    -- its epic's group (OrchestratorLeadsItsEpicGroup): what the same
+    -- successful read reported (PaneView.orchestrators). A failed read
+    -- leaves it alone with listed_agents. Every one is live, so the agents
+    -- filter never hides one. Empty before the first read.
+    listed_orchestrators: [core/Orchestrator]
 
     -- Which of listed_agents the section shows (CycleAgentListFilter). Starts
     -- on `running` in every fresh renderer and is never saved: like focus, it
@@ -2422,6 +2445,7 @@ rule RefreshAgentTreeAgentList {
     ensures: pane.last_agents_listed_at = now
     ensures: pane.listed_agents = grouped_by_epic(listed)
     ensures: pane.hidden_agent_count = board_hidden_agents()
+    ensures: pane.listed_orchestrators = board_orchestrators()
 
     -- A resumed agent that now has a window: jump to it, and stop waiting.
     -- One that left the list: stop waiting (ForgetPendingResumeJump). One
@@ -2480,7 +2504,9 @@ rule RefreshAgentTreeAgentList {
         -- not in the list, while the tree and commits sections still show
         -- its work. A pending resume jump whose task the board's filter now hides
         -- has left the list, so it is forgotten like any other.
-        -- board_hidden_agents() is the same answer's hidden_agents.
+        -- board_hidden_agents() is the same answer's hidden_agents, and
+        -- board_orchestrators() its orchestrators
+        -- (OrchestratorsAreThisMachinesLiveOnes).
         --
         -- == Read-only ==
         -- board_tasks() is BoardPaneView's pane_view(pane.task.id).live_agents
@@ -2506,14 +2532,20 @@ rule RefreshAgentTreeAgentList {
         -- child of their own, then the rest, each run in ascending epic id —
         -- and the top-level groups ordered the same way. (The board orders
         -- each run by card order; the pane is sent ids only.)
-        -- How the groups are drawn is AgentListGroupsByEpic. The order
+        -- How the groups are drawn is AgentListGroupsByEpic. An
+        -- orchestrator's row leads its epic's group, before the group's
+        -- tasks, and an orchestrated epic with no listed task agent still
+        -- has a group, holding the orchestrator's row alone
+        -- (OrchestratorLeadsItsEpicGroup). The order
         -- therefore never changes under the cursor except when an agent
         -- starts or finishes, or a task moves to another epic.
         --
         -- == The cursor follows its task ==
         -- A read that changes the list keeps the agents cursor on the task it
         -- was on, not on the row index: an agent starting above it must not
-        -- move the selection onto a different agent. When the selected task
+        -- move the selection onto a different agent. On an orchestrator's
+        -- row it stays on that orchestrator, known by its epic: an
+        -- orchestrator has no task id. When the selected task
         -- has left the list, the cursor stays at its row index, clamped to
         -- the last row. "The list" here is the shown one (shown_agents): under
         -- the `running` filter, an agent that detaches leaves it, and the
@@ -2682,6 +2714,26 @@ rule JumpToAgentWindow {
         -- The window is named by the task, not by the text on the row, so a
         -- title that changed since the last read still jumps to the right
         -- agent.
+}
+
+rule JumpToOrchestratorWindow {
+    -- Space or Enter on an orchestrator's row switches tmux to the
+    -- orchestrator's window, as JumpToAgentWindow does for a task agent.
+    when: JumpToOrchestratorWindowKeyPressed(user, pane, orchestrator)
+
+    requires: pane.focus = agents
+    requires: orchestrator in pane.listed_orchestrators
+
+    -- observable output; no rule listens
+    ensures: AgentWindowSelected(window: orchestrator.tmux_window)
+    ensures: pane.pending_jump = null
+
+    @guidance
+        -- An orchestrator's row has no resume, and the tree, commits and
+        -- diff of the pane stay its own task's: the row is a way to reach
+        -- the orchestrator's window and nothing else. A window that closed
+        -- since the last read fails visibly
+        -- (AgentTreeAgentJumpFailureIsVisible), as a task agent's does.
 }
 
 rule AgentTreeAgentJumpFailureIsVisible {
@@ -3067,6 +3119,7 @@ surface AgentTreeCompanionPane {
         pane.shown_agents
         pane.agent_filter
         pane.hidden_agent_count
+        pane.listed_orchestrators
         pane.task_resolution
         pane.startup_failure when pane.task_resolution = unresolved
 
@@ -3144,6 +3197,7 @@ surface AgentTreeCompanionPane {
         OpenSelectedAgentTreeFileInEditor(user, pane, node) -- v (file, tree focus)
         SelectAgentTreeSourceKeyPressed(user, pane, commit) -- Space, Enter (commits focus)
         JumpToAgentWindowKeyPressed(user, pane, target)     -- Space, Enter (agents focus, attached row)
+        JumpToOrchestratorWindowKeyPressed(user, pane, orchestrator) -- Space, Enter (agents focus, orchestrator row)
         ResumeDetachedAgent(user, pane, target)             -- Space, Enter (agents focus, detached row)
 
         -- Not keys of their own. AgentTreeKeyPressed is raised for every key
@@ -3387,6 +3441,21 @@ surface AgentTreeCompanionPane {
         -- id, nothing indented. A board that predates the epic
         -- itself sends none, and every agent then reads as epicless: the list
         -- is the plain id-ordered list with no headers and no rule.
+
+    @guarantee OrchestratorLeadsItsEpicGroup
+        -- An orchestrator listed by the board
+        -- (OrchestratorsAreThisMachinesLiveOnes) is the first row of its
+        -- epic's group: the group of the orchestrated epic itself, never an
+        -- ancestor's, above that epic's task agents. When the epic has no
+        -- listed task agent the group still appears, with its header and the
+        -- orchestrator's row alone. The row reads `● <name> orchestrator`:
+        -- the attached dot, the orchestrator's name, and the word
+        -- `orchestrator` in the muted colour, the mark that tells it from a
+        -- task agent's row. It is indented like the group's task rows. The
+        -- agents filter shows it under `running` as well as `all`, since
+        -- it is always live. Space or Enter on it jumps to its window
+        -- (JumpToOrchestratorWindow); it is never the pane's own row and has
+        -- no resume.
 
     @guarantee AgentListNamesHiddenAgents
         -- When pane.hidden_agent_count is above zero, the agents section ends
