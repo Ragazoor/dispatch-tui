@@ -748,7 +748,7 @@ async fn dispatch_save_key_overrides_writes_the_file_and_clears_the_staging() {
     }
     press(&mut app, KeyCode::Enter);
     press(&mut app, KeyCode::Enter);
-    app.handle_key(KeyEvent::new(KeyCode::Char('O'), KeyModifiers::SHIFT));
+    app.handle_key(KeyEvent::new(KeyCode::Char('V'), KeyModifiers::SHIFT));
     let save = press(&mut app, KeyCode::Char('w'))
         .into_iter()
         .find(|c| {
@@ -766,7 +766,7 @@ async fn dispatch_save_key_overrides_writes_the_file_and_clears_the_staging() {
         serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     assert_eq!(
         written,
-        serde_json::json!([{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O", "G"]}])
+        serde_json::json!([{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["V", "G"]}])
     );
     assert!(
         !press(&mut app, KeyCode::Char('w'))

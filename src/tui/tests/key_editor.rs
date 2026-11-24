@@ -195,8 +195,8 @@ fn replace_puts_the_captured_key_in_place_of_the_picked_one() {
     let mut app = editor_on(row);
     app.handle_key(ch('l'));
     app.handle_key(key(KeyCode::Enter));
-    app.handle_key(ch('O'));
-    assert_eq!(staged(&app, row), Some(strings(&["]", "O"])));
+    app.handle_key(ch('V'));
+    assert_eq!(staged(&app, row), Some(strings(&["]", "V"])));
 }
 
 #[test]
@@ -219,11 +219,11 @@ fn restoring_a_row_with_a_file_entry_stages_its_removal() {
     let cmds = app.handle_key(ch('r'));
     assert!(recorded(&cmds).is_empty(), "nothing to restore");
 
-    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]});
+    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["V"]});
     app.update(Message::KeyEditor(KeyEditorMessage::FileRead(Ok(vec![
         entry,
     ]))));
-    assert_eq!(editor(&app).file_keys(row), strings(&["O"]).as_slice());
+    assert_eq!(editor(&app).file_keys(row), strings(&["V"]).as_slice());
     let cmds = app.handle_key(ch('r'));
     assert_eq!(recorded(&cmds), vec!["key_editor_restore_default"]);
     assert_eq!(staged(&app, row), Some(vec![]));
@@ -301,7 +301,7 @@ fn a_saved_write_clears_the_staged_edits_and_a_refused_one_keeps_them() {
     let row = row_of(KeyNamespace::BoardNormal, "navigate_row_last");
     let mut app = editor_on(row);
     app.handle_key(ch('a'));
-    app.handle_key(ch('O'));
+    app.handle_key(ch('V'));
     app.update(Message::KeyEditor(KeyEditorMessage::Saved(Err(vec![
         "it clashes".to_string(),
     ]))));
@@ -332,7 +332,7 @@ fn an_unreadable_file_is_shown_and_a_save_against_it_is_refused() {
     app.update(Message::KeyEditor(KeyEditorMessage::FileRead(read)));
     assert!(editor(&app).file_error().is_some());
     app.handle_key(ch('a'));
-    app.handle_key(ch('O'));
+    app.handle_key(ch('V'));
     let Err(KeySetError::Refused(messages)) = set_key_overrides(&file, &editor(&app).changes())
     else {
         panic!("keybinding_set wrote over an unreadable file");
@@ -350,7 +350,7 @@ fn closing_with_edits_staged_asks_first() {
     let row = row_of(KeyNamespace::BoardNormal, "navigate_row_last");
     let mut app = editor_on(row);
     app.handle_key(ch('a'));
-    app.handle_key(ch('O'));
+    app.handle_key(ch('V'));
     app.handle_key(ch('q'));
     assert_eq!(app.input.mode, InputMode::ConfirmDiscardKeyEdits);
     let cmds = app.handle_key(ch('n'));
@@ -395,12 +395,12 @@ fn the_search_filters_the_rows_and_esc_clears_it() {
 fn the_editor_shows_current_default_pending_and_staged_keys() {
     let row = row_of(KeyNamespace::BoardNormal, "navigate_row_last");
     let mut app = editor_on(row);
-    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]});
+    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["V"]});
     app.update(Message::KeyEditor(KeyEditorMessage::FileRead(Ok(vec![
         entry,
     ]))));
     let screen = buffer_text(&render_to_buffer(&mut app, 160, 50));
-    assert!(screen.contains("after restart: O"), "{screen}");
+    assert!(screen.contains("after restart: V"), "{screen}");
     app.handle_key(key(KeyCode::Enter));
     app.handle_key(ch('P'));
     let screen = buffer_text(&render_to_buffer(&mut app, 160, 50));
@@ -451,8 +451,8 @@ fn a_clash_between_two_staged_rows_shows_under_both() {
     let second = row_of(KeyNamespace::BoardNormal, "navigate_row_first");
     let mut app = editor_on(first);
     let e = app.input.key_editor.as_deref_mut().unwrap();
-    e.stage(first, strings(&["]", "G", "O"]));
-    e.stage(second, strings(&["[", "gg", "O"]));
+    e.stage(first, strings(&["]", "G", "V"]));
+    e.stage(second, strings(&["[", "gg", "V"]));
     assert!(e.problems_of(first).next().is_some(), "{:?}", e.problems);
     assert!(e.problems_of(second).next().is_some(), "{:?}", e.problems);
 }
@@ -461,7 +461,7 @@ fn a_clash_between_two_staged_rows_shows_under_both() {
 fn restoring_a_row_whose_removal_is_staged_records_nothing() {
     let row = row_of(KeyNamespace::BoardNormal, "navigate_row_last");
     let mut app = editor_on(row);
-    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]});
+    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["V"]});
     app.update(Message::KeyEditor(KeyEditorMessage::FileRead(Ok(vec![
         entry,
     ]))));
@@ -478,7 +478,7 @@ fn restoring_a_row_whose_removal_is_staged_records_nothing() {
 fn snapshot_key_editor() {
     let row = row_of(KeyNamespace::BoardNormal, "navigate_row_last");
     let mut app = editor_on(row);
-    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["]", "O"]});
+    let entry = serde_json::json!({"namespace": "board.normal", "action": "navigate_row_last", "keys": ["]", "V"]});
     app.update(Message::KeyEditor(KeyEditorMessage::FileRead(Ok(vec![
         entry,
     ]))));

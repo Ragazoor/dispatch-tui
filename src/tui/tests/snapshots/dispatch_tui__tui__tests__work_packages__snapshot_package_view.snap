@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/work_packages.rs
+assertion_line: 1219
 expression: render_to_string(&mut app)
 ---
                                                                                                                   🔕  [N]
@@ -41,4 +42,4 @@ expression: render_to_string(&mut app)
 │                              │                          │                              │                             │
 │                              │                          │                              │                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[Space] dispatch  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [s]plit
+[Space] dispatch  [Y] ready  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quic

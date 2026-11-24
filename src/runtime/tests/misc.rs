@@ -777,7 +777,7 @@ mod bootstrap {
         let (_dir, data_dir, paths) = fixture().await;
         std::fs::write(
             data_dir.join(crate::keybindings::KEY_OVERRIDE_FILE_NAME),
-            r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+            r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
                 {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
         )
         .unwrap();
@@ -795,7 +795,7 @@ mod bootstrap {
                     && b.action == "delete_task"
             })
             .unwrap();
-        assert_eq!(delete.keys, ["O"]);
+        assert_eq!(delete.keys, ["V"]);
         let shown = bootstrap.app.error_popup().expect("the refusal is shown");
         assert!(shown.contains("Ctrl+E"), "{shown}");
     }

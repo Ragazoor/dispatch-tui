@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/key_editor.rs
+assertion_line: 488
 expression: buffer_text(&buf)
 ---
                                                                                               🔕  [N]
@@ -12,8 +13,8 @@ expression: buffer_text(&buf)
  ╭───║  k, Up navigate_row_up: Move to the previous card in the column                        ║     
  │  ▎║  [, gg navigate_row_first: Jump to the first row of the column                         ║     
  │   ║▸ ], G navigate_row_last: Jump to the last row of the column                            ║     
- ╰───║      editing: ], O, j                                                                  ║     
-     ║      after restart: ], O staged: ], O, j                                               ║     
+ ╰───║      editing: ], V, j                                                                  ║     
+     ║      after restart: ], V staged: ], V, j                                               ║     
      ║      "j" would be a key of both board.normal navigate_row_down and board.normal        ║     
      ║      navigate_row_last, which can apply at once; pick a key the other row does not list║     
      ║  Esc clear_search (with a search active): Clear the active search query                ║     

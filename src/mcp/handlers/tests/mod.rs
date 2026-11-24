@@ -1418,6 +1418,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
             json!({"about": "a", "tried": "t", "recommendation": "r"}),
         ),
         ("waiting-item_resolve", json!({"waiting_item_id": 1})),
+        ("orchestrator_restart", json!({"epic_id": 1})),
         ("epic-note_create", json!({"text": "t"})),
         ("epic-note_update", json!({"epic_note_id": 1})),
         ("epic-note_delete", json!({"epic_note_id": 1})),

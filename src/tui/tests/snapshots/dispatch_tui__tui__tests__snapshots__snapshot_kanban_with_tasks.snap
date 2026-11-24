@@ -1,5 +1,6 @@
 ---
 source: src/tui/tests/snapshots.rs
+assertion_line: 38
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -41,4 +42,4 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-[Space] dispatch  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [s]plit
+[Space] dispatch  [Y] ready  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quic

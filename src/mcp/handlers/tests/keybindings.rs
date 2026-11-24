@@ -143,7 +143,7 @@ async fn a_family_name_returns_every_group_of_the_family() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 15);
+    assert_eq!(gs.len(), 17);
     assert!(gs.iter().all(|g| g["namespace"]
         .as_str()
         .unwrap()
@@ -198,13 +198,13 @@ async fn an_unknown_namespace_is_rejected_listing_the_valid_names() {
 }
 
 /// Non-vacuity of the family filter: every board.confirm.* dialog has rows,
-/// so the family returns fifteen groups none of which is empty.
+/// so the family returns seventeen groups none of which is empty.
 #[tokio::test]
-async fn the_confirm_family_returns_fifteen_non_empty_groups() {
+async fn the_confirm_family_returns_seventeen_non_empty_groups() {
     let state = test_state().await;
     let resp = list(&state, json!({"namespace": "board.confirm"})).await;
     let gs = groups(&resp);
-    assert_eq!(gs.len(), 15);
+    assert_eq!(gs.len(), 17);
     for g in &gs {
         assert!(
             !g["bindings"].as_array().unwrap().is_empty(),
@@ -290,12 +290,12 @@ async fn the_catalogue_shows_the_users_keys_from_the_override_file() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
-        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]"#,
     );
     let state = board_started_in(dir.path()).await;
 
     let row = row_of(&state, "board.normal", "delete_task").await;
-    assert_eq!(row["keys"], json!(["O"]));
+    assert_eq!(row["keys"], json!(["V"]));
     assert_eq!(row["default_keys"], json!(default_keys("delete_task")));
     assert!(row.get("pending_keys").is_none(), "{row}");
 
@@ -305,7 +305,7 @@ async fn the_catalogue_shows_the_users_keys_from_the_override_file() {
         json!({"namespace": "board.normal", "query": "delete_task"}),
     )
     .await;
-    assert_eq!(groups(&resp)[0]["bindings"][0]["keys"], json!(["O"]));
+    assert_eq!(groups(&resp)[0]["bindings"][0]["keys"], json!(["V"]));
 }
 
 /// ReadersFollowTheRemap for the catalogue: under the remapped table every
@@ -429,13 +429,13 @@ async fn an_agent_remaps_a_key_sees_it_and_restores_the_default() {
 
     let resp = set(
         &state,
-        json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]),
+        json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]),
     )
     .await;
     assert!(!is_error(&resp), "{resp:?}");
     let answer = text_of(&resp);
     assert!(
-        answer.contains("delete_task") && answer.contains("\"O\""),
+        answer.contains("delete_task") && answer.contains("\"V\""),
         "{answer}"
     );
     assert!(answer.contains("when the board next starts"), "{answer}");
@@ -443,14 +443,14 @@ async fn an_agent_remaps_a_key_sees_it_and_restores_the_default() {
     // The running board still answers to the default; the change is pending.
     let row = row_of(&state, "board.normal", "delete_task").await;
     assert_eq!(row["keys"], json!(default_keys("delete_task")));
-    assert_eq!(row["pending_keys"], json!(["O"]));
+    assert_eq!(row["pending_keys"], json!(["V"]));
     let reply = text_of(&list(&state, json!({"namespace": "board.normal"})).await);
     assert!(reply.contains("when the board next starts"), "{reply}");
 
     // After a restart the board answers to the user's key.
     let state = board_restarted_cleanly_in(dir.path()).await;
     let row = row_of(&state, "board.normal", "delete_task").await;
-    assert_eq!(row["keys"], json!(["O"]));
+    assert_eq!(row["keys"], json!(["V"]));
     assert_eq!(row["default_keys"], json!(default_keys("delete_task")));
     assert!(row.get("pending_keys").is_none(), "{row}");
 
@@ -484,7 +484,7 @@ async fn an_agent_remaps_a_key_sees_it_and_restores_the_default() {
 #[tokio::test]
 async fn a_change_the_load_would_refuse_writes_nothing_and_says_what_to_fix() {
     let dir = tempfile::tempdir().unwrap();
-    let before = r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#;
+    let before = r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]"#;
     write_file(dir.path(), before);
     let state = board_started_in(dir.path()).await;
 
@@ -494,11 +494,11 @@ async fn a_change_the_load_would_refuse_writes_nothing_and_says_what_to_fix() {
             "Ctrl+D",
         ),
         (
-            json!({"namespace": "board.normal", "action": "no_such_action", "keys": ["O"]}),
+            json!({"namespace": "board.normal", "action": "no_such_action", "keys": ["V"]}),
             "create_task",
         ),
         (
-            json!({"namespace": "board.nope", "action": "delete_task", "keys": ["O"]}),
+            json!({"namespace": "board.nope", "action": "delete_task", "keys": ["V"]}),
             "board.normal",
         ),
         (
@@ -585,12 +585,12 @@ async fn a_swap_is_one_call_and_either_half_alone_is_refused() {
 #[tokio::test]
 async fn a_change_that_breaks_an_accepted_entry_is_refused() {
     let dir = tempfile::tempdir().unwrap();
-    let before = r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#;
+    let before = r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]"#;
     write_file(dir.path(), before);
     let state = board_started_in(dir.path()).await;
     let resp = set(
         &state,
-        json!([{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["O"]}]),
+        json!([{"namespace": "board.normal", "action": "navigate_row_last", "keys": ["V"]}]),
     )
     .await;
     assert!(is_error(&resp));
@@ -641,7 +641,7 @@ async fn a_row_named_twice_in_one_call_is_refused() {
     let resp = set(
         &state,
         json!([
-            {"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+            {"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
             {"namespace": "board.normal", "action": "delete_task", "keys": []},
         ]),
     )
@@ -665,7 +665,7 @@ async fn a_file_that_is_not_a_list_is_never_written_over() {
         let state = board_started_in(dir.path()).await;
         let resp = set(
             &state,
-            json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]),
+            json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]),
         )
         .await;
         assert!(is_error(&resp), "{before}");
@@ -682,12 +682,12 @@ async fn an_entry_the_load_already_refuses_is_kept_and_named() {
     let dir = tempfile::tempdir().unwrap();
     write_file(
         dir.path(),
-        r#"[{"namespace": "board.nope", "action": "delete_task", "keys": ["O"]}, 7]"#,
+        r#"[{"namespace": "board.nope", "action": "delete_task", "keys": ["V"]}, 7]"#,
     );
     let state = board_started_in(dir.path()).await;
     let resp = set(
         &state,
-        json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]),
+        json!([{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]),
     )
     .await;
     assert!(!is_error(&resp), "{resp:?}");
@@ -697,9 +697,9 @@ async fn an_entry_the_load_already_refuses_is_kept_and_named() {
     assert_eq!(
         file,
         json!([
-            {"namespace": "board.nope", "action": "delete_task", "keys": ["O"]},
+            {"namespace": "board.nope", "action": "delete_task", "keys": ["V"]},
             7,
-            {"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+            {"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
         ])
     );
 }
@@ -713,7 +713,7 @@ async fn a_change_replaces_its_rows_entry_in_place_and_repeating_it_changes_noth
     write_file(
         dir.path(),
         &json!([
-            {"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+            {"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
             {"namespace": "board.normal", "action": "navigate_row_last", "keys": [free[0]]},
         ])
         .to_string(),
@@ -800,8 +800,8 @@ async fn the_index_counts_overridden_rows_and_lists_the_load_errors() {
 
     write_file(
         dir.path(),
-        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
-            {"namespace": "board.nope", "action": "delete_task", "keys": ["O"]}]"#,
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
+            {"namespace": "board.nope", "action": "delete_task", "keys": ["V"]}]"#,
     );
     let state = board_started_in(dir.path()).await;
     let text = text_of(&list(&state, json!({})).await);

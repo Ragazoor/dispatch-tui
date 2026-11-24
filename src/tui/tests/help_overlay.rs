@@ -274,7 +274,7 @@ fn every_row_of_the_table_is_in_the_overlay_under_its_namespace() {
 fn the_overlay_shows_the_users_keys_from_the_override_file() {
     let load = crate::keybindings::loaded_table(
         crate::keybindings::KeyTableReader::Board,
-        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#,
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]"#,
     );
     let body = overlay_body_of(help_app_with(&load));
     assert_overlay_shows_every_row(&body, load.table);
@@ -297,7 +297,7 @@ fn the_overlay_shows_the_users_keys_from_the_override_file() {
         .filter(|&i| i > from && i < to)
         .map(|i| body[i - 1].trim())
         .collect();
-    assert_eq!(key_lines, vec!["O"], "{}", body.join("\n"));
+    assert_eq!(key_lines, vec!["V"], "{}", body.join("\n"));
 }
 
 /// ReadersFollowTheRemap for the overlay: under the remapped table every row
