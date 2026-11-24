@@ -93,32 +93,19 @@ impl EpicContext {
         }
     }
 
-    /// `orchestrators.allium`'s covering(epic), then that epic's orchestrator
-    /// row on this machine. A read failure mid-walk answers `None`: the agent
-    /// then asks the operator, as it would without an orchestrator.
+    /// This machine's orchestrator of the epic that covers `epic`. A read
+    /// failure answers `None`: the agent then asks the operator, as it would
+    /// without an orchestrator.
     async fn covering_orchestrator(
         epic: &crate::models::Epic,
         db: &dyn store::TaskReadStore,
     ) -> Option<String> {
-        let mut seen: HashSet<EpicId> = HashSet::new();
-        let mut cursor = epic.id;
-        let mut parent = epic.parent_epic_id;
-        let covering = loop {
-            if !seen.insert(cursor) {
-                return None;
-            }
-            if db.epic_orchestration(cursor).await.is_some() {
-                break cursor;
-            }
-            let row = db.get_epic(parent?).await?;
-            cursor = row.id;
-            parent = row.parent_epic_id;
-        };
+        let (covering, _) = store::covering(db, Some(epic.id)).await?;
         let host = db.host_id();
         db.list_orchestrators()
             .await
             .into_iter()
-            .find(|o| o.epic_id == covering && o.host == host)
+            .find(|o| o.epic_id == covering.id && o.host == host)
             .map(|o| o.name)
     }
 

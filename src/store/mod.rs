@@ -633,6 +633,27 @@ pub trait PollOwnershipStore: Send + Sync {
     async fn override_poll_owner(&self, target: PollScopeId) -> Result<()>;
 }
 
+/// How far up an epic chain [`covering`] climbs before it gives up on a
+/// chain that does not end.
+const MAX_CHAIN: usize = 64;
+
+/// `orchestrators.allium`'s `covering(epic)`: the switch on `epic` or on its
+/// nearest ancestor that has one, with that epic.
+pub async fn covering(
+    db: &dyn TaskReadStore,
+    epic: Option<EpicId>,
+) -> Option<(crate::models::Epic, crate::models::EpicOrchestration)> {
+    let mut next = epic;
+    for _ in 0..MAX_CHAIN {
+        let found = db.get_epic(next?).await?;
+        if let Some(on) = db.epic_orchestration(found.id).await {
+            return Some((found, on));
+        }
+        next = found.parent_epic_id;
+    }
+    None
+}
+
 /// An orchestrated epic's orchestrator on each machine (`core.allium:
 /// Orchestrator`). Its rows touch no task or epic, so, like
 /// [`PollOwnershipStore`], the reads and the writes sit together on the

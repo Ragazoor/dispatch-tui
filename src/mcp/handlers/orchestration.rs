@@ -8,25 +8,12 @@ use crate::models::{
 };
 use crate::service::ServiceError;
 
-/// How far up an epic chain [`covering`] climbs before it gives up on a
-/// chain that does not end.
-const MAX_CHAIN: usize = 64;
-
-/// `orchestrators.allium`'s `covering(epic)`: the switch on `epic` or on its
-/// nearest ancestor that has one, with that epic.
+/// `crate::store::covering` over this server's store.
 pub(super) async fn covering(
     state: &McpState,
     epic: Option<EpicId>,
 ) -> Option<(Epic, EpicOrchestration)> {
-    let mut next = epic;
-    for _ in 0..MAX_CHAIN {
-        let found = state.epic_svc.get_epic(next?).await.ok()?;
-        if let Some(on) = state.db.epic_orchestration(found.id).await {
-            return Some((found, on));
-        }
-        next = found.parent_epic_id;
-    }
-    None
+    crate::store::covering(&*state.db, epic).await
 }
 
 /// Who a ready mark set by `identity` names (`UpdateTaskViaMcp`, "Who marked
