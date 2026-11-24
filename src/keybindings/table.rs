@@ -189,10 +189,16 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Jump to the epic the task belongs to; does nothing for a task with no epic",
     ),
     normal(
-        &["Enter", "Space"],
+        &["Enter"],
         Some(C::OnOrchestratorCard),
         "enter_epic",
         "Open the orchestrated epic's view",
+    ),
+    normal(
+        &["Space"],
+        Some(C::OnOrchestratorCard),
+        "open_orchestrator",
+        "Open the orchestrator's window. Starts its session first when it has none",
     ),
     normal(
         &["Enter"],

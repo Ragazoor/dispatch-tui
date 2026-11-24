@@ -757,8 +757,13 @@ pub(in crate::tui) fn orchestrator_action_hints(
 ) -> Vec<Span<'static>> {
     let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
     bar.push(Some(C::OnOrchestratorCard), "enter_epic", "Enter", "open");
+    bar.push(
+        Some(C::OnOrchestratorCard),
+        "open_orchestrator",
+        "Space",
+        "orchestrator",
+    );
     bar.push(None, "edit_task", "e", "edit");
-    bar.push(None, "open_orchestrator", "O", "orchestrator");
     bar.push(None, "cycle_lens_forward", "Tab", "lens");
     bar.push(None, "open_board_filter", "f", "filter");
     bar.push(None, "search_tasks", "/", "search");

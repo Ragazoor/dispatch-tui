@@ -886,10 +886,10 @@ given {
 --     else id. The columns have no sections.
 --
 -- Keys on a card (orchestrators.allium: KeysOnTheCard; keybindings.allium,
--- on_orchestrator_card): Enter and Space open the epic view, which this lens
--- reads flat; e opens the epic's edit form, where the orchestrator's
--- switch, start rule and limit live; O opens this machine's orchestrator's
--- window. The cursor keys move as on any card. Every other card key does
+-- on_orchestrator_card): Enter opens the epic view, which this lens
+-- reads flat; Space and O open this machine's orchestrator's window, as
+-- Space on a task card goes to its agent; e opens the epic's edit form,
+-- where the orchestrator's switch, start rule and limit live. The cursor keys move as on any card. Every other card key does
 -- nothing there: a card cannot be selected, moved, reordered, reparented,
 -- linked, folded or deleted from this view. Decided by zlata2 while the
 -- operator was away; open to the operator's review.

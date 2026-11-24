@@ -1339,14 +1339,15 @@ surface OrchestratorView {
         -- log line, cut to fit. Down is drawn as an alarm, like crashed.
 
     @guarantee KeysOnTheCard
-        -- Enter and Space open the epic view, flattened, with the epic's
-        -- tasks. The orchestrator key opens the orchestrator's window, as
-        -- OrchestratorKey does in the epic view. The edit key opens the
+        -- Enter opens the epic view, flattened, with the epic's tasks.
+        -- Space opens the orchestrator's window, as Space on a task card
+        -- goes to the task's agent; the orchestrator key does the same,
+        -- as OrchestratorKey does in the epic view. The edit key opens the
         -- epic's edit form, where the switch, the start rule and the limit
         -- live. The cursor keys move; every other card key does nothing
-        -- here (keybindings.allium: on_orchestrator_card). Space and the
-        -- edit key decided by the epic's acting orchestrator while the
-        -- operator was away; open to the operator's review.
+        -- here (keybindings.allium: on_orchestrator_card). The edit key
+        -- decided by the epic's acting orchestrator while the operator
+        -- was away; open to the operator's review.
 }
 
 -- The epic view's part (O14, O15).

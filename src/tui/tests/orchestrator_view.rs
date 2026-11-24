@@ -467,11 +467,16 @@ fn enter_opens_the_epic_view_flat_and_q_comes_back_to_the_orchestrator_view() {
 }
 
 #[test]
-fn space_opens_the_epic_view_too() {
-    let mut app = orchestrator_app(vec![], vec![make_epic(10)], on_ten());
+fn space_opens_the_orchestrators_window_and_stays_on_the_board() {
+    let mut app = orchestrator_app(vec![running_here(1, 10)], vec![make_epic(10)], on_ten());
     on_first_card(&mut app);
-    key(&mut app, KeyCode::Char(' '));
-    assert_eq!(app.current_epic_id(), Some(EpicId(10)));
+    let cmds = key(&mut app, KeyCode::Char(' '));
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::JumpToTmux { .. }))),
+        "{cmds:?}"
+    );
+    assert_eq!(app.current_epic_id(), None);
 }
 
 #[test]
@@ -507,7 +512,7 @@ fn the_hint_bar_names_the_cards_keys() {
     let mut app = orchestrator_app(vec![], vec![make_epic(10)], on_ten());
     on_first_card(&mut app);
     let buf = render_to_buffer(&mut app, 160, 40);
-    for want in ["[Enter] open", "[e]dit", "[O]rchestrator"] {
+    for want in ["[Enter] open", "[Space] orchestrator", "[e]dit"] {
         assert!(buffer_contains(&buf, want), "missing {want:?}");
     }
     assert!(!buffer_contains(&buf, "[x] delete"));

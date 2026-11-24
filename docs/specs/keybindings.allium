@@ -470,11 +470,11 @@ enum KeyReceiver { dispatch | tmux }
 --                                                                toggle_section_collapse
 --   on_folded_epic_group      "on a folded epic group"          Enter / Space:
 --                                                                toggle_epic_fold
---   on_orchestrator_card      "on an orchestrator card" (the    Enter / Space: enter_epic
+--   on_orchestrator_card      "on an orchestrator card" (the    Enter: enter_epic
 --                              orchestrator view's card,         (the epic itself, no
---                              board-layout.allium:              descent)
---                              "Orchestrator View"; not an
---                              epic card)
+--                              board-layout.allium:              descent);
+--                              "Orchestrator View"; not an       Space: open_orchestrator
+--                              epic card)                        (what O does there)
 --   on_epic_card              "on an epic card"                 Space: enter_epic;
 --                                                                Enter: jump_to_deepest_epic;
 --                                                                m: reparent_epic; H/L;
