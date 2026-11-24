@@ -1585,6 +1585,7 @@ rule DispatchTaskViaMcp {
 rule OrchestratorMemoryViaMcp {
     when: McpOrchestratorAnswerRecord(caller_identity, task, question, answer, reason)
        or McpOrchestratorSummaryRecord(caller_identity, text)
+       or McpOrchestratorTroubleRecord(caller_identity, task, trouble, text)
        or McpWaitingItemCreate(caller_identity, task, about, tried, recommendation)
        or McpEpicNoteCreate(caller_identity, text)
        or McpEpicNoteUpdate(caller_identity, note, text, done)
@@ -1600,6 +1601,11 @@ rule OrchestratorMemoryViaMcp {
         -- The answer itself goes to the agent as a message; this records it.
         -- orchestrator-summary_record(text): orch/OrchestratorSummaryRecorded,
         -- refused while the epic is not done.
+        -- orchestrator-trouble_record(task_id, trouble, text):
+        -- orch/OrchestratorRecordsATroubleAction, the one retry for stale,
+        -- crashed, start_failed or conflict, recorded before the orchestrator
+        -- acts. A second retry in the same bout is refused with the advice
+        -- to raise a waiting item instead.
         -- waiting-item_create(task_id?, about, tried, recommendation):
         -- orch/WaitingItemRaised, which also writes the passed_on entry.
         -- epic-note_create(text), epic-note_update(epic_note_id, text?, done?),

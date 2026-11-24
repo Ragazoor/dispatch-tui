@@ -68,11 +68,18 @@
 -- MarksReadyOnlyWhatIsWanted is the ready argument's description
 -- (mcp-task-tools.allium: CreateTaskViaMcp). OrchestratorAnswerLine is a part of the
 -- orchestrator's prompt (dispatch-prompt.allium: OrchestratorSessionPrompt).
+-- Built (step 7): the wake events and the trouble reactions. The wake is
+-- agent-health.allium's (OrchestratorWakeEvents, WakeTheOrchestrator); the
+-- trouble rules below, OrchestratorRecordsATroubleAction, the review entry
+-- (TaskEnteringReviewIsLogged), the ping and review timers and the board's
+-- ask for the closing summary (OrchestratorAskedForItsSummary) are built;
+-- the tool is mcp-task-tools.allium's (OrchestratorMemoryViaMcp:
+-- orchestrator-trouble_record), the prompt's trouble part
+-- dispatch-prompt.allium's (OrchestratorSessionPrompt).
+-- Open, for the operator: already_retried is built narrower than its intent
+-- (see its definition). Decided by the epic's acting orchestrator while the
+-- operator was away.
 -- Left for the steps that own them, so none is missed:
---   - step 7: the board asking the orchestrator for its closing summary
---     before it closes the window of a finished epic (EndOrchestratorSession);
---     it needs the wake mechanism. Until then the summary is written only
---     when the orchestrator records it on its own, as its prompt tells it.
 --   - step 9: EpicFinishedNotified from EndOrchestratorSession, the
 --     desktop notification of a raised item, and OrchestratorRestartAsked
 --     (the orchestrator key on a down orchestrator). Until then switching
@@ -203,6 +210,23 @@ config {
 -- worked again, the start went through, the wrap-up landed). So one retry is
 -- spent per bout of trouble. It comes back when the retry worked, and when
 -- the operator has dealt with the item a second failure raised (O10).
+--   That is the intent. The store keeps no record of a trouble ending, so
+--   the build is narrower: the entry must be newer than every resolved item
+--   of the task and, for stale, crashed and conflict, newer than the task's
+--   newest started_task entry. A start_failed retry is itself a start, so for
+--   start_failed only a resolved item ends the bout. A trouble that ended by
+--   itself and comes back later therefore goes to the operator, not to a
+--   second retry: it fails toward the operator and never loops. Decided by
+--   the epic's acting orchestrator while the operator was away; open to the
+--   operator's review.
+-- live_orchestrator_for(task): this machine's core/Orchestrator of
+-- covering(task) when its session is live and the task is this machine's
+-- (task.host is this host, or the task has no host), else null (O11).
+-- started_by_orchestrator(request): the log holds a started_task entry for
+-- request.task written at request.requested_at, in the request's own
+-- transaction (OrchestratorStartsATask).
+-- entered_review_at(task): the at of the task's newest review entry
+-- (TaskEnteringReviewIsLogged), or null.
 -- waits_on_someone_else(task): the task reviews another author's PR and the
 -- operator has given their verdict (core.allium, "Derived review sections":
 -- changes requested by me, approved by me).
@@ -512,8 +536,31 @@ rule EndOrchestratorSession {
         -- nothing to handle. The board closes the window. A task that
         -- reopens or arrives makes the session wanted again on the next
         -- check. On a finished epic the board asks the orchestrator for its
-        -- closing summary before it closes the window, and the orchestrator
-        -- records it (OrchestratorRecordsItsSummary).
+        -- closing summary before it closes the window
+        -- (OrchestratorAskedForItsSummary), and the orchestrator records it
+        -- (OrchestratorRecordsItsSummary).
+}
+
+rule BoardWaitsForTheSummary {
+    when: OrchestratorAskedForItsSummary(orchestrator)
+
+    requires: orchestrator.host = core/local_host()
+    requires: orchestrator.is_live
+
+    ensures: SummaryAskTyped(orchestrator)
+
+    @guidance
+        -- HOST-SIDE. The ask is a wake message (agent-health.allium:
+        -- WakeTheOrchestrator): "the epic is done: record your closing
+        -- summary with orchestrator-summary_record". The board keeps the
+        -- window until the orchestrator's next completed turn
+        -- (last_turn_at after the ask) or until config.orchestrator_ping_wait
+        -- has passed since the ask, whichever is first, and then ends the
+        -- session as EndOrchestratorSession says. The ask is the board's own
+        -- memory: a board that restarts while it waits asks again. When no
+        -- session is live as the epic finishes there is no ask and no
+        -- summary. Decided by the epic's acting orchestrator while the
+        -- operator was away; open to the operator's review.
 }
 
 rule OrchestratorRecordsItsSummary {
@@ -592,7 +639,8 @@ rule OrchestratorStartsATask {
         -- unfinished work. Between tasks it cannot tell apart it takes board
         -- order (sort_order, then id), as the chain did.
         --
-        -- It starts work when it wakes (OrchestratorWakeEvents) and a slot is
+        -- It starts work when it wakes (agent-health.allium:
+        -- OrchestratorWakeEvents) and a slot is
         -- free. A task that is not ready is never started; the orchestrator
         -- may tell the operator that one looks unblocked.
         --
@@ -621,6 +669,32 @@ rule OrchestratorAnswersAnAgent {
         -- The answer itself travels as a message to the task agent. The log
         -- entry is how "every answer is recorded on the task" holds: the
         -- task's detail lists the entries that name it.
+}
+
+rule OrchestratorRecordsATroubleAction {
+    when: OrchestratorActedOnTrouble(orchestrator, task, trouble, text)
+
+    requires: covering(task) = orchestrator.orchestration
+    requires: text != ""
+    -- O10: one retry per bout. The refusal tells the orchestrator to pass
+    -- the trouble on instead ("task <id> already had its one retry for
+    -- <trouble>: raise a waiting item with waiting-item_create").
+    requires: not already_retried(task, trouble)
+
+    ensures: core/OrchestratorLogEntry.created(
+        epic: orchestrator.epic, host: orchestrator.host, at: now,
+        kind: acted_on_trouble, task: task, question: null,
+        trouble: trouble, text: text
+    )
+
+    @guidance
+        -- How each trouble rule below writes its acted_on_trouble entry. The
+        -- orchestrator records first and then acts (pings, resumes, starts
+        -- again, tells the agent to resolve the conflict), so a refused
+        -- record stops a second retry before it happens. The store checks
+        -- already_retried in the write, so the one retry holds whatever the
+        -- orchestrator's judgement. Decided by the epic's acting orchestrator
+        -- while the operator was away; open to the operator's review.
 }
 
 rule OrchestratorPassesOnToTheOperator {
@@ -733,8 +807,33 @@ rule RemoveEpicNote {
 
 -- == Trouble ==
 
--- Each rule fires when the orchestrator, woken by the event, acts on it. A
--- board with no live orchestrator for the task does what it does without one.
+-- Each rule fires when the orchestrator, woken by the event
+-- (agent-health.allium: OrchestratorWakeEvents), acts on it. A board with no
+-- live orchestrator for the task does what it does without one. Each
+-- acted_on_trouble entry below is written through
+-- OrchestratorRecordsATroubleAction, which refuses a second retry; each
+-- WaitingItemRaised is the orchestrator's waiting-item_create.
+
+rule TaskEnteringReviewIsLogged {
+    when: task: core/Task.status transitions_to review
+
+    requires: covering(task) != null
+
+    ensures: core/OrchestratorLogEntry.created(
+        epic: covering(task).epic, host: task.host, at: now,
+        kind: review, task: task, question: null, trouble: null,
+        text: "entered review"
+    )
+
+    @guidance
+        -- Written by the store in the write that moves the task, whoever
+        -- moves it, so the review reminder's clock survives a board restart
+        -- (entered_review_at). Its host is the task's, empty for a task no
+        -- machine holds. No tool writes it (OnlyTheOrchestratorWritesItsLog).
+        -- A task already in review when the switch went on has no entry and
+        -- gets no reminder. Decided by the epic's acting orchestrator while
+        -- the operator was away; open to the operator's review.
+}
 
 rule AgentNeedsInput {
     when: task: core/Task.sub_status transitions_to needs_input
@@ -755,23 +854,39 @@ rule AgentIsStale {
 
     requires: live_orchestrator_for(task) != null
 
-    ensures: AgentPinged(live_orchestrator_for(task), task)
-    ensures: core/OrchestratorLogEntry.created(
-        epic: live_orchestrator_for(task).epic,
-        host: live_orchestrator_for(task).host, at: now,
-        kind: acted_on_trouble, task: task, question: null,
-        trouble: stale, text: "asked the agent for status"
-    )
+    -- An agent that waits for the operator is not pinged.
+    requires: not exists core/WaitingItem{task: task, resolved_at: null}
+
+    ensures:
+        if not waits_for_its_orchestrator(task):
+            AgentPinged(live_orchestrator_for(task), task)
+            core/OrchestratorLogEntry.created(
+                epic: live_orchestrator_for(task).epic,
+                host: live_orchestrator_for(task).host, at: now,
+                kind: acted_on_trouble, task: task, question: null,
+                trouble: stale, text: "asked the agent for status"
+            )
 
     @guidance
         -- A message asking for status. An agent that works again within
         -- config.orchestrator_ping_wait ends it there.
+        --
+        -- A covered agent that asked its orchestrator and waits for the
+        -- answer raises no needs input, so it reads as stale.
+        -- waits_for_its_orchestrator(task) is the orchestrator's own reading
+        -- of its conversation: the agent asked it something it has not
+        -- answered. Then it answers, or leaves the agent waiting, and pings
+        -- nothing. Its prompt tells it to check that, and for an open item of
+        -- the task, before it pings. Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
 }
 
 rule StaleAgentDidNotAnswer {
     when: AgentPingExpired(orchestrator, task)
 
     requires: task.sub_status = stale
+    requires: not exists core/WaitingItem{task: task, resolved_at: null}
 
     ensures: WaitingItemRaised(
         epic: orchestrator.epic, host: orchestrator.host, task: task,
@@ -779,6 +894,14 @@ rule StaleAgentDidNotAnswer {
         tried: "asked it for status",
         recommendation: stale_recommendation(orchestrator, task)
     )
+
+    @guidance
+        -- AgentPingExpired is due config.orchestrator_ping_wait after the
+        -- task's newest stale acted_on_trouble entry, read from the store so
+        -- a board restart does not lose it. The board that holds the
+        -- orchestrator's window wakes it once per entry; the open-item
+        -- requires keeps a restarted board, which forgot that it woke it,
+        -- from raising a second item.
 }
 
 rule AgentCrashed {
@@ -822,7 +945,8 @@ rule StartFailed {
                 trouble: start_failed, text: request.reason
             )
             TaskMarkedReady(task: request.task, marked_by: agent, agent_name: orchestrator.name)
-            OrchestratorStartsTask(orchestrator, request.task)
+            OrchestratorStartsTask(orchestrator, request.task,
+                "retry after a failed start: " + request.reason)
         else:
             WaitingItemRaised(
                 epic: orchestrator.epic, host: orchestrator.host, task: request.task,
@@ -869,13 +993,16 @@ rule WrapUpConflict {
 rule LongWaitInReview {
     when: ReviewReminderDue(task)
 
-    -- Due config.orchestrator_review_reminder_after after the task entered
-    -- review, when it has not left since.
+    -- Due config.orchestrator_review_reminder_after after
+    -- entered_review_at(task), while the task has not left review since.
     requires: task.status = review
+    requires: entered_review_at(task) != null
     -- A review the operator has already given waits on the other author.
     requires: not waits_on_someone_else(task)
     requires: live_orchestrator_for(task) != null
+    -- Once per stay: no item of the task was raised since it entered review.
     requires: not exists core/WaitingItem{task: task, resolved_at: null}
+    requires: not core/WaitingItems.any(i => i.task = task and i.raised_at > entered_review_at(task))
 
     ensures: WaitingItemRaised(
         epic: live_orchestrator_for(task).epic,
@@ -887,7 +1014,12 @@ rule LongWaitInReview {
     )
 
     @guidance
-        -- Once per stay in review. The task is not moved.
+        -- Once per stay in review. The task is not moved. A task no machine
+        -- holds (a review of another author's PR) is any live orchestrator's
+        -- of the epic; the open-item requires keeps a second machine from
+        -- raising a second item but for a race. Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
 }
 
 ------------------------------------------------------------
@@ -976,33 +1108,8 @@ surface OrchestratorAnswerLine {
         -- reaches the task agent, and the item is resolved.
 }
 
--- What wakes a live orchestrator. Each arrives as a message in its session.
-surface OrchestratorWakeEvents {
-    facing agent: core/DispatchedAgent
-
-    @guarantee WokenByItsSubtreeOnly
-        -- A task appears in, or moves into, the subtree. A task is marked
-        -- ready or its mark is cleared. A task of this machine changes status
-        -- or enters needs input, stale, crashed or conflict. A start the
-        -- orchestrator asked for fails. A ping or a review reminder comes
-        -- due. A task agent or the operator writes to it. A WaitingItem of
-        -- the epic is resolved.
-
-    @guarantee QuietOtherwise
-        -- Between events it does nothing and costs nothing. It does not poll
-        -- the board.
-
-    @guarantee AnUndeliveredReplyIsNotLost
-        -- A message to a task agent whose session is not there to take it is
-        -- reported back to the orchestrator as undelivered
-        -- (agent-health.allium: UndeliveredPeerMessage). The answer is in the
-        -- log either way, and the agent's next prompt points it there.
-
-    @guarantee OnlyThisMachinesAgents
-        -- O11. It sees every task of the subtree, and acts on the agents of
-        -- its own machine. A task another machine runs is that machine's
-        -- orchestrator's.
-}
+-- What wakes a live orchestrator is agent-health.allium's
+-- (OrchestratorWakeEvents, WakeTheOrchestrator).
 
 -- What the orchestrator is told when its session starts, fresh or resumed.
 surface OrchestratorPrompt {
@@ -1104,6 +1211,7 @@ surface OrchestratorMcpTools {
         OrchestratorStartsTask(orchestrator, task, reason)
         OrchestratorAnswered(orchestrator, task, question, answer, reason)
         OrchestratorSummaryRecorded(orchestrator, text)
+        OrchestratorActedOnTrouble(orchestrator, task, trouble, text)
         WaitingItemRaised(epic, host, task?, about, tried, recommendation)
         WaitingItemResolved(item)
         EpicNoteWritten(epic, text)
@@ -1121,10 +1229,12 @@ surface OrchestratorMcpTools {
         -- that covers it by name, and the log entries that name the task.
 
     @guarantee OnlyTheOrchestratorWritesItsLog
-        -- A start, an answer, an item raised and a summary write their own
-        -- log entry, stamped with the calling orchestrator's epic and host.
-        -- No tool appends a free line to the log or edits one. The tools are
-        -- mcp-task-tools.allium's (OrchestratorMemoryViaMcp).
+        -- A start, an answer, a trouble action, an item raised and a summary
+        -- write their own log entry, stamped with the calling orchestrator's
+        -- epic and host. The store writes the session entries and the review
+        -- entry itself (TaskEnteringReviewIsLogged). No tool appends a free
+        -- line to the log or edits one. The tools are mcp-task-tools.allium's
+        -- (OrchestratorMemoryViaMcp).
 }
 
 -- The board's third lens (O14).
@@ -1252,8 +1362,6 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes (RequestDispatch
 --     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - agent-health.allium: the orchestrator's wake events (its hooks are
---     there already).
 --   - board-layout.allium, board-visuals.allium, agent-tree.allium and
 --     keybindings.allium: the lens order, the orchestrator view, the header,
 --     the ready marker and the two keys.

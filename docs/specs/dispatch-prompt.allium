@@ -1653,7 +1653,15 @@ surface OrchestratorSessionPrompt {
         --     the agent before the item is resolved;
         --   the start rule, said in words ("only backlog tasks marked ready"
         --     or "every backlog task"), and the limit;
-        --   the trouble rules with their one retry (O10);
+        --   the trouble rules with their one retry (O10): wake messages from the
+--     board start "[dispatch] "; it records each retry with
+--     orchestrator-trouble_record before it acts, and a refused record
+--     means it raises a waiting item instead; for a stale agent it first
+--     checks whether the agent waits for its own answer or for an open item
+--     of the task, and then answers or leaves it, and pings nothing; a
+--     failed start is retried by marking the task ready and starting it
+--     again; a review reminder raises an item; when the board says the epic
+--     is done it records its closing summary;
         --   one line per task of the subtree, in board order: id, title,
         --     status, sub-status, ready (backlog only), agent name;
         --   its memory (orchestrators.allium, O13): every note of the epic,

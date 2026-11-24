@@ -1429,6 +1429,78 @@ surface OrchestratorHooks {
         -- quietly, as MissingTaskSucceeds does for a task.
 }
 
+-- What wakes a live orchestrator (orchestrators.allium, O12). Each event
+-- arrives as a message in its session; between events it costs nothing.
+surface OrchestratorWakeEvents {
+    facing agent: core/DispatchedAgent
+
+    @guarantee WokenByItsSubtreeOnly
+        -- A task appears in, or moves into, the subtree. A task is marked
+        -- ready or its mark is cleared. A task of this machine changes status
+        -- or enters needs input, stale, crashed or conflict. A start the
+        -- orchestrator asked for fails. A ping or a review reminder comes
+        -- due. A task agent or the operator writes to it. A WaitingItem of
+        -- the epic is resolved. The epic finishes (the summary ask,
+        -- orchestrators.allium: BoardWaitsForTheSummary).
+
+    @guarantee QuietOtherwise
+        -- Between events it does nothing and costs nothing. It does not poll
+        -- the board.
+
+    @guarantee AnUndeliveredReplyIsNotLost
+        -- A message to a task agent whose session is not there to take it
+        -- fails in the orchestrator's own SendMessage call, which tells it so.
+        -- Its hooks add nothing (OrchestratorHooks: OnlyAStopIsReported). The
+        -- answer is in the log either way, and the agent's next prompt points
+        -- it there.
+
+    @guarantee OnlyThisMachinesAgents
+        -- O11. It sees every task of the subtree, and acts on the agents of
+        -- its own machine. A task another machine runs is that machine's
+        -- orchestrator's.
+}
+
+-- How the events reach it. A task agent's or the operator's message is
+-- Claude Code's own SendMessage; every other event is the board's.
+rule WakeTheOrchestrator {
+    when: core/Tick()
+
+    ensures:
+        for o in core/Orchestrators where host = core/local_host() and is_live:
+            if wake_events(o) != []:
+                OrchestratorWoken(o, wake_events(o))
+
+    @guidance
+        -- HOST-SIDE. Only the board that holds the orchestrator's window
+        -- wakes it. On each tick it compares the subtree with what it saw at
+        -- its last tick: the tasks, their status, sub-status, host and ready
+        -- mark, the epic's resolved items and the failed requests the
+        -- orchestrator asked for (orchestrators.allium:
+        -- started_by_orchestrator). wake_events(o) is what changed, in the
+        -- scope WokenByItsSubtreeOnly gives, and the timers that came due:
+        -- a ping (orchestrators.allium: AgentPingExpired, once per stale
+        -- entry), a review reminder (ReviewReminderDue, once per review
+        -- entry) and the summary ask. A due timer is skipped while the task
+        -- has an open item.
+        --
+        -- The events of one tick go as ONE message, typed into the window
+        -- as a single line that starts "[dispatch] " and names each event
+        -- with its task id, and for trouble whether the one retry is still
+        -- there (orchestrators.allium: already_retried). Claude Code queues
+        -- a message typed while a turn runs.
+        --
+        -- The comparison lives in the board's memory. Events while no board
+        -- runs are not replayed. The first tick that finds a live window it
+        -- did not start (a board restart adopting it) sends one wake that
+        -- says the board restarted and to check the board; that and the
+        -- prompt's first-turn check (orchestrators.allium:
+        -- FirstTurnChecksTheBoard) cover the gap. A session this board just
+        -- started gets no wake for what its prompt already shows. A failed
+        -- send is logged and not retried: the next event wakes it again.
+        -- Decided by the epic's acting orchestrator while the operator was
+        -- away; open to the operator's review.
+}
+
 -- The tmux liveness check. Every tick the board asks tmux which of this
 -- host's running and review tasks still have their window, and reports each
 -- one that does not. agent-tree.allium and pr-workflow.allium consume it

@@ -197,6 +197,8 @@ enum LogEntryKind {
     acted_on_trouble -- it pinged, resumed, retried or redirected a task agent
     session          -- its own session started, resumed, ended or died
     summary          -- its closing summary of a finished epic
+    review           -- a covered task entered review; written by the store,
+                     -- not the orchestrator (TaskEnteringReviewIsLogged)
 }
 
 -- The trouble a log entry of kind acted_on_trouble is about.
