@@ -1137,3 +1137,50 @@ async fn a_long_log_is_cut_and_says_how_to_read_the_rest() {
         "{epic_read}"
     );
 }
+
+/// orchestrators.allium: OrchestratorRecordsATroubleAction. One retry per
+/// bout: the second record of the same trouble is refused with the advice to
+/// raise an item, and a plain session cannot record one.
+#[tokio::test]
+async fn a_trouble_action_is_recorded_once_then_refused() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+    let args = json!({ "task_id": task.0, "trouble": "crashed", "text": "resumed the agent" });
+
+    let first = ok_text(
+        &tool_as(
+            &state,
+            "orchestrator-trouble_record",
+            args.clone(),
+            as_orchestrator(&name),
+        )
+        .await,
+    );
+    assert!(first.contains("crashed"), "{first}");
+    let log = state.db.orchestrator_log_of_epic(e).await;
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert_eq!(log[0].kind, crate::models::LogEntryKind::ActedOnTrouble);
+    assert_eq!(log[0].trouble.as_deref(), Some("crashed"));
+
+    let second = tool_as(
+        &state,
+        "orchestrator-trouble_record",
+        args.clone(),
+        as_orchestrator(&name),
+    )
+    .await;
+    assert!(
+        error_message(&second).contains("waiting-item_create"),
+        "{}",
+        error_message(&second)
+    );
+
+    let plain = tool(&state, "orchestrator-trouble_record", args).await;
+    assert!(
+        error_message(&plain).contains("orchestrator-trouble_record is an orchestrator's tool"),
+        "{}",
+        error_message(&plain)
+    );
+}

@@ -104,6 +104,7 @@ pub mod record_learning_retrieval_reducer;
 pub mod record_notification_reducer;
 pub mod record_orchestrator_answer_reducer;
 pub mod record_orchestrator_summary_reducer;
+pub mod record_orchestrator_trouble_reducer;
 pub mod record_pre_tool_use_reducer;
 pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
@@ -321,6 +322,7 @@ pub use record_learning_retrieval_reducer::record_learning_retrieval;
 pub use record_notification_reducer::record_notification;
 pub use record_orchestrator_answer_reducer::record_orchestrator_answer;
 pub use record_orchestrator_summary_reducer::record_orchestrator_summary;
+pub use record_orchestrator_trouble_reducer::record_orchestrator_trouble;
 pub use record_pre_tool_use_reducer::record_pre_tool_use;
 pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
@@ -667,6 +669,12 @@ pub enum Reducer {
         name: String,
         text: String,
     },
+    RecordOrchestratorTrouble {
+        name: String,
+        task_id: i64,
+        trouble: String,
+        text: String,
+    },
     RecordPreToolUse {
         id: i64,
         sub_status: String,
@@ -1010,6 +1018,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordNotification { .. } => "record_notification",
             Reducer::RecordOrchestratorAnswer { .. } => "record_orchestrator_answer",
             Reducer::RecordOrchestratorSummary { .. } => "record_orchestrator_summary",
+            Reducer::RecordOrchestratorTrouble { .. } => "record_orchestrator_trouble",
             Reducer::RecordPreToolUse { .. } => "record_pre_tool_use",
             Reducer::RecordUsageEvent { .. } => "record_usage_event",
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
@@ -1470,6 +1479,17 @@ Reducer::RaiseOrchestratorDownItem{
                 text,
 }             => __sats::bsatn::to_vec(&record_orchestrator_summary_reducer::RecordOrchestratorSummaryArgs {
                 name: name.clone(),
+                text: text.clone(),
+}),
+            Reducer::RecordOrchestratorTrouble{
+                name,
+                task_id,
+                trouble,
+                text,
+}             => __sats::bsatn::to_vec(&record_orchestrator_trouble_reducer::RecordOrchestratorTroubleArgs {
+                name: name.clone(),
+                task_id: task_id.clone(),
+                trouble: trouble.clone(),
                 text: text.clone(),
 }),
             Reducer::RecordPreToolUse{

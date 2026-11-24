@@ -73,6 +73,7 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
         end_marks_on_finish(ctx, prior, &row);
         drop_ready_mark_on_leaving_backlog(ctx, prior, &row);
         resolve_items_on_finish(ctx, prior, &row);
+        log_entering_review(ctx, prior, &row);
     }
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);

@@ -360,8 +360,16 @@ use super::*;
 /// task finishes or is deleted and when the switch goes off, and remove the
 /// memory with its epic. A board on an older build lacks the reducers.
 ///
+/// Bumped: a task agent in trouble (`orchestrators.allium:
+/// OrchestratorRecordsATroubleAction`): `record_orchestrator_trouble` writes
+/// an `acted_on_trouble` entry and refuses a second retry in a bout
+/// (`already_retried`), and every task write that moves a covered task into
+/// review writes its `review` entry (`TaskEnteringReviewIsLogged`). A board
+/// on an older build lacks the reducer and does not write the entry in its
+/// mirror.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 68;
+pub const RULES_VERSION: i64 = 69;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

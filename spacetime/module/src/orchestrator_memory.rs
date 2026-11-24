@@ -19,6 +19,16 @@ pub const LOG_PASSED_ON: &str = "passed_on";
 pub const LOG_ACTED_ON_TROUBLE: &str = "acted_on_trouble";
 pub const LOG_SESSION: &str = "session";
 pub const LOG_SUMMARY: &str = "summary";
+pub const LOG_REVIEW: &str = "review";
+
+/// `TaskEnteringReviewIsLogged`'s text.
+pub const REVIEW_ENTERED: &str = "entered review";
+
+pub const TROUBLE_STALE: &str = "stale";
+pub const TROUBLE_CRASHED: &str = "crashed";
+pub const TROUBLE_START_FAILED: &str = "start_failed";
+pub const TROUBLE_CONFLICT: &str = "conflict";
+pub const TROUBLES: [&str; 4] = [TROUBLE_STALE, TROUBLE_CRASHED, TROUBLE_START_FAILED, TROUBLE_CONFLICT];
 
 pub const SESSION_STARTED: &str = "session started";
 pub const SESSION_RESUMED: &str = "session resumed";
@@ -138,6 +148,86 @@ pub fn check_orchestrator_summary(
     }
     let text = required("the summary", text)?;
     Ok(log_entry(&o, LOG_SUMMARY, 0, &text))
+}
+
+/// `already_retried(task, trouble)`, as built: an `acted_on_trouble` entry for
+/// the pair newer than every resolved item of the task and, but for
+/// `start_failed`, newer than the task's newest `started_task` entry.
+pub fn already_retried(r: &impl StoreReads, epic_id: i64, task_id: i64, trouble: &str) -> bool {
+    let log = r.log_of_epic(epic_id);
+    let of_task = || log.iter().filter(|e| e.task_id == task_id);
+    let Some(retry) = of_task()
+        .filter(|e| e.kind == LOG_ACTED_ON_TROUBLE && e.trouble == trouble)
+        .map(|e| e.at.as_str())
+        .max()
+    else {
+        return false;
+    };
+    let resolved = r
+        .items_of_task(task_id)
+        .into_iter()
+        .map(|i| i.resolved_at)
+        .filter(|at| !at.is_empty())
+        .max()
+        .unwrap_or_default();
+    let started = if trouble == TROUBLE_START_FAILED {
+        None
+    } else {
+        of_task()
+            .filter(|e| e.kind == LOG_STARTED_TASK)
+            .map(|e| e.at.as_str())
+            .max()
+    };
+    retry > resolved.as_str() && started.is_none_or(|s| retry > s)
+}
+
+/// `OrchestratorRecordsATroubleAction`'s entry.
+pub fn check_orchestrator_trouble(
+    r: &impl StoreReads,
+    name: &str,
+    task_id: i64,
+    trouble: &str,
+    text: &str,
+) -> Result<OrchestratorLogEntry, String> {
+    let o = orchestrator_writing(r, name)?;
+    covered_task(r, &o, task_id)?;
+    if !TROUBLES.contains(&trouble) {
+        return Err(format!(
+            "unknown trouble {trouble:?}: expected one of {}",
+            TROUBLES.join(", ")
+        ));
+    }
+    let text = required("what was done", text)?;
+    if already_retried(r, o.epic_id, task_id, trouble) {
+        return Err(format!(
+            "task {task_id} already had its one retry for {trouble}: raise a waiting item with \
+             waiting-item_create instead"
+        ));
+    }
+    Ok(OrchestratorLogEntry {
+        trouble: trouble.to_string(),
+        ..log_entry(&o, LOG_ACTED_ON_TROUBLE, task_id, &text)
+    })
+}
+
+/// `TaskEnteringReviewIsLogged`: the entry for a write from `prior` to
+/// `next`, or `None` when it is no move into review of a covered task.
+pub fn review_entry(r: &impl StoreReads, prior: &Task, next: &Task) -> Option<OrchestratorLogEntry> {
+    if prior.status == REVIEW || next.status != REVIEW {
+        return None;
+    }
+    let on = covering_orchestration(r, next.epic_id)?;
+    Some(OrchestratorLogEntry {
+        id: 0,
+        epic_id: on.epic_id,
+        host: next.host.clone(),
+        at: String::new(),
+        kind: LOG_REVIEW.to_string(),
+        task_id: next.id,
+        text: REVIEW_ENTERED.to_string(),
+        question: String::new(),
+        trouble: String::new(),
+    })
 }
 
 /// `OrchestratorPassesOnToTheOperator`: the item and its `passed_on` entry,
@@ -327,6 +417,13 @@ pub(crate) fn resolve_items_on_finish(ctx: &ReducerContext, prior: &Task, next: 
     }
 }
 
+/// Called by every task write that can move a status.
+pub(crate) fn log_entering_review(ctx: &ReducerContext, prior: &Task, next: &Task) {
+    if let Some(entry) = review_entry(ctx, prior, next) {
+        insert_log_entry(ctx, entry);
+    }
+}
+
 /// Called with every delete of a task row.
 pub(crate) fn resolve_items_of_deleted_task(ctx: &ReducerContext, task_id: i64) {
     resolve_all(ctx, open_items_of_task(ctx, task_id));
@@ -376,6 +473,20 @@ pub fn record_orchestrator_answer(
     reason: String,
 ) -> Result<(), String> {
     let entry = check_orchestrator_answer(ctx, &name, task_id, &question, &answer, &reason)?;
+    require_acting_for(ctx, &entry.host)?;
+    insert_log_entry(ctx, entry);
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn record_orchestrator_trouble(
+    ctx: &ReducerContext,
+    name: String,
+    task_id: i64,
+    trouble: String,
+    text: String,
+) -> Result<(), String> {
+    let entry = check_orchestrator_trouble(ctx, &name, task_id, &trouble, &text)?;
     require_acting_for(ctx, &entry.host)?;
     insert_log_entry(ctx, entry);
     Ok(())

@@ -507,6 +507,16 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_record_orchestrator_summary(name, text)
     }
 
+    async fn record_orchestrator_trouble(
+        &self,
+        name: String,
+        task: TaskId,
+        trouble: String,
+        text: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_record_orchestrator_trouble(name, task, trouble, text)
+    }
+
     async fn raise_waiting_item(
         &self,
         name: String,

@@ -798,6 +798,18 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
             "the epic says so".to_string(),
         );
         each!(record_orchestrator_answer(first, question, answer, why)).expect("answer");
+        // One retry per trouble: the second record is refused alike.
+        let (crashed, resumed) = ("crashed".to_string(), "resumed the agent".to_string());
+        each!(record_orchestrator_trouble(first, crashed, resumed)).expect("the one retry");
+        let refused = each!(record_orchestrator_trouble(first, crashed, resumed))
+            .expect_err("a second retry");
+        assert!(refused.contains("waiting-item_create"), "{refused}");
+        // A covered task entering review is logged by the store.
+        let review_patch = bindings::TaskPatch {
+            status: Some("review".into()),
+            ..blank_task_patch()
+        };
+        both!(patch_task(first, review_patch)).expect("first in review");
         let (about, tried, rec) = (
             "  may I drop the column?  ".to_string(),
             "read the migration".to_string(),
@@ -834,7 +846,7 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
         both!(patch_task(second, done_patch)).expect("second done");
 
         let expected = memory_of(&rows_mem, epic);
-        assert_eq!(expected.0.len(), 11, "{:?}", expected.0);
+        assert_eq!(expected.0.len(), 13, "{:?}", expected.0);
         assert_eq!(expected.1.len(), 1, "{:?}", expected.1);
         assert_eq!(expected.2.len(), 3, "{:?}", expected.2);
         wait_for!(memory_of(&rows_real, epic) == expected);

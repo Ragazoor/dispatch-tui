@@ -398,6 +398,16 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::Named("record_orchestrator_answer"))
     }
 
+    async fn record_orchestrator_trouble(
+        &self,
+        _name: String,
+        _task: TaskId,
+        _trouble: String,
+        _text: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("record_orchestrator_trouble"))
+    }
+
     async fn record_orchestrator_summary(
         &self,
         _name: String,

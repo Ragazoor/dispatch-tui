@@ -632,6 +632,23 @@ agent as a message. The entry shows on the task's read and the epic's.",
             "required": ["task_id", "question", "answer", "reason"]
         };
 
+    async write "orchestrator-trouble_record" => orchestrator_memory::handle_trouble_record,
+        "Record the one retry you make for a task agent in trouble, before you make it: asking a \
+stale agent for status, resuming a crashed one, starting a failed start again, or telling it to \
+resolve a wrap-up conflict. Only an epic's orchestrator calls it; the epic and the machine come \
+from who you are. It records and does nothing else. A second retry for the same trouble is \
+refused until the operator has dealt with an item about the task (or, but for a failed start, \
+the task was started again): then raise a waiting item with waiting-item_create instead.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task in trouble; a task of your epic"},
+                "trouble": {"type": "string", "enum": ["stale", "crashed", "start_failed", "conflict"], "description": "Which trouble"},
+                "text": {"type": "string", "description": "What you do about it, in one line"}
+            },
+            "required": ["task_id", "trouble", "text"]
+        };
+
     async write "orchestrator-summary_record" => orchestrator_memory::handle_summary_record,
         "Record the closing summary of your epic once it is done: what it delivered, what is left \
 open, and the notes that look worth keeping as learnings. Only an epic's orchestrator calls it, \

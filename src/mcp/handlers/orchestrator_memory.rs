@@ -207,6 +207,45 @@ pub(super) async fn handle_answer_record(
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TroubleArgs {
+    #[serde(deserialize_with = "deserialize_flexible_id")]
+    task_id: TaskId,
+    trouble: String,
+    text: String,
+}
+
+pub(super) async fn handle_trouble_record(
+    state: &McpState,
+    id: Option<Value>,
+    identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let a = match parse_args::<TroubleArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let o = orchestrator_or_refuse!(state, id, identity, "orchestrator-trouble_record");
+    match state
+        .db
+        .record_orchestrator_trouble(&o.name, a.task_id, &a.trouble, &a.text)
+        .await
+    {
+        Ok(()) => {
+            state.notify_epic_changed(o.epic_id);
+            text(
+                id,
+                format!(
+                    "Recorded your retry for {} on task #{}. This is its one retry: if the trouble comes back, raise a waiting item.",
+                    a.trouble, a.task_id.0
+                ),
+            )
+        }
+        Err(e) => write_err(id, e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SummaryArgs {
     text: String,
 }

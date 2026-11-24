@@ -55,6 +55,26 @@ impl MemoryReducerCaller {
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    pub(super) fn apply_record_orchestrator_trouble(
+        &self,
+        name: String,
+        task: TaskId,
+        trouble: String,
+        text: String,
+    ) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let entry =
+            match module::check_orchestrator_trouble(&*tables, &name, task.0, &trouble, &text) {
+                Ok(entry) => entry,
+                Err(why) => return Ok(ReducerOutcome::Refused(why)),
+            };
+        if let Err(why) = self.acting_for(&tables, &entry.host) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        self.insert_log_entry(&mut tables, entry);
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
     pub(super) fn apply_record_orchestrator_summary(
         &self,
         name: String,

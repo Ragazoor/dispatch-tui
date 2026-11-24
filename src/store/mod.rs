@@ -697,6 +697,14 @@ pub trait OrchestratorStore: Send + Sync {
         answer: &str,
         reason: &str,
     ) -> Result<()>;
+    /// `OrchestratorRecordsATroubleAction`, for orchestrator `name`.
+    async fn record_orchestrator_trouble(
+        &self,
+        name: &str,
+        task: TaskId,
+        trouble: &str,
+        text: &str,
+    ) -> Result<()>;
     /// `OrchestratorRecordsItsSummary`, for orchestrator `name`.
     async fn record_orchestrator_summary(&self, name: &str, text: &str) -> Result<()>;
     /// `OrchestratorPassesOnToTheOperator`, for orchestrator `name`: the new

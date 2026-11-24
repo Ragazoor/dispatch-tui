@@ -37,22 +37,22 @@ use crate::spacetime::bindings::{
     patch_epic as _, patch_learning as _, patch_task as _, patch_work_package as _,
     raise_orchestrator_down_item as _, raise_waiting_item as _, read_archived_task as _,
     record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_orchestrator_answer as _, record_orchestrator_summary as _, record_pre_tool_use as _,
-    record_usage_event as _, record_user_prompt_submit as _, register_host as _, regroup_epic as _,
-    remove_epic_note as _, report_dispatch_failed as _, report_dispatch_provisioned as _,
-    report_feed_request_done as _, report_feed_request_failed as _, report_pr_status as _,
-    report_pr_unreadable as _, report_session_request_done as _,
-    report_session_request_failed as _, request_dispatch as _, request_exit_session as _,
-    request_feed_refresh as _, request_wrap_up as _, rescope_epic_learnings as _,
-    resolve_waiting_item as _, save_repo_path as _, save_setting as _, set_bookmark as _,
-    set_display_name as _, set_epic_group_by_repo as _, set_managed_feed_settings as _,
-    set_task_epic as _, set_verify_command as _, start_orchestrator_session as _,
-    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
-    subagent_stop as _, subscribe_to_epic as _, switch_orchestrator_off as _,
-    switch_orchestrator_on as _, try_record_stop as _, unlink_work_package_item as _,
-    unsubscribe_from_epic as _, update_epic as _, update_task as _,
-    update_work_package_with_links as _, write_epic_note as _, DbConnection,
-    OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
+    record_orchestrator_answer as _, record_orchestrator_summary as _,
+    record_orchestrator_trouble as _, record_pre_tool_use as _, record_usage_event as _,
+    record_user_prompt_submit as _, register_host as _, regroup_epic as _, remove_epic_note as _,
+    report_dispatch_failed as _, report_dispatch_provisioned as _, report_feed_request_done as _,
+    report_feed_request_failed as _, report_pr_status as _, report_pr_unreadable as _,
+    report_session_request_done as _, report_session_request_failed as _, request_dispatch as _,
+    request_exit_session as _, request_feed_refresh as _, request_wrap_up as _,
+    rescope_epic_learnings as _, resolve_waiting_item as _, save_repo_path as _, save_setting as _,
+    set_bookmark as _, set_display_name as _, set_epic_group_by_repo as _,
+    set_managed_feed_settings as _, set_task_epic as _, set_verify_command as _,
+    start_orchestrator_session as _, subagent_clear as _,
+    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
+    subscribe_to_epic as _, switch_orchestrator_off as _, switch_orchestrator_on as _,
+    try_record_stop as _, unlink_work_package_item as _, unsubscribe_from_epic as _,
+    update_epic as _, update_task as _, update_work_package_with_links as _, write_epic_note as _,
+    DbConnection, OwnEpicsTableAccess as _, OwnPackagesTableAccess as _, OwnTasksTableAccess as _,
     VisibleDispatchRequestsTableAccess as _, VisibleEpicNotesTableAccess as _,
     VisibleLearningsTableAccess as _, VisibleSessionRequestsTableAccess as _,
     VisibleWaitingItemsTableAccess as _,
@@ -380,6 +380,20 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the orchestrator's answer",
             record_orchestrator_answer_then(name, task.0, question, answer, reason)
+        )
+    }
+
+    async fn record_orchestrator_trouble(
+        &self,
+        name: String,
+        task: TaskId,
+        trouble: String,
+        text: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the orchestrator's trouble action",
+            record_orchestrator_trouble_then(name, task.0, trouble, text)
         )
     }
 

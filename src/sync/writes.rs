@@ -203,6 +203,14 @@ pub trait ReducerCaller: Send + Sync {
         answer: String,
         reason: String,
     ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorRecordsATroubleAction`.
+    async fn record_orchestrator_trouble(
+        &self,
+        name: String,
+        task: TaskId,
+        trouble: String,
+        text: String,
+    ) -> Result<ReducerOutcome>;
     /// `orchestrators.allium: OrchestratorRecordsItsSummary`.
     async fn record_orchestrator_summary(
         &self,

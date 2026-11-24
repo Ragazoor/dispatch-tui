@@ -16,6 +16,7 @@ pub enum LogEntryKind {
     ActedOnTrouble,
     Session,
     Summary,
+    Review,
 }
 
 define_str_enum!(LogEntryKind, "log entry kind" {
@@ -25,6 +26,7 @@ define_str_enum!(LogEntryKind, "log entry kind" {
     ActedOnTrouble => "acted_on_trouble",
     Session => "session",
     Summary => "summary",
+    Review => "review",
 });
 
 /// `core.allium: OrchestratorLogEntry`: one line of an orchestrated epic's

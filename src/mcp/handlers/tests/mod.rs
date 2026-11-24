@@ -1408,6 +1408,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
             json!({"task_id": 1, "question": "q", "answer": "a", "reason": "r"}),
         ),
         ("orchestrator-summary_record", json!({"text": "s"})),
+        (
+            "orchestrator-trouble_record",
+            json!({"task_id": 1, "trouble": "stale", "text": "t"}),
+        ),
         ("orchestrator-log_search", json!({"epic_id": 1})),
         (
             "waiting-item_create",

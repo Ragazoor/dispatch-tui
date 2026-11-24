@@ -105,6 +105,24 @@ impl super::super::OrchestratorStore for Store {
             .applied()
     }
 
+    async fn record_orchestrator_trouble(
+        &self,
+        name: &str,
+        task: TaskId,
+        trouble: &str,
+        text: &str,
+    ) -> Result<()> {
+        self.caller
+            .record_orchestrator_trouble(
+                name.to_string(),
+                task,
+                trouble.to_string(),
+                text.to_string(),
+            )
+            .await?
+            .applied()
+    }
+
     async fn record_orchestrator_summary(&self, name: &str, text: &str) -> Result<()> {
         self.caller
             .record_orchestrator_summary(name.to_string(), text.to_string())
