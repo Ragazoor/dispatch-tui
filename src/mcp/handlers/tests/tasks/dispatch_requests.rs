@@ -1,4 +1,4 @@
-//! `task_dispatch`, `task_search` and the epic chain on request rows
+//! `task_dispatch` and `task_search` on request rows
 //! (`store-split.allium: DispatchRequest`).
 //!
 //! `mcp-task-tools.allium: DispatchTaskViaMcp` writes a request (origin
@@ -7,9 +7,7 @@
 //! dispatched (the worktree and window), failed (an error carrying the row's
 //! reason), or still open when the cap passes (NOT an error: the request id
 //! and its state, pointing at `task_search`). `GetTaskViaMcp` shows that request
-//! as its `[Dispatch request]` line. `epics.allium: AutoDispatchNextSubtask`
-//! requests its next subtask with origin `epic_chain`, no mode, and moves to
-//! the next candidate on a refusal.
+//! as its `[Dispatch request]` line.
 //!
 //! No MCP path provisions: the runner here panics on any call. The tests drive
 //! the row the way this board's host reactor would — claim, then report —
@@ -342,115 +340,4 @@ async fn get_task_omits_the_line_when_there_is_no_request() {
     .await;
 
     assert!(!extract_response_text(&resp).contains("Dispatch request"));
-}
-
-// -- AutoDispatchNextSubtask ------------------------------------------------------
-
-async fn auto_epic(db: &Arc<dyn store::TaskStore>) -> crate::models::EpicId {
-    let epic = db.create_epic("Chained", "desc", None).await.unwrap();
-    db.patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(true))
-        .await
-        .unwrap();
-    epic.id
-}
-
-async fn subtask(
-    db: &Arc<dyn store::TaskStore>,
-    epic: crate::models::EpicId,
-    title: &str,
-    sort_order: i64,
-    tag: Option<crate::models::TaskTag>,
-) -> TaskId {
-    db.create_task(CreateTaskRequest {
-        epic_id: Some(epic),
-        sort_order: Some(sort_order),
-        tag,
-        ..CreateTaskRequest::fixture(title, "/repo")
-    })
-    .await
-    .unwrap()
-}
-
-/// Close a session of `epic` through the real tools — a done wrap-up, then
-/// `exit_session` — which runs the chain in the module (`store-split.allium:
-/// RequestExitSession`). Answers the `exit_session` response.
-async fn close_a_session_in(state: &Arc<McpState>, epic: crate::models::EpicId) -> JsonRpcResponse {
-    let closing = create_running_task_with_window_in(state, "/repo", Some(epic)).await;
-    close_session_via_mcp(
-        state,
-        closing,
-        crate::mcp::handlers::tasks::WrapUpAction::Done,
-    )
-    .await
-}
-
-/// The chain writes a request like every launch path: origin `epic_chain`, no
-/// mode (a plan-less research subtask gets research from the module), naming
-/// this board's host — and provisions nothing itself.
-#[tokio::test]
-async fn the_chain_requests_its_next_subtask_with_origin_epic_chain() {
-    let (state, db) = state_with_wait_cap(Duration::ZERO);
-    let epic = auto_epic(&db).await;
-    let next = subtask(
-        &db,
-        epic,
-        "Look into it",
-        10,
-        Some(crate::models::TaskTag::Research),
-    )
-    .await;
-
-    let resp = close_a_session_in(&state, epic).await;
-
-    assert!(
-        extract_response_text(&resp).contains(&task_ref_of(&state, next).await),
-        "the close names the subtask the module chained: {resp:?}"
-    );
-    let row = db
-        .latest_dispatch_request_for_task(next)
-        .await
-        .expect("the chain writes a request");
-    assert_eq!(row.origin, DispatchOrigin::EpicChain);
-    assert_eq!(row.mode, DispatchMode::Research);
-    assert_eq!(row.host, crate::store::MEMORY_HOST_ID);
-    assert_eq!(row.state, DispatchRequestState::Requested);
-}
-
-/// A refused request is ORDINARY: the chain moves to the next candidate.
-/// Here the first candidate's worktree is on another machine, so the module
-/// refuses it although the board sees it in backlog.
-#[tokio::test]
-async fn the_chain_moves_to_the_next_candidate_on_a_refused_request() {
-    let (state, db) = state_with_wait_cap(Duration::ZERO);
-    let epic = auto_epic(&db).await;
-    let foreign = subtask(&db, epic, "Owned elsewhere", 10, None).await;
-    db.patch_task(
-        foreign,
-        &store::TaskPatch::new()
-            .worktree(Some("/elsewhere/.worktrees/x"))
-            .host(Some("another-machine")),
-    )
-    .await
-    .unwrap();
-    let second = subtask(&db, epic, "Mine", 20, None).await;
-
-    let resp = close_a_session_in(&state, epic).await;
-
-    assert!(
-        extract_response_text(&resp).contains(&task_ref_of(&state, second).await),
-        "{resp:?}"
-    );
-    assert!(db.latest_dispatch_request_for_task(foreign).await.is_none());
-    assert_eq!(
-        db.get_task(foreign).await.unwrap().status,
-        TaskStatus::Backlog,
-        "a refusal writes nothing"
-    );
-    assert_eq!(
-        db.latest_dispatch_request_for_task(second)
-            .await
-            .unwrap()
-            .origin,
-        DispatchOrigin::EpicChain
-    );
 }

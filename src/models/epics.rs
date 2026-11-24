@@ -30,7 +30,6 @@ pub struct Epic {
     /// derived from the epic's done subtasks. See "Done Column Ordering" in
     /// `docs/specs/board-layout.allium`.
     pub completed_at: Option<DateTime<Utc>>,
-    pub auto_dispatch: bool,
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,

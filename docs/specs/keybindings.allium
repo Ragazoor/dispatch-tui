@@ -430,18 +430,18 @@ enum KeyReceiver { dispatch | tmux }
 -- for one key and another thing for a second key. Where two keys rank the
 -- same condition differently, they use two literals.
 --
--- board.normal, view-level (q, Q, Esc, U, R). Esc's handler tests, in order:
+-- board.normal, view-level (q, Q, Esc, R, I). Esc's handler tests, in order:
 -- a search active, a nested view open, cards selected. q and Q test only
 -- whether a nested view is open and ignore search. A nested view is an epic
 -- view or a work package view (work-packages.allium: ExitPackage): both sit
--- below the main board and q / Esc / Q leave them the same way. U and R act
+-- below the main board and q / Esc / Q leave them the same way. R and I act
 -- on the epic the user is inside, so they test for an epic view alone — a
 -- package view is not an epic, and they claim nothing there:
 --   search_active             "with a search active"            Esc: clear_search
 --                              (any view)
 --   inside_nested_view        "inside an epic or work package   q: exit_epic; Q: exit_all_epics
 --                              view" (search active or not)
---   inside_epic_view          "inside an epic view"             U, R, I: resolve_waiting_item
+--   inside_epic_view          "inside an epic view"             R, I: resolve_waiting_item
 --                              (search active or not; a subset
 --                              of inside_nested_view)
 --   nested_view_no_search     "inside an epic or work package   Esc: exit_epic
@@ -457,7 +457,7 @@ enum KeyReceiver { dispatch | tmux }
 --   (search_active, nested_view_no_search, with_selection) are each mutually
 --   exclusive by these definitions. Esc on the top-level board with no
 --   search, no selection and the cursor off a select-all row has no row and
---   does nothing; so do U, R and I outside an epic view.
+--   does nothing; so do R and I outside an epic view.
 --   O (open_orchestrator) has no context: it acts in an epic view, on a
 --   task card of a covered epic (orchestrators.allium: OrchestratorKey) and
 --   on an orchestrator card (orchestrators.allium: KeysOnTheCard),
@@ -603,7 +603,7 @@ entity KeyBinding {
     -- Every key that runs this row's action, written as typed: a single key
     -- ("j", "Enter", "Space"), a modified key ("Ctrl+D"), or a chord ("gg").
     -- A shifted letter is written as the bare uppercase letter ("L", "H",
-    -- "G", "U", "R"), never "Shift+L": that is the form recorded usage
+    -- "G", "Y", "R"), never "Shift+L": that is the form recorded usage
     -- history already holds. A modifier form like "Ctrl+D" is only for a
     -- modifier other than the letter-case Shift.
     -- A modified key is written modifier, then key: "Ctrl+D", "Alt+B",

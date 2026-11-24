@@ -30,7 +30,7 @@ fn set(store: &Store, who: &str, task: i64, on: bool) -> Result<(), String> {
 #[test]
 fn set_and_clear_are_per_person_and_idempotent() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
@@ -50,7 +50,7 @@ fn set_and_clear_are_per_person_and_idempotent() {
 #[test]
 fn a_bookmark_is_written_only_by_its_own_person() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
@@ -69,7 +69,7 @@ fn a_bookmark_is_written_only_by_its_own_person() {
 #[test]
 fn a_done_task_cannot_be_bookmarked() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "done"));
 
     let err = set(&store, "alice", task, true).expect_err("done is refused");
@@ -82,7 +82,7 @@ fn a_done_task_cannot_be_bookmarked() {
 #[test]
 fn a_missing_task_is_refused_and_anyone_may_bookmark_a_task() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "mine", false);
+    let epic = store.create_epic("alice", "mine");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     assert!(set(&store, "bob", 9_999, true).is_err());
@@ -94,7 +94,7 @@ fn a_missing_task_is_refused_and_anyone_may_bookmark_a_task() {
 #[test]
 fn finishing_a_task_ends_its_bookmarks() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create("alice", epic_task("t", epic, "running"));
     set(&store, "alice", task, true).expect("set");
@@ -111,8 +111,8 @@ fn finishing_a_task_ends_its_bookmarks() {
 #[test]
 fn moving_a_task_to_another_epic_keeps_its_bookmark() {
     let store = Store::new();
-    let from = store.create_epic("alice", "from", false);
-    let to = store.create_epic("alice", "to", false);
+    let from = store.create_epic("alice", "from");
+    let to = store.create_epic("alice", "to");
     let task = store.create("alice", epic_task("t", from, "backlog"));
     set(&store, "alice", task, true).expect("set");
 
@@ -127,7 +127,7 @@ fn moving_a_task_to_another_epic_keeps_its_bookmark() {
 #[test]
 fn deleting_a_task_removes_its_bookmarks() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "running"));
     // Done ends the bookmark first, so insert one by hand to prove the delete
     // path removes rows on its own.
@@ -154,7 +154,7 @@ fn deleting_a_task_removes_its_bookmarks() {
 fn closing_a_task_ends_its_bookmarks_and_unseen_marks() {
     let store = Store::new();
     store.register_host_for("host-a", "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create_signalled("alice", epic_task("t", epic, "review"));
     set(&store, "alice", task, true).expect("set");
@@ -174,7 +174,7 @@ fn closing_a_task_ends_its_bookmarks_and_unseen_marks() {
 #[test]
 fn the_operator_cannot_write_a_persons_bookmark() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     let err = store
@@ -196,7 +196,7 @@ fn retitle(title: &str) -> TaskPatch {
 #[test]
 fn update_task_writes_the_fields_and_the_bookmark_together() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("before", epic, "backlog"));
 
     store
@@ -222,7 +222,7 @@ fn update_task_writes_the_fields_and_the_bookmark_together() {
 #[test]
 fn update_task_with_a_refused_bookmark_writes_no_field() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("before", epic, "backlog"));
     let patch = TaskPatch {
         title: Some("never".into()),

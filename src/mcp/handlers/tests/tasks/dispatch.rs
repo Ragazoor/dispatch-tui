@@ -4,37 +4,19 @@ use crate::models::test_tmux_window;
 use crate::dispatch::mock_sequence::DispatchScript;
 use crate::mcp::handlers::tasks::WrapUpAction;
 
-async fn wait_for_task_changed(
-    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
-    expected_id: crate::models::TaskId,
-) {
-    loop {
-        match rx.recv().await {
-            Some(crate::board_event::BoardEvent::TaskChanged(id)) if id == expected_id => break,
-            Some(_) => continue,
-            None => panic!("notification channel closed before dispatch completed"),
-        }
-    }
-}
+// -- closing a session -------------------------------------------------------
 
-// -- automatic epic chaining on exit_session ---------------------------------
-//
-// Epic chaining is a server-side side effect of closing a session, not a tool
-// an agent calls: `AutoDispatchNextSubtask` in docs/specs/epics.allium is keyed
-// on the `SessionClosed(task)` event that `ExitSessionViaMcp` emits last. The
-// old `dispatch_next` MCP tool is gone, so every test below drives the real
-// close path instead.
-
-/// Wiring shared by the chaining tests: a temp repo, an in-memory DB, an
-/// `McpState` with a notification channel, and a runner with a generous queue
-/// of successes covering the closing task's detached `tmux kill-window` plus a
-/// full worktree provisioning for the chained subtask.
-struct ChainFixture {
+/// Wiring shared by the close and dispatch tests: a temp repo, an in-memory DB,
+/// an `McpState` with a notification channel, and a runner with a generous
+/// queue of successes covering the closing task's detached `tmux kill-window`
+/// and a full worktree provisioning.
+struct CloseFixture {
     _dir: tempfile::TempDir,
     repo_path: String,
     db: Arc<dyn store::TaskStore>,
     state: Arc<McpState>,
-    notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
+    /// Held so the state's board notifications have a live receiver.
+    _notify_rx: tokio::sync::mpsc::UnboundedReceiver<crate::board_event::BoardEvent>,
     /// The same runner the state holds, kept concrete so a test can inspect
     /// which commands the close path actually issued.
     runner: Arc<MockProcessRunner>,
@@ -43,7 +25,7 @@ struct ChainFixture {
     host: Option<tokio::task::JoinHandle<()>>,
 }
 
-impl Drop for ChainFixture {
+impl Drop for CloseFixture {
     fn drop(&mut self) {
         if let Some(host) = self.host.take() {
             host.abort();
@@ -51,19 +33,19 @@ impl Drop for ChainFixture {
     }
 }
 
-impl ChainFixture {
+impl CloseFixture {
     async fn new() -> Self {
         Self::build(None).await
     }
 
-    /// Like [`ChainFixture::new`], but with a caller-supplied runner script, for
+    /// Like [`CloseFixture::new`], but with a caller-supplied runner script, for
     /// tests that assert on the exact command sequence a dispatch issues (or
     /// need one to fail).
     async fn with_runner(runner: Arc<MockProcessRunner>) -> Self {
         Self::build_with(runner, None).await
     }
 
-    /// Like [`ChainFixture::new`], but with a `task_svc` whose `close_task`
+    /// Like [`CloseFixture::new`], but with a `task_svc` whose `close_task`
     /// always fails, so `task_update(status="done")`'s close does not take
     /// effect (`MarkTaskDoneViaMcp`).
     async fn with_failing_close() -> Self {
@@ -73,7 +55,7 @@ impl ChainFixture {
         fx
     }
 
-    /// Like [`ChainFixture::new`], but with a `task_svc` whose
+    /// Like [`CloseFixture::new`], but with a `task_svc` whose
     /// `request_dispatch` is always refused, standing in for another entry
     /// point having taken the task first. Every other method panics, so a
     /// caller that dispatches without requesting is caught rather than
@@ -86,9 +68,9 @@ impl ChainFixture {
     }
 
     async fn build(task_svc_override: Option<Arc<dyn crate::service::TaskServiceApi>>) -> Self {
-        // The kill-window teardown and the chained dispatch race by design, and
-        // MockProcessRunner pops a shared FIFO, so queue uniform successes
-        // rather than a command-ordered script.
+        // The host's teardown runs beside the test and MockProcessRunner pops a
+        // shared FIFO, so queue uniform successes rather than a command-ordered
+        // script.
         let runner = Arc::new(MockProcessRunner::new(
             (0..24).map(|_| MockProcessRunner::ok()).collect(),
         ));
@@ -117,32 +99,10 @@ impl ChainFixture {
             repo_path,
             db,
             state,
-            notify_rx,
+            _notify_rx: notify_rx,
             runner,
             host,
         }
-    }
-
-    /// Wait for `task`'s dispatch request to finish — dispatched or failed —
-    /// and return it. A deadline on a signal, not a wall-clock wait: it wakes
-    /// on every row change and returns the instant the row finishes.
-    async fn wait_for_dispatch(
-        &self,
-        task: crate::models::TaskId,
-    ) -> crate::models::DispatchRequest {
-        let mut changes = self.db.dispatch_request_changes();
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                if let Some(row) = self.db.latest_dispatch_request_for_task(task).await {
-                    if !row.is_open() {
-                        return row;
-                    }
-                }
-                changes.changed().await.expect("the rows outlive the test");
-            }
-        })
-        .await
-        .expect("the request must finish")
     }
 
     /// Wait for `task`'s exit_session or close row to finish — the host's teardown ran
@@ -179,29 +139,16 @@ impl ChainFixture {
             .collect()
     }
 
-    async fn epic(&self, auto_dispatch: bool) -> crate::models::EpicId {
-        let epic = self
-            .db
-            .create_epic("Chained Epic", "desc", None)
-            .await
-            .unwrap();
-        self.db
-            .patch_epic(
-                epic.id,
-                &store::EpicPatch::new().auto_dispatch(auto_dispatch),
-            )
-            .await
-            .unwrap();
-        epic.id
+    async fn epic(&self) -> crate::models::EpicId {
+        self.db.create_epic("Epic", "desc", None).await.unwrap().id
     }
 
-    /// A backlog subtask that a chain can pick up. `repo_path` defaults to the
+    /// A backlog subtask. `repo_path` defaults to the
     /// fixture's temp repo; pass an override to make provisioning fail.
     async fn backlog_subtask(
         &self,
         epic_id: Option<crate::models::EpicId>,
         title: &str,
-        sort_order: Option<i64>,
         repo_path: Option<&str>,
     ) -> crate::models::TaskId {
         let id = self
@@ -209,7 +156,6 @@ impl ChainFixture {
             .create_task(CreateTaskRequest {
                 plan: Some("docs/plan.md"),
                 epic_id,
-                sort_order,
                 ..CreateTaskRequest::fixture(title, repo_path.unwrap_or(&self.repo_path))
             })
             .await
@@ -261,67 +207,11 @@ impl ChainFixture {
     }
 }
 
-// -- task_update(status="done") closes but never chains ----------------------
+// -- task_update(status="done") ----------------------------------------------
 //
 // MarkTaskDoneViaMcp (mcp-task-tools.allium) closes in the module
-// (`close_task`, store-split.allium: RequestCloseTask, X1), with no token and no
-// chain; the window is torn down by the host serving the `close` row. The chain
-// is the module's, inside `request_exit_session`'s transaction, and only a
-// close with a wrap_up behind it can say the closed work reached base_branch.
-// These are the teardown checks plus that one divergence.
-
-/// task_update(status="done") leaves the epic's next backlog subtask in
-/// backlog — the divergence from `exit_session_dispatches_first_backlog_subtask`.
-///
-/// The assertion is sound without waiting for anything: the module's chain
-/// claims its subtask in `request_exit_session`'s own transaction, and this
-/// path never calls it, so a chain that was going to fire would have moved the
-/// row to Running by the time the close responds.
-#[tokio::test]
-async fn update_task_done_does_not_chain_the_next_subtask() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let first = fx
-        .backlog_subtask(Some(epic_id), "Task 1", Some(10), None)
-        .await;
-
-    let resp = fx.close_via_update_task(closing).await;
-    assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
-
-    let next = fx.db.get_task(first).await.unwrap();
-    assert_eq!(
-        next.status,
-        TaskStatus::Backlog,
-        "task_update(status=\"done\") must not dispatch the next subtask"
-    );
-    assert!(next.worktree.is_none());
-    assert!(next.tmux_window.is_none());
-
-    // The closing task itself still closed.
-    assert_eq!(
-        fx.db.get_task(closing).await.unwrap().status,
-        TaskStatus::Done
-    );
-}
-
-/// The response never names a chained subtask, because no chain ever runs —
-/// contrast `exit_session_response_names_the_chained_subtask`.
-#[tokio::test]
-async fn update_task_done_response_never_names_a_chained_subtask() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    fx.backlog_subtask(Some(epic_id), "Wire up the widget", Some(10), None)
-        .await;
-
-    let resp = fx.close_via_update_task(closing).await;
-    let text = extract_response_text(&resp);
-    assert_eq!(
-        text,
-        format!("{} marked done.", task_ref_of(&fx.state, closing).await)
-    );
-}
+// (`close_task`, store-split.allium: RequestCloseTask, X1), with no token; the
+// window is torn down by the host serving the `close` row.
 
 /// Closing a task with a live tmux window via task_update(status="done")
 /// tears the window down, the same as exit_session does — parity with
@@ -332,7 +222,7 @@ async fn update_task_done_response_never_names_a_chained_subtask() {
 /// `docs/conventions.md`.
 #[tokio::test]
 async fn update_task_done_kills_the_tmux_window() {
-    let fx = ChainFixture::new().await;
+    let fx = CloseFixture::new().await;
     let closing = fx.closing_subtask(None).await;
 
     let resp = fx.close_via_update_task(closing).await;
@@ -359,12 +249,12 @@ async fn update_task_done_kills_the_tmux_window() {
 }
 
 /// A close that does not take effect must leave the task exactly as it was —
-/// no status change, no cleared window, no chain — and say so in the response.
+/// no status change, no cleared window — and say so in the response.
 /// (The module's close is whole or absent, as `exit_session`'s is:
-/// `a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain`.)
+/// `a_refused_exit_session_changes_nothing_and_kills_nothing`.)
 #[tokio::test]
 async fn update_task_done_failed_close_leaves_the_task_unchanged() {
-    let fx = ChainFixture::with_failing_close().await;
+    let fx = CloseFixture::with_failing_close().await;
     let closing = fx.closing_subtask(None).await;
     let before = fx.db.get_task(closing).await.unwrap();
 
@@ -395,146 +285,18 @@ async fn update_task_done_failed_close_leaves_the_task_unchanged() {
     );
 }
 
-// allow-phantom-symbol: renamed test, cited for provenance
-/// Migrated from `dispatch_next_picks_first_backlog_subtask`: closing a subtask
-/// dispatches the epic's first backlog subtask and leaves the rest alone.
+/// Closing a session of a task in an epic starts nothing else: the epic's
+/// backlog subtask stays in backlog with no dispatch request, and the reply is
+/// exactly "Session closed." (`orchestrators.allium` O8).
+///
+/// The module writes any request inside `request_exit_session`'s own
+/// transaction, so the absence of a row is final once the close responds.
 #[tokio::test]
-async fn exit_session_dispatches_first_backlog_subtask() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
+async fn exit_session_in_an_epic_leaves_its_backlog_subtask_alone() {
+    let fx = CloseFixture::new().await;
+    let epic_id = fx.epic().await;
     let closing = fx.closing_subtask(Some(epic_id)).await;
-    let first = fx
-        .backlog_subtask(Some(epic_id), "Task 1", Some(10), None)
-        .await;
-    let second = fx
-        .backlog_subtask(Some(epic_id), "Task 2", Some(20), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
-
-    wait_for_task_changed(&mut fx.notify_rx, first).await;
-    fx.wait_for_dispatch(first).await;
-
-    let dispatched = fx.db.get_task(first).await.unwrap();
-    assert_eq!(dispatched.status, TaskStatus::Running);
-    assert!(dispatched.worktree.is_some());
-    assert!(dispatched.tmux_window.is_some());
-    assert!(
-        dispatched.last_pre_tool_use_at.is_some(),
-        "last_pre_tool_use_at should be seeded so the tick classifier does not flicker the task to Stale"
-    );
-
-    let untouched = fx.db.get_task(second).await.unwrap();
-    assert_eq!(
-        untouched.status,
-        TaskStatus::Backlog,
-        "only one subtask may be chained per closed session"
-    );
-    assert!(untouched.worktree.is_none());
-}
-
-/// The chained subtask is reported in the response text so the closing agent
-/// can see what it handed off to.
-#[tokio::test]
-async fn exit_session_response_names_the_chained_subtask() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Wire up the widget", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    let text = extract_response_text(&resp);
-    assert_eq!(
-        text,
-        format!(
-            "Session closed. Dispatching next epic subtask {}.",
-            task_ref_of(&fx.state, next).await
-        ),
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-}
-
-// allow-phantom-symbol: renamed test, cited for provenance
-/// Migrated from `dispatch_next_respects_sort_order`: selection is by
-/// `sort_order` ascending, not creation order.
-#[tokio::test]
-async fn exit_session_chain_respects_sort_order() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    // Created first, but sorts last.
-    let later = fx
-        .backlog_subtask(Some(epic_id), "Task A", Some(20), None)
-        .await;
-    let earlier = fx
-        .backlog_subtask(Some(epic_id), "Task B", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains(&task_ref_of(&fx.state, earlier).await),
-        "expected the lower sort_order subtask to be chained, got: {text}"
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, earlier).await;
-    assert_eq!(
-        fx.db.get_task(later).await.unwrap().status,
-        TaskStatus::Backlog
-    );
-}
-
-// allow-phantom-symbol: renamed test, cited for provenance
-/// Migrated from `dispatch_next_respects_tag_routing`: the chained dispatch
-/// still routes through `DispatchMode::for_task`.
-#[tokio::test]
-async fn exit_session_chain_respects_tag_routing() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Research Task", Some(10), None)
-        .await;
-    // Research + no plan routes to the research agent rather than the standard
-    // dispatch agent.
-    fx.db
-        .patch_task(
-            next,
-            &store::TaskPatch::new()
-                .plan_path(None)
-                .tag(Some(crate::models::TaskTag::Research)),
-        )
-        .await
-        .unwrap();
-    let task = fx.db.get_task(next).await.unwrap();
-    assert_eq!(
-        crate::models::DispatchMode::for_task(&task),
-        crate::models::DispatchMode::Research,
-        "fixture must exercise the research routing branch"
-    );
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    assert!(resp.error.is_none(), "{:?}", resp.error);
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-    assert_eq!(
-        fx.db.get_task(next).await.unwrap().status,
-        TaskStatus::Running
-    );
-}
-
-// allow-phantom-symbol: renamed test, cited for provenance
-/// Migrated from `dispatch_next_no_backlog_returns_success_noop`: closing the
-/// epic's last subtask closes cleanly and chains nothing.
-#[tokio::test]
-async fn exit_session_with_no_backlog_subtask_closes_without_chaining() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
+    let next = fx.backlog_subtask(Some(epic_id), "Task 1", None).await;
 
     let resp = fx.close(closing, WrapUpAction::Done).await;
     assert_eq!(extract_response_text(&resp), "Session closed.");
@@ -542,40 +304,21 @@ async fn exit_session_with_no_backlog_subtask_closes_without_chaining() {
         fx.db.get_task(closing).await.unwrap().status,
         TaskStatus::Done
     );
-}
 
-// The missing-epic case of the old board-side chain (`dispatch_next_epic_not_found_returns_error`,
-// then `auto_dispatch_next`'s warn-and-skip) has no counterpart any more: the
-// chain runs in the module's transaction against the epic it reads there, and a
-// dangling epic reference is not a reachable state.
-
-// allow-phantom-symbol: renamed test, cited for provenance
-/// Migrated from `dispatch_next_returns_disabled_when_auto_dispatch_off`
-/// (previously in tests/tasks/crud.rs): `auto_dispatch = false` closes the
-/// session and chains nothing.
-#[tokio::test]
-async fn exit_session_does_not_chain_when_auto_dispatch_off() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(false).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Task 1", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    assert_eq!(extract_response_text(&resp), "Session closed.");
-
-    // The claim is synchronous and completes before exit_session returns, so a
-    // subtask still in Backlog here was never claimed and can never transition.
     let untouched = fx.db.get_task(next).await.unwrap();
     assert_eq!(untouched.status, TaskStatus::Backlog);
     assert!(untouched.worktree.is_none());
+    assert!(untouched.tmux_window.is_none());
+    assert!(
+        fx.db.latest_dispatch_request_for_task(next).await.is_none(),
+        "closing a session must not request a dispatch"
+    );
 }
 
-/// A task with no epic closes cleanly and chains nothing.
+/// A task with no epic closes cleanly.
 #[tokio::test]
-async fn exit_session_without_epic_closes_without_chaining() {
-    let fx = ChainFixture::new().await;
+async fn exit_session_without_epic_closes() {
+    let fx = CloseFixture::new().await;
     let closing = fx.closing_subtask(None).await;
 
     let resp = fx.close(closing, WrapUpAction::Done).await;
@@ -586,188 +329,10 @@ async fn exit_session_without_epic_closes_without_chaining() {
     );
 }
 
-/// The regression guard for this change: by the time the next subtask is
-/// running with a worktree, the closed subtask is already terminal with its
-/// tmux window cleared. The old skill-driven ordering violated exactly this.
-#[tokio::test]
-async fn exit_session_chain_starts_only_after_the_closing_task_is_terminal() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
-
-    fx.close(closing, WrapUpAction::Done).await;
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-    fx.wait_for_dispatch(next).await;
-
-    let successor = fx.db.get_task(next).await.unwrap();
-    assert_eq!(successor.status, TaskStatus::Running);
-    assert!(
-        successor.worktree.is_some(),
-        "successor should be provisioned once its request is dispatched"
-    );
-
-    let predecessor = fx.db.get_task(closing).await.unwrap();
-    assert_eq!(
-        predecessor.status,
-        TaskStatus::Done,
-        "the closed subtask must already be terminal before its successor is provisioned"
-    );
-    assert!(
-        predecessor.tmux_window.is_none(),
-        "the closed subtask's window must already be cleared"
-    );
-}
-
-/// All three wrap-up actions chain, matching the behaviour the skill had when
-/// it fired `dispatch_next` regardless of action.
-#[tokio::test]
-async fn exit_session_chains_for_rebase_action() {
-    assert_action_chains(WrapUpAction::Rebase).await;
-}
-
-#[tokio::test]
-async fn exit_session_chains_for_done_action() {
-    assert_action_chains(WrapUpAction::Done).await;
-}
-
-#[tokio::test]
-async fn exit_session_chains_for_pr_action() {
-    assert_action_chains(WrapUpAction::Pr).await;
-}
-
-async fn assert_action_chains(action: WrapUpAction) {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
-
-    let resp = fx.close(closing, action).await;
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains(&task_ref_of(&fx.state, next).await),
-        "action {:?} must chain, got: {text}",
-        action
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-    assert_eq!(
-        fx.db.get_task(next).await.unwrap().status,
-        TaskStatus::Running
-    );
-}
-
-/// A failed dispatch reverts the claim, leaving the subtask dispatchable
-/// exactly as it was before the chain fired. The module
-/// reverts it when the request fails (`ReleaseClaimOfFailedRequest`).
-#[tokio::test]
-async fn exit_session_chain_reverts_claim_when_dispatch_fails() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    // A repo path that does not exist fails provisioning before any subprocess
-    // runs, so the failure is deterministic.
-    let next = fx
-        .backlog_subtask(
-            Some(epic_id),
-            "Doomed",
-            Some(10),
-            Some("/nonexistent/dispatch-chain-repo"),
-        )
-        .await;
-
-    let resp = fx.close(closing, WrapUpAction::Done).await;
-    assert!(
-        resp.error.is_none(),
-        "a failed chain must not fail the close: {:?}",
-        resp.error
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-    let request = fx.wait_for_dispatch(next).await;
-    assert_eq!(request.state, crate::models::DispatchRequestState::Failed);
-
-    let reverted = fx.db.get_task(next).await.unwrap();
-    assert_eq!(
-        reverted.status,
-        TaskStatus::Backlog,
-        "a failed dispatch must return the subtask to backlog"
-    );
-    assert_eq!(
-        reverted.sub_status,
-        SubStatus::default_for(TaskStatus::Backlog)
-    );
-    assert!(reverted.worktree.is_none());
-    assert!(
-        reverted.last_pre_tool_use_at.is_none(),
-        "the revert must also drop the activity timestamp the claim seeded, or the \
-         subtask is not left exactly as it was before the chain fired"
-    );
-}
-
-/// A failed chained dispatch must be visible to the operator, not only to
-/// `app.log`. The chain's request carries origin
-/// `epic_chain`, and the board raises AutoDispatchFailed from that row when it
-/// fails (`epics.allium: ReportChainedDispatchFailure`, pinned on the board in
-/// `src/tui/tests/dispatch_requests.rs`). What the chain owes is a row that
-/// says so: its origin, its failure and why.
-#[tokio::test]
-async fn exit_session_chain_leaves_a_failed_epic_chain_row_for_the_board() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(
-            Some(epic_id),
-            "Doomed",
-            Some(10),
-            Some("/nonexistent/dispatch-chain-repo"),
-        )
-        .await;
-
-    fx.close(closing, WrapUpAction::Done).await;
-    let request = fx.wait_for_dispatch(next).await;
-
-    assert_eq!(request.origin, crate::models::DispatchOrigin::EpicChain);
-    assert_eq!(request.state, crate::models::DispatchRequestState::Failed);
-    assert!(
-        request.reason.as_deref().is_some_and(|r| !r.is_empty()),
-        "the row must carry why the dispatch failed"
-    );
-}
-
-/// A chained dispatch that SUCCEEDS leaves a dispatched row, which raises
-/// nothing on the board. Guards against every chained subtask reading as
-/// stalled.
-#[tokio::test]
-async fn exit_session_chain_reports_no_failure_when_dispatch_succeeds() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
-
-    fx.close(closing, WrapUpAction::Done).await;
-    let request = fx.wait_for_dispatch(next).await;
-
-    assert_eq!(request.origin, crate::models::DispatchOrigin::EpicChain);
-    assert_eq!(
-        request.state,
-        crate::models::DispatchRequestState::Dispatched,
-        "a successful chained dispatch must not fail its row: {:?}",
-        request.reason
-    );
-}
-
 // -- a close that does not take effect ----------------------------------------
 //
 // `exit_session`'s close is the module's (`store-split.allium` W4), in ONE
-// transaction with the token, the epic rollup and the chain
+// transaction with the token and the epic rollup
 // (`pr-workflow.allium: ExitSession`), and so is `task_update`
 // status="done" (`close_task`, X1): either took effect whole or not at all. The
 // board does not gate a teardown on a close; the one test below drives a
@@ -855,17 +420,11 @@ crate::task_service_api!(service_api_stub_bridge, LostClaimTaskService);
 /// checks the token, applies the close and writes the teardown row in one
 /// transaction. The task keeps its status, sub_status and window (so it stays
 /// visible in its current column, and its live agent stays attachable), no
-/// window is killed, no row is written and the chain does not fire. This
-/// replaces the old board-side "terminal write did not land but the token is
-/// spent" cases, which can no longer happen.
+/// window is killed and no row is written.
 #[tokio::test]
-async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain() {
-    let fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
+async fn a_refused_exit_session_changes_nothing_and_kills_nothing() {
+    let fx = CloseFixture::new().await;
+    let closing = fx.closing_subtask(None).await;
     let token = seed_exit_token(&fx.state, closing, WrapUpAction::Done).await;
     let before = fx.db.get_task(closing).await.unwrap();
     let rows_before = fx.db.session_requests().await.len();
@@ -895,11 +454,6 @@ async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain
         "a refused close must leave the tmux window alive: {:?}",
         fx.kill_window_calls()
     );
-    assert_eq!(
-        fx.db.get_task(next).await.unwrap().status,
-        TaskStatus::Backlog,
-        "a refused close must not chain"
-    );
 
     // The token is still valid: the retry with the right action closes.
     let retry = call(
@@ -928,7 +482,7 @@ async fn a_refused_exit_session_changes_nothing_kills_nothing_and_does_not_chain
 /// `docs/conventions.md`.
 #[tokio::test]
 async fn exit_session_successful_close_kills_the_tmux_window() {
-    let fx = ChainFixture::new().await;
+    let fx = CloseFixture::new().await;
     let closing = fx.closing_subtask(None).await;
     let window = fx
         .db
@@ -961,52 +515,6 @@ async fn exit_session_successful_close_kills_the_tmux_window() {
     assert!(
         kills[0].1.iter().any(|arg| arg == pane_id.as_str()),
         "expected kill-window to target {pane_id:?} (window {window:?}), got: {kills:?}"
-    );
-}
-
-/// The full agent-facing sequence — `wrap_up(action="done")` then
-/// `exit_session` with the issued token — chains without the agent asking for
-/// it. There is no `dispatch_next` tool to call any more.
-#[tokio::test]
-async fn wrap_up_then_exit_session_chains_without_an_agent_tool_call() {
-    let mut fx = ChainFixture::new().await;
-    let epic_id = fx.epic(true).await;
-    let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Successor", Some(10), None)
-        .await;
-
-    let wrap = call(
-        &fx.state,
-        "tools/call",
-        Some(json!({
-            "name": "session_wrap-up",
-            "arguments": { "task_id": closing.0, "action": "done" }
-        })),
-    )
-    .await;
-    assert!(wrap.error.is_none(), "wrap_up failed: {:?}", wrap.error);
-    let token = token_in_response(&extract_response_text(&wrap));
-
-    let resp = call(
-        &fx.state,
-        "tools/call",
-        Some(json!({
-            "name": "session_exit",
-            "arguments": { "task_id": closing.0, "token": token, "action": "done" }
-        })),
-    )
-    .await;
-    let text = extract_response_text(&resp);
-    assert!(
-        text.contains(&task_ref_of(&fx.state, next).await),
-        "the close itself must chain, got: {text}"
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
-    assert_eq!(
-        fx.db.get_task(next).await.unwrap().status,
-        TaskStatus::Running
     );
 }
 
@@ -1221,10 +729,8 @@ async fn call_dispatch_task(
 
 #[tokio::test]
 async fn dispatch_task_dispatches_backlog_task() {
-    let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
-    let task_id = fx
-        .backlog_subtask(None, "My Backlog Task", None, None)
-        .await;
+    let fx = CloseFixture::with_runner(dispatch_runner_script()).await;
+    let task_id = fx.backlog_subtask(None, "My Backlog Task", None).await;
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
@@ -1254,12 +760,12 @@ async fn dispatch_task_dispatches_backlog_task() {
 /// rule-guidance.DispatchTaskViaMcp ("The success text names which provisioning
 /// path ran"): the reuse path must SAY it reused.
 ///
-/// `ChainFixture::backlog_subtask` pre-creates the worktree directory, which is
+/// `CloseFixture::backlog_subtask` pre-creates the worktree directory, which is
 /// what puts provisioning on the reuse branch.
 #[tokio::test]
 async fn dispatch_task_success_text_names_a_reused_worktree() {
-    let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
-    let task_id = fx.backlog_subtask(None, "Crashed Task", None, None).await;
+    let fx = CloseFixture::with_runner(dispatch_runner_script()).await;
+    let task_id = fx.backlog_subtask(None, "Crashed Task", None).await;
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
@@ -1323,8 +829,8 @@ async fn dispatch_task_reports_the_status_a_lost_claim_left_behind() {
     // transition finds nothing to move and the handler re-reads to name the
     // status the task actually holds (DispatchTaskViaMcp in
     // docs/specs/mcp-task-tools.allium).
-    let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
-    let task_id = fx.backlog_subtask(None, "Contended Task", None, None).await;
+    let fx = CloseFixture::with_runner(dispatch_runner_script()).await;
+    let task_id = fx.backlog_subtask(None, "Contended Task", None).await;
     assert!(
         matches!(
             fx.state
@@ -1359,8 +865,8 @@ async fn dispatch_task_reports_the_status_a_lost_claim_left_behind() {
 /// still reads Backlog.
 #[tokio::test]
 async fn dispatch_task_lost_claim_provisions_nothing() {
-    let fx = ChainFixture::with_lost_claim().await;
-    let task_id = fx.backlog_subtask(None, "Contended Task", None, None).await;
+    let fx = CloseFixture::with_lost_claim().await;
+    let task_id = fx.backlog_subtask(None, "Contended Task", None).await;
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 
@@ -1381,12 +887,11 @@ async fn dispatch_task_lost_claim_provisions_nothing() {
 /// nothing, and answers with the row's reason.
 #[tokio::test]
 async fn dispatch_task_releases_the_claim_when_provisioning_fails() {
-    let fx = ChainFixture::new().await;
+    let fx = CloseFixture::new().await;
     // A repo path that does not exist fails provisioning before any subprocess
-    // runs, so the failure is deterministic — the same shape
-    // `exit_session_chain_reverts_claim_when_dispatch_fails` uses.
+    // runs, so the failure is deterministic.
     let task_id = fx
-        .backlog_subtask(None, "Doomed", None, Some("/nonexistent/dispatch-mcp-repo"))
+        .backlog_subtask(None, "Doomed", Some("/nonexistent/dispatch-mcp-repo"))
         .await;
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
@@ -1441,10 +946,10 @@ async fn dispatch_task_unknown_task_id_returns_error() {
 
 #[tokio::test]
 async fn dispatch_task_respects_tag_routing() {
-    let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
+    let fx = CloseFixture::with_runner(dispatch_runner_script()).await;
     // Feature-tagged task with no plan → still routes to the standard dispatch
     // agent (only Research + no plan routes elsewhere).
-    let task_id = fx.backlog_subtask(None, "Feature Task", None, None).await;
+    let task_id = fx.backlog_subtask(None, "Feature Task", None).await;
     fx.db
         .patch_task(
             task_id,
@@ -1470,9 +975,9 @@ async fn dispatch_task_respects_tag_routing() {
 async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
     // Dependabot tag is a label now — it routes through the unified dispatch
     // agent like any other task without a dedicated dispatch mode.
-    let fx = ChainFixture::with_runner(dispatch_runner_script()).await;
+    let fx = CloseFixture::with_runner(dispatch_runner_script()).await;
     let title = "Bump foo from 1.0.0 to 1.0.1";
-    let task_id = fx.backlog_subtask(None, title, None, None).await;
+    let task_id = fx.backlog_subtask(None, title, None).await;
     fx.db
         .patch_task(
             task_id,
@@ -1539,13 +1044,13 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
     // `spawn_blocking`, so the mock's panic surfaced as a `JoinError` — the very
     // error this test asserts on. It passed on the mock breaking, not on
     // dispatch failing.
-    let fx = ChainFixture::with_runner(
+    let fx = CloseFixture::with_runner(
         crate::dispatch::mock_sequence::DispatchScript::dispatch()
             .fails_at(crate::dispatch::mock_sequence::Step::NewWindow)
             .shared_runner(),
     )
     .await;
-    let task_id = fx.backlog_subtask(None, "Backlog Task", None, None).await;
+    let task_id = fx.backlog_subtask(None, "Backlog Task", None).await;
 
     let resp = call_dispatch_task(&fx.state, task_id).await;
 

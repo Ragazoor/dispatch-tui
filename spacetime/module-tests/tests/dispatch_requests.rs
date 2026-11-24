@@ -99,7 +99,7 @@ fn timer_count(store: &Store, req: i64) -> usize {
 
 /// Alice's tasks inside a fresh epic, plus the epic's id.
 fn epic_with_tasks(store: &Store, count: usize) -> (i64, Vec<i64>) {
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let ids = (0..count)
         .map(|_| store.create("alice", epic_task("t", epic, "backlog")))
         .collect();
@@ -519,25 +519,17 @@ fn a_repeated_dispatched_report_is_accepted_and_changes_nothing() {
     assert_eq!(only_request(&store).worktree, "/wt/1-t");
 }
 
+/// `store-split.allium: DispatchRequestOrigin`: epic_chain stays on old rows
+/// only, and a new request naming it is refused.
 #[test]
-fn the_epic_chain_may_not_request_a_phoenix_task() {
+fn a_new_epic_chain_request_is_refused() {
     let store = Store::new();
     let id = host_and_task(&store);
-    patch(
-        &store,
-        id,
-        TaskPatch {
-            phoenix: Some(true),
-            ..TaskPatch::default()
-        },
-    );
 
     let refused = request_as(&store, "alice", id, HOST_A, "epic_chain", "").unwrap_err();
-    assert!(refused.contains("phoenix"), "{refused}");
+    assert!(refused.contains("epic_chain"), "{refused}");
     assert_eq!(store.db().dispatch_requests().iter().count(), 0);
     assert_eq!(store.task(id).status, "backlog");
-
-    request(&store, id).expect("a request from the TUI takes it");
 }
 
 #[test]
@@ -731,7 +723,7 @@ fn deleting_an_epic_fails_the_open_requests_of_its_subtree_tasks() {
 fn a_feed_ingest_that_keeps_a_claimed_stale_task_fails_its_open_request() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "Feed", false);
+    let epic = store.create_epic("alice", "Feed");
     store
         .call("alice", |ctx| {
             patch_epic(

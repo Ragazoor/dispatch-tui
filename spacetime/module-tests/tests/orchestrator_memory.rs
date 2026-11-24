@@ -22,7 +22,7 @@ const HOST: &str = "host-a";
 /// (epic, task, orchestrator).
 fn setup(store: &Store) -> (i64, i64, Orchestrator) {
     store.register_host_for(HOST, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     store
         .call("alice", |ctx| switch_orchestrator_on(ctx, epic, None, None))
@@ -135,7 +135,7 @@ fn a_start_needs_a_reason_and_a_known_orchestrator() {
 fn an_orchestrator_cannot_start_a_task_outside_its_epic() {
     let store = Store::new();
     let (epic, _, o) = setup(&store);
-    let other_epic = store.create_epic("alice", "Other", false);
+    let other_epic = store.create_epic("alice", "Other");
     let outside = store.create("alice", epic_task("x", other_epic, "backlog"));
 
     let why = store
@@ -147,6 +147,53 @@ fn an_orchestrator_cannot_start_a_task_outside_its_epic() {
     assert!(why.contains(&format!("task {outside} is not in epic {epic}")), "{why}");
     assert_eq!(store.task(outside).status, "backlog");
     assert!(log(&store, epic).is_empty());
+}
+
+/// `orchestrators.allium: SameRulesAsAPerson`.
+#[test]
+fn an_orchestrator_starts_a_phoenix_task_like_any_other() {
+    let store = Store::new();
+    let (epic, _, o) = setup(&store);
+    let phoenix = store.create(
+        "alice",
+        Task {
+            phoenix: true,
+            ..epic_task("p", epic, "backlog")
+        },
+    );
+
+    store
+        .call("alice", |ctx| {
+            orchestrator_request_dispatch(ctx, phoenix, HOST.into(), o.name.clone(), "r".into())
+        })
+        .expect("the orchestrator's start");
+
+    assert_eq!(store.task(phoenix).status, "running");
+    assert_eq!(log(&store, epic).len(), 1);
+}
+
+/// `orchestrators.allium: SameRulesAsAPerson`; `schedules.allium`, S8.
+#[test]
+fn an_orchestrator_may_start_a_task_before_its_scheduled_time() {
+    let store = Store::new();
+    let (epic, _, o) = setup(&store);
+    let scheduled = store.create(
+        "alice",
+        Task {
+            schedule: "* * * * *".into(),
+            ..epic_task("s", epic, "backlog")
+        },
+    );
+    assert!(!store.task(scheduled).next_due.is_empty(), "create arms it");
+
+    store
+        .call("alice", |ctx| {
+            orchestrator_request_dispatch(ctx, scheduled, HOST.into(), o.name.clone(), "r".into())
+        })
+        .expect("the orchestrator's start");
+
+    assert_eq!(store.task(scheduled).status, "running");
+    assert_eq!(log(&store, epic).len(), 1);
 }
 
 #[test]
@@ -178,7 +225,7 @@ fn an_answer_is_logged_on_its_task() {
 fn an_answer_about_a_task_outside_the_epic_is_refused() {
     let store = Store::new();
     let (epic, _, o) = setup(&store);
-    let other_epic = store.create_epic("alice", "Other", false);
+    let other_epic = store.create_epic("alice", "Other");
     let outside = store.create("alice", epic_task("x", other_epic, "backlog"));
 
     let why = store
@@ -329,7 +376,7 @@ fn notes_are_written_changed_and_removed_by_their_orchestrator() {
 fn another_epics_orchestrator_cannot_touch_a_note() {
     let store = Store::new();
     let (_, _, o) = setup(&store);
-    let other = store.create_epic("alice", "Other", false);
+    let other = store.create_epic("alice", "Other");
     store.create("alice", epic_task("y", other, "backlog"));
     store
         .call("alice", |ctx| switch_orchestrator_on(ctx, other, None, None))

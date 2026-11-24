@@ -3,7 +3,7 @@
 //!
 //! Spec: `docs/specs/schedules.allium` (task #98394), plus the two rules it
 //! writes into others: `store-split.allium: RequestDispatch` (the
-//! schedule-origin and epic-chain checks, in [`validate_dispatch_request`]) and
+//! schedule-origin check, in [`validate_dispatch_request`]) and
 //! `tasks.allium: PhoenixRespawn` (the successor's schedule, in
 //! [`phoenix_successor`]).
 //!
@@ -300,11 +300,6 @@ pub fn arm_created_task(task: Task, now: &str) -> Result<Task, String> {
 /// fixed-width spelling, so they compare as strings.
 pub fn task_is_due(task: &Task, now: &str) -> bool {
     !task.next_due.is_empty() && task.next_due.as_str() <= now
-}
-
-/// Whether `task` is still waiting for a scheduled time ahead of `now`.
-pub fn task_awaits_schedule(task: &Task, now: &str) -> bool {
-    !task.next_due.is_empty() && task.next_due.as_str() > now
 }
 
 /// `LeavingBacklogCancelsThePendingRun`: a status write other than the

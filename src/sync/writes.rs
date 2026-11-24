@@ -735,7 +735,7 @@ pub trait ReducerCaller: Send + Sync {
         reason: String,
     ) -> Result<ReducerOutcome>;
     /// `RequestExitSession`: check `token` (a done wrap_up row's id), apply the
-    /// close, run the epic chain and write the exit_session row, all in one
+    /// close and write the exit_session row, all in one
     /// transaction. `pr_url` is `""` unless the action is `pr`. An applied call
     /// reads the new exit_session row's id back as the outcome's one id.
     async fn request_exit_session(
@@ -748,8 +748,7 @@ pub trait ReducerCaller: Send + Sync {
     /// `RequestCloseTask` (`task_update`'s done path): fail the task's open
     /// session request, apply the Done close, respawn a phoenix task, roll the
     /// epic up and, when there is host work and `host` (the caller's own) is
-    /// where it is, write a `close` row; all in one transaction. No token, no
-    /// epic chain.
+    /// where it is, write a `close` row; all in one transaction. No token.
     async fn close_task(&self, task: TaskId, host: String) -> Result<ReducerOutcome>;
     /// `HostRestartFailsInterruptedSessionRequests`: fail `host`'s running rows.
     async fn fail_interrupted_session_requests(&self, host: String) -> Result<ReducerOutcome>;

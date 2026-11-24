@@ -52,7 +52,7 @@ fn link_ids(store: &Store) -> Vec<String> {
 
 /// A done epic holding one done task: both can be deleted.
 fn done_epic(store: &Store, title: &str) -> (i64, i64) {
-    let epic = store.create_epic("alice", title, false);
+    let epic = store.create_epic("alice", title);
     let task = store.create("alice", epic_task(title, epic, "done"));
     assert_eq!(store.epic(epic).status, "done");
     (epic, task)
@@ -160,7 +160,7 @@ fn patching_a_work_package_writes_the_sort_order_and_omitting_it_keeps_it() {
 fn linking_is_idempotent_and_refuses_unknown_targets() {
     let store = Store::new();
     let package = new_package(&store, "Window 1");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     for _ in 0..2 {
@@ -207,7 +207,7 @@ fn linking_is_idempotent_and_refuses_unknown_targets() {
 fn deleting_a_work_package_removes_its_links_and_keeps_the_items() {
     let store = Store::new();
     let package = new_package(&store, "Window 1");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     link(&store, package, "task", task).expect("link");
 
@@ -227,7 +227,7 @@ fn deleting_linked_items_removes_their_links_and_only_theirs() {
     let store = Store::new();
     let package = new_package(&store, "Window 1");
     let (epic_e, task_in_e) = done_epic(&store, "E");
-    let epic_f = store.create_epic("alice", "F", false);
+    let epic_f = store.create_epic("alice", "F");
     let task_in_f = store.create("alice", epic_task("in F", epic_f, "done"));
     let kept = store.create("alice", epic_task("kept", epic_f, "backlog"));
     for (kind, id) in [
@@ -306,7 +306,7 @@ fn update_with(
 #[test]
 fn create_with_links_writes_package_and_links_or_nothing() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     create_with(
@@ -345,7 +345,7 @@ fn create_with_links_writes_package_and_links_or_nothing() {
 #[test]
 fn update_with_links_is_atomic_and_refuses_overlap_and_a_missing_package() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     let package = new_package(&store, "W");
     link(&store, package, "task", task).expect("link");
@@ -416,7 +416,7 @@ fn update_with_links_is_atomic_and_refuses_overlap_and_a_missing_package() {
 #[test]
 fn a_link_only_update_leaves_updated_at_alone() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let package = new_package(&store, "W");
     let stamp = |store: &Store| {
         store

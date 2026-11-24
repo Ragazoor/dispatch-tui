@@ -123,10 +123,6 @@ async fn update_task_with_base_branch_updates_it() {
     assert_eq!(task.base_branch, "release/2.0");
 }
 
-// `dispatch_next_returns_disabled_when_auto_dispatch_off` moved to
-// tests/tasks/dispatch.rs as `exit_session_does_not_chain_when_auto_dispatch_off`
-// — the auto_dispatch flag is now read by the session-close chain, not by a tool.
-
 // -- task_search: header-based caller identity ---------------------------------
 
 #[tokio::test]

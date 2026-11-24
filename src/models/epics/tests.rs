@@ -220,7 +220,6 @@ fn epic_struct_fields() {
         plan_path: None,
         sort_order: None,
         completed_at: None,
-        auto_dispatch: true,
         parent_epic_id: None,
         feed_command: None,
         feed_interval_secs: None,
@@ -258,10 +257,7 @@ fn epic_has_status_field_directly_accessible() {
 // --- EpicSubstatus / epic_substatus ---
 
 fn test_epic() -> Epic {
-    EpicBuilder::new(1)
-        .title("Test")
-        .auto_dispatch(true)
-        .build()
+    EpicBuilder::new(1).title("Test").build()
 }
 
 fn test_task() -> Task {

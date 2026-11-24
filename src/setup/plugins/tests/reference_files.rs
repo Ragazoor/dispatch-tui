@@ -150,16 +150,14 @@ fn wrap_up_exit_session_errors_live_in_a_reference_named_at_the_step() {
     );
 }
 
-/// TheNextCallIsNamedJustInTime: exit_session owns the epic chain and its
-/// description says so, so the skill carries no section telling the agent
-/// not to dispatch the next subtask itself.
+/// TheNextCallIsNamedJustInTime: the skill carries no section telling the
+/// agent not to dispatch the next subtask itself.
 #[test]
 fn wrap_up_skill_has_no_dont_dispatch_the_next_subtask_section() {
     let lower = skill_text("wrap-up").to_lowercase();
     assert!(
         !lower.contains("next subtask yourself"),
-        "wrap-up must not carry a don't-dispatch-the-next-subtask section — \
-         exit_session owns the chain"
+        "wrap-up must not carry a don't-dispatch-the-next-subtask section"
     );
 }
 

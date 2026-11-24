@@ -70,7 +70,6 @@ fn a_requested_wrap_up_row_decodes_with_its_sentinels_absent() {
     assert!(row.pr_url.is_none());
     assert!(row.wrap_up_request.is_none());
     assert!(row.tmux_window.is_none());
-    assert!(row.chained_task.is_none());
     assert!(row.is_open());
     assert!(row.has_host_work());
 }
@@ -101,7 +100,7 @@ fn a_done_wrap_up_with_no_host_work_has_no_deadline() {
 }
 
 /// An exit_session row carries the token it consumed, the window to tear
-/// down, the pr url the close recorded and the subtask the chain requested.
+/// down and the pr url the close recorded.
 #[test]
 fn an_exit_session_row_decodes_its_references() {
     let rows = SharedRows::new();
@@ -111,7 +110,6 @@ fn an_exit_session_row_decodes_its_references() {
         pr_url: "https://github.com/o/r/pull/9".into(),
         wrap_up_request: 3,
         tmux_window: "task-7".into(),
-        chained_task: 12,
         deadline: "2026-10-12 12:00:30.000".into(),
         ..requested_row(5)
     });
@@ -121,7 +119,6 @@ fn an_exit_session_row_decodes_its_references() {
     assert_eq!(row.pr_url.as_deref(), Some("https://github.com/o/r/pull/9"));
     assert_eq!(row.wrap_up_request, Some(SessionRequestId(3)));
     assert_eq!(row.tmux_window.as_ref().map(|w| w.as_str()), Some("task-7"));
-    assert_eq!(row.chained_task, Some(TaskId(12)));
     assert!(row.has_host_work());
 }
 

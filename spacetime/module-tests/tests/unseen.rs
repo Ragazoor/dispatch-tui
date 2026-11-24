@@ -27,8 +27,8 @@ fn unseen_for(store: &Store, who: &str) -> Vec<i64> {
 #[test]
 fn a_signalled_task_is_unseen_for_every_known_person() {
     let store = Store::new();
-    let root = store.create_epic("alice", "root", false);
-    let child = store.create_epic("alice", "child", false);
+    let root = store.create_epic("alice", "root");
+    let child = store.create_epic("alice", "child");
     store
         .call("alice", |ctx| {
             patch_epic(
@@ -55,7 +55,7 @@ fn a_signalled_task_is_unseen_for_every_known_person() {
 #[test]
 fn an_ordinary_create_marks_nothing() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
 
     store.create("alice", epic_task("plain", epic, "backlog"));
@@ -68,7 +68,7 @@ fn an_ordinary_create_marks_nothing() {
 #[test]
 fn a_later_member_is_not_marked() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.create_signalled("alice", epic_task("new", epic, "backlog"));
 
     store.enrol("late");
@@ -82,8 +82,8 @@ fn a_later_member_is_not_marked() {
 #[test]
 fn seeing_a_task_clears_only_that_task_for_that_person() {
     let store = Store::new();
-    let root = store.create_epic("alice", "root", false);
-    let child = store.create_epic("alice", "child", false);
+    let root = store.create_epic("alice", "root");
+    let child = store.create_epic("alice", "child");
     store
         .call("alice", |ctx| {
             patch_epic(
@@ -117,7 +117,7 @@ fn seeing_a_task_clears_only_that_task_for_that_person() {
 #[test]
 fn mark_task_seen_refuses_a_blank_identity_and_tolerates_nothing_to_clear() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create_signalled("alice", epic_task("t", epic, "backlog"));
 
     assert!(store
@@ -134,8 +134,8 @@ fn mark_task_seen_refuses_a_blank_identity_and_tolerates_nothing_to_clear() {
 #[test]
 fn moving_a_task_out_of_its_epic_clears_the_mark() {
     let store = Store::new();
-    let from = store.create_epic("alice", "from", false);
-    let to = store.create_epic("alice", "to", false);
+    let from = store.create_epic("alice", "from");
+    let to = store.create_epic("alice", "to");
     store.enrol("bob");
     let task = store.create_signalled("alice", epic_task("new", from, "backlog"));
 
@@ -150,7 +150,7 @@ fn moving_a_task_out_of_its_epic_clears_the_mark() {
 #[test]
 fn finishing_a_task_clears_the_mark() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create_signalled("alice", epic_task("new", epic, "running"));
 
@@ -165,7 +165,7 @@ fn finishing_a_task_clears_the_mark() {
 #[test]
 fn deleting_a_task_removes_its_marks() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create_signalled("alice", epic_task("new", epic, "running"));
     // Done clears the mark first, so re-mark by hand to prove the delete path

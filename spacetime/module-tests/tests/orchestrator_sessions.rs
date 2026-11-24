@@ -19,7 +19,7 @@ const OTHER: &str = "host-b";
 fn orchestrated(store: &Store) -> i64 {
     store.register_host_for(HOST, "alice");
     store.register_host_for(OTHER, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store
         .call("alice", |ctx| switch_orchestrator_on(ctx, epic, None, None))
         .expect("switch on");
@@ -74,7 +74,7 @@ fn ensuring_creates_one_row_per_epic_and_host() {
 fn ensuring_without_a_switch_is_refused() {
     let store = Store::new();
     store.register_host_for(HOST, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
 
     let why = ensure(&store, epic, HOST).unwrap_err();
     assert!(why.contains("has no orchestrator"), "{why}");
@@ -279,7 +279,7 @@ fn a_reparent_under_an_orchestrated_epic_removes_the_moved_epics_orchestrators()
     let store = Store::new();
     let epic = orchestrated(&store);
     ensure(&store, epic, HOST).unwrap();
-    let top = store.create_epic("alice", "Top", false);
+    let top = store.create_epic("alice", "Top");
     store
         .call("alice", |ctx| switch_orchestrator_on(ctx, top, None, None))
         .unwrap();

@@ -260,19 +260,14 @@ fn a_schedule_origin_request_needs_a_due_task() {
 }
 
 #[test]
-fn the_epic_chain_passes_over_a_task_still_waiting_for_its_time() {
+fn a_person_may_launch_a_scheduled_task_early() {
     let ahead = Task {
         next_due: "2026-10-26 09:00:00.000".into(),
         ..due_task()
     };
-    let why = validate_dispatch_request(&ahead, HOST_A, "epic_chain", false, NOW).unwrap_err();
-    assert_eq!(
-        why,
-        "task 1 is waiting for its scheduled time, which the epic chain does not dispatch early"
-    );
-    // A due one, it may take; and every other origin may launch early.
-    assert!(validate_dispatch_request(&due_task(), HOST_A, "epic_chain", false, NOW).is_ok());
-    assert!(validate_dispatch_request(&ahead, HOST_A, "user", false, NOW).is_ok());
+    for origin in ["user", "mcp", "quick"] {
+        assert!(validate_dispatch_request(&ahead, HOST_A, origin, false, NOW).is_ok(), "{origin}");
+    }
 }
 
 #[test]

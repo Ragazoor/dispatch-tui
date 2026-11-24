@@ -19,7 +19,7 @@ Agents let me take on more work than before. Dispatch is my way of organising th
 
 **How do I stay close to code I do care about?** At work the code is not a black box, and I do not want to drift away from it because an agent writes it. The agent-tree pane (`Prefix+e` in an agent's window, by default) shows the files the agent changed. From there one key opens a file's diff and another opens the file in your editor.
 
-**How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do all of what you can do there and a bit more. Agents can also send each other messages natively. Auto-dispatch helps too: it starts the next task in an epic when the one before it finishes. With only these tools, a lot of patterns are easy to try, for example:
+**How far can agents orchestrate themselves?** I do some of the orchestration myself from the board. Agents now do a lot more of it. Claude is a first-class user of the board: through MCP tools it can do all of what you can do there and a bit more. Agents can also send each other messages natively. With only these tools, a lot of patterns are easy to try, for example:
 
 - fan out work to several agents, then fan their results back in
 - let one agent create, dispatch and follow other tasks
@@ -103,7 +103,7 @@ In a hurry? Press `D` instead. It skips the form, dispatches at once, and the ag
 
 **Tags** — labels such as `bug`, `feature`, `chore`, `research`, `pr-review`. Most are just labels. Two change behaviour: `research` launches a research agent, and `pr-review` skips the design step and, given a PR link, cuts the worktree from that PR's branch.
 
-**Epics** — a group of tasks that run in order. Epics can hold other epics. `Space` on an epic card steps inside; `q` steps back out one level and `Q` returns to the board. Inside an epic, turn on auto-dispatch (`U`) and finishing one subtask starts the next, so each worktree is cut from a branch that already holds its predecessor's work.
+**Epics** — a group of tasks that run in order. Epics can hold other epics. `Space` on an epic card steps inside; `q` steps back out one level and `Q` returns to the board.
 
 **Work packages** — a set of epics and tasks that serve one goal. `w` links the selected card to a package; `Space` on a package card opens it.
 

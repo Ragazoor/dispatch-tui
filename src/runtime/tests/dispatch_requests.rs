@@ -591,7 +591,7 @@ async fn startup_fails_interrupted_rows_then_serves_requested_ones() {
     let (waiting, _repo) = r.provisionable_task().await;
     let waiting_req = requested(
         r.rt.task_svc
-            .request_dispatch(waiting.id, DispatchOrigin::EpicChain, None)
+            .request_dispatch(waiting.id, DispatchOrigin::Mcp, None)
             .await
             .unwrap(),
     );
@@ -701,7 +701,7 @@ mod bootstrap {
                 .with_registered_host(host, "c0ffee"),
         );
         let task = ready(caller.create_task(stamped_task("Interrupted"))).unwrap();
-        ready(caller.request_dispatch(task, host.into(), "epic_chain".into(), String::new()))
+        ready(caller.request_dispatch(task, host.into(), "user".into(), String::new()))
             .unwrap()
             .applied()
             .unwrap();

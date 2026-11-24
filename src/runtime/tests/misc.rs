@@ -239,9 +239,8 @@ mod load_init_helpers {
     }
 }
 
-/// The shared dispatch prologue. Four launch sites (task_dispatch and the epic chain
-/// in src/mcp/handlers/tasks/dispatch.rs, exec_quick_dispatch and exec_dispatch_agent
-/// in src/runtime/tasks.rs) run it; their own end-to-end tests cover the wiring,
+/// The shared dispatch prologue. task_dispatch (src/mcp/handlers/tasks/dispatch.rs),
+/// exec_quick_dispatch and exec_dispatch_agent (src/runtime/tasks.rs) run it; their own end-to-end tests cover the wiring,
 /// these pin the prologue itself.
 mod prepare_inputs {
     use super::*;
@@ -488,8 +487,8 @@ mod backfill_embeddings {
 mod off_board_dispatch {
     use super::*;
 
-    // A launch the board did not ask for (the task_dispatch tool, or epic
-    // auto-dispatch chaining). Every request is
+    // A launch the board did not ask for (the task_dispatch tool, or an
+    // orchestrator's start). Every request is
     // provisioned by this host's reactor, so an off-board request reaches the
     // board as the same `Dispatched` message a key press does.
     #[tokio::test]
@@ -540,13 +539,6 @@ mod off_board_dispatch {
             other => panic!("expected Dispatched, got {other:?}"),
         }
     }
-
-    // `apply_loop_event_auto_dispatch_failed_marks_the_subtask` pinned the
-    // `BoardEvent::AutoDispatchFailed` the MCP chain used to send. The
-    // chain's failure is raised from its failed
-    // `epic_chain` request row (`epics.allium: ReportChainedDispatchFailure`);
-    // the marker, status line and once-only rule are pinned in
-    // `src/tui/tests/dispatch_requests.rs`.
 }
 
 mod invalidate_feed_cache {

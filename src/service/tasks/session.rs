@@ -9,8 +9,7 @@
 //!   (`store-split.allium: RequestWrapUp`, `RequestExitSession`,
 //!   `RequestCloseTask`). Thin reducer calls. The module checks them, sets the
 //!   Conflict sub_status, applies the close (terminal write, epic rollup,
-//!   phoenix respawn), runs the epic chain and records the exit token as the
-//!   row; nothing is rebased or killed here.
+//!   phoenix respawn) and records the exit token as the row; nothing is rebased or killed here.
 //! - **Serving** — [`TaskService::serve_session_request`], this host's reaction
 //!   to a `requested` row naming it (`HostClaimsSessionRequest` ->
 //!   `pr-workflow.allium: WrapUpRebase` / `ExitSessionTeardown`, which an
@@ -77,8 +76,8 @@ impl TaskService {
         Ok(self.db.request_wrap_up(task_id, action).await?)
     }
 
-    /// `RequestExitSession`: the token check, the close, the epic chain and the
-    /// exit_session row, in one module transaction. The close is whole or
+    /// `RequestExitSession`: the token check, the close and the exit_session
+    /// row, in one module transaction. The close is whole or
     /// absent: a refusal changes nothing and leaves `token` valid. Tears
     /// nothing down; this host's board serves the exit_session row.
     pub async fn request_exit_session(

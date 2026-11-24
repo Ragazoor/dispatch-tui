@@ -92,8 +92,7 @@ pub enum TaskMessage {
     MarkDispatching(TaskId),
     /// This host's dispatch request rows, every state, as the latest board
     /// reload read them (`store-split.allium: DispatchRequest`). They drive DispatchingFeedback's
-    /// open membership, `FailedRequestReported` and the epic chain's
-    /// `ReportChainedDispatchFailure`. The FIRST one an App receives is its
+    /// open membership and `FailedRequestReported`. The FIRST one an App receives is its
     /// baseline: rows already failed in it are history and raise nothing.
     DispatchRequestsRefreshed(Vec<crate::models::DispatchRequest>),
     /// The tasks this person has not yet seen, as the latest board reload read

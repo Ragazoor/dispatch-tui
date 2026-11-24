@@ -8,8 +8,7 @@
 //! `DeletingATaskFailsItsOpenSessionRequest` and the invariants
 //! `OneOpenSessionRequestPerTask`, `AnExitTokenIsConsumedOnce` and
 //! `EveryExitSessionHadAWrapUp`; the close itself is
-//! `pr-workflow.allium: ExitSession` and the chain is
-//! `epics.allium: AutoDispatchNextSubtask`.
+//! `pr-workflow.allium: ExitSession`.
 //!
 //! Built exactly as `dispatch_request.rs` is: every DECISION is a pure
 //! function over rows, testable without a store (`tests.rs`'s
@@ -70,8 +69,8 @@ pub struct SessionRequest {
     /// On an exit_session or close row: the window the close cleared from the
     /// task, which the host tears down.
     pub tmux_window: String,
-    /// On an exit_session row: the subtask the epic chain requested in the same
-    /// transaction, or `0` when the chain stopped.
+    /// Dead: always `0`. It named the subtask the removed epic chain
+    /// requested. It stays because an automigration cannot drop a column.
     pub chained_task: i64,
     /// `requested_at` plus the timeout of the row's kind, computed by the
     /// module when the row is written and stored so the HOST reads the
@@ -529,16 +528,15 @@ pub fn apply_session_close(task: Task, action: &str, pr_url: &str, now: &str) ->
 }
 
 /// `ExitSession`'s `exit_session` row (`SessionRequest.created(...)`): names the
-/// task's host, the window to tear down, the token it consumes and the
-/// subtask the chain requested (`0` for none). `task` is the task as it was
-/// BEFORE the close, so the window is the one the close cleared.
+/// task's host, the window to tear down and the token it consumes. `task` is
+/// the task as it was BEFORE the close, so the window is the one the close
+/// cleared.
 pub fn new_exit_session_request(
     task: &Task,
     window: &str,
     token_id: i64,
     action: &str,
     pr_url: &str,
-    chained_task: i64,
     now: &str,
 ) -> SessionRequest {
     SessionRequest {
@@ -555,7 +553,6 @@ pub fn new_exit_session_request(
         },
         wrap_up_request: token_id,
         tmux_window: window.into(),
-        chained_task,
         deadline: session_request_deadline(SESSION_KIND_EXIT_SESSION, now),
         ..blank_session_request()
     }
@@ -666,15 +663,6 @@ pub fn phoenix_successor(predecessor: &Task, epic_id: i64, now: &str, created_by
     }
 }
 
-/// `AutoDispatchNextSubtask`'s candidates: the epic's backlog subtasks in board
-/// order, `sort_order` (nulls fall back to the task id), then id. Phoenix
-/// subtasks are refused by the request itself, not filtered here.
-pub fn chain_candidates(tasks: Vec<Task>) -> Vec<Task> {
-    let mut candidates: Vec<Task> = tasks.into_iter().filter(|t| t.status == BACKLOG).collect();
-    candidates.sort_by_key(|t| (t.sort_order.unwrap_or(t.id), t.id));
-    candidates
-}
-
 // -- Store helpers ------------------------------------------------------------
 
 fn find_session_request(ctx: &ReducerContext, request_id: i64) -> Result<SessionRequest, String> {
@@ -775,35 +763,6 @@ pub(crate) fn respawn_phoenix_successor_of(
     let epic_id = route_to_repo_group(ctx, closed.epic_id, &closed.repo_path);
     let successor = phoenix_successor(closed, epic_id, stamp, &caller_identity(ctx));
     write_task(ctx, successor).is_ok()
-}
-
-/// `AutoDispatchNextSubtask`: the first backlog subtask of the closed task's
-/// epic whose `epic_chain` request is accepted, requested on the closed task's
-/// host through the shared dispatch path. `0` when the chain stops. A refused
-/// candidate is ordinary and the chain moves on; nothing here fails the close.
-fn chain_next_subtask(ctx: &ReducerContext, closed: &Task, host: &str) -> i64 {
-    if closed.epic_id == 0 {
-        return 0;
-    }
-    match ctx.db.epics().id().find(closed.epic_id) {
-        Some(epic) if epic.auto_dispatch => {}
-        _ => return 0,
-    }
-    let subtasks: Vec<Task> = ctx.db.tasks().epic_id().filter(&closed.epic_id).collect();
-    let stamp = now(ctx);
-    for candidate in chain_candidates(subtasks) {
-        if check_dispatch_request(ctx, &candidate, host, DISPATCH_ORIGIN_EPIC_CHAIN, &stamp).is_err() {
-            continue;
-        }
-        let Ok(mode) = choose_dispatch_mode(&candidate, "") else {
-            continue;
-        };
-        let id = candidate.id;
-        if create_dispatch_request(ctx, candidate, host, mode, DISPATCH_ORIGIN_EPIC_CHAIN).is_ok() {
-            return id;
-        }
-    }
-    0
 }
 
 // -- Reducers -----------------------------------------------------------------
@@ -917,9 +876,9 @@ pub fn report_session_request_failed(
     Ok(())
 }
 
-/// `RequestExitSession`, with the close it asks for (`ExitSession`) and the
-/// epic chain (`AutoDispatchNextSubtask`): ONE transaction, so the close is
-/// whole or absent. A refusal writes nothing and leaves the token valid.
+/// `RequestExitSession`, with the close it asks for (`ExitSession`): ONE
+/// transaction, so the close is whole or absent. A refusal writes nothing
+/// and leaves the token valid.
 #[spacetimedb::reducer]
 pub fn request_exit_session(
     ctx: &ReducerContext,
@@ -955,22 +914,17 @@ pub fn request_exit_session(
     )?;
 
     let stamp = now(ctx);
-    let host = task.host.clone();
     let epic_id = task.epic_id;
     let mut closed = apply_session_close(task.clone(), &action, &pr_url, &stamp);
-    // The respawn follows the Done write in spirit and lands in the same
-    // transaction; where it sits relative to the chain cannot matter (the
-    // chain skips phoenix subtasks).
     if should_respawn_phoenix(&task.status, &closed)
         && respawn_phoenix_successor_of(ctx, &closed, &stamp)
     {
         closed.phoenix = false;
     }
-    write_task(ctx, closed.clone())?;
+    write_task(ctx, closed)?;
     close_agent_session(&mut AgentTables(ctx), task_id);
     recalculate_epic_chain(ctx, epic_id);
 
-    let chained = chain_next_subtask(ctx, &closed, &host);
     let row = ctx.db.session_requests().insert(SessionRequest {
         requested_by: caller_identity(ctx),
         ..new_exit_session_request(
@@ -979,7 +933,6 @@ pub fn request_exit_session(
             token_row.id,
             &action,
             &pr_url,
-            chained,
             &stamp,
         )
     });
@@ -991,8 +944,8 @@ pub fn request_exit_session(
 /// the task's open session request ("task closed"), applies the Done close,
 /// respawns a phoenix task that enters Done, rolls up the epic chain and, when
 /// there is host work and the teardown host is the caller's, writes a `close`
-/// row with its backstop timer. No token is issued, checked or consumed and no
-/// epic chain runs. A missing task is refused.
+/// row with its backstop timer. No token is issued, checked or consumed. A
+/// missing task is refused.
 #[spacetimedb::reducer]
 pub fn close_task(ctx: &ReducerContext, task_id: i64, host: String) -> Result<(), String> {
     let Some(task) = ctx.db.tasks().id().find(task_id) else {

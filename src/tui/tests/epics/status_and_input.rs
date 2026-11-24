@@ -159,32 +159,6 @@ fn esc_in_epic_view_exits_to_board() {
 }
 
 #[test]
-fn shift_u_in_epic_view_toggles_auto_dispatch() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(42);
-    epic.auto_dispatch = true;
-    app.board.epics = vec![epic];
-
-    // Enter epic view
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
-        EpicId(42),
-    )));
-
-    // Press Shift+U — should return ToggleEpicAutoDispatch command with auto_dispatch = false
-    let cmds = app.handle_key(make_key(KeyCode::Char('U')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Epic(crate::tui::commands::EpicCommand::ToggleAutoDispatch {
-            id: EpicId(42),
-            auto_dispatch: false
-        })
-    )));
-
-    // Also verify in-memory state was updated
-    assert!(!app.board.epics[0].auto_dispatch);
-}
-
-#[test]
 fn epic_title_esc_cancels() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputEpicTitle;

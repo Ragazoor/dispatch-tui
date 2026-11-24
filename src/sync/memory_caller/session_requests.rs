@@ -207,7 +207,7 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `request_exit_session`: the token check, the close
-    /// (`ExitSession`), the epic chain and the exit_session row — the module's
+    /// (`ExitSession`) and the exit_session row — the module's
     /// ONE transaction, which the held lock stands for here. Every fallible step
     /// that can refuse runs before the first write, as in the module, so a
     /// refusal leaves the task and the token as they were.
@@ -247,7 +247,6 @@ impl MemoryReducerCaller {
         )?;
 
         let stamp = self.now();
-        let host = task.host.clone();
         let epic_id = task.epic_id;
         let mut closed = module::apply_session_close(task.clone(), action, pr_url, &stamp);
         if module::should_respawn_phoenix(&task.status, &closed)
@@ -255,11 +254,10 @@ impl MemoryReducerCaller {
         {
             closed.phoenix = false;
         }
-        self.write_task(&mut tables, closed.clone())?;
+        self.write_task(&mut tables, closed)?;
         module::close_agent_session(&mut self.agent_store(&mut tables), task_id);
         self.recalculate_epic_chain(&mut tables, epic_id);
 
-        let chained = self.chain_next_subtask(&mut tables, &closed, &host);
         let id = self.write_session_request(
             &mut tables,
             module::SessionRequest {
@@ -270,7 +268,6 @@ impl MemoryReducerCaller {
                     token_row.id,
                     action,
                     pr_url,
-                    chained,
                     &stamp,
                 )
             },
@@ -390,58 +387,6 @@ impl MemoryReducerCaller {
         let epic_id = self.route_to_repo_group(tables, closed.epic_id, &closed.repo_path);
         let successor = module::phoenix_successor(closed, epic_id, stamp, &self.sender);
         self.write_task(tables, successor).is_ok()
-    }
-
-    /// Mirrors the module's `chain_next_subtask` (`AutoDispatchNextSubtask`):
-    /// the first backlog subtask of the closed task's epic whose `epic_chain`
-    /// request is accepted, requested on the closed task's host through the
-    /// shared dispatch path. `0` when the chain stops; nothing here fails the
-    /// close.
-    fn chain_next_subtask(&self, tables: &mut Tables, closed: &module::Task, host: &str) -> i64 {
-        if closed.epic_id == 0 {
-            return 0;
-        }
-        match tables.epics.get(&closed.epic_id) {
-            Some(epic) if epic.auto_dispatch => {}
-            _ => return 0,
-        }
-        let subtasks: Vec<module::Task> = tables
-            .tasks
-            .values()
-            .filter(|t| t.epic_id == closed.epic_id)
-            .cloned()
-            .collect();
-        let stamp = self.now();
-        for candidate in module::chain_candidates(subtasks) {
-            if module::check_dispatch_request(
-                &*tables,
-                &candidate,
-                host,
-                module::DISPATCH_ORIGIN_EPIC_CHAIN,
-                &stamp,
-            )
-            .is_err()
-            {
-                continue;
-            }
-            let Ok(mode) = module::choose_dispatch_mode(&candidate, "") else {
-                continue;
-            };
-            let id = candidate.id;
-            if self
-                .create_dispatch_request_body(
-                    tables,
-                    candidate,
-                    host,
-                    mode,
-                    module::DISPATCH_ORIGIN_EPIC_CHAIN,
-                )
-                .is_ok()
-            {
-                return id;
-            }
-        }
-        0
     }
 
     pub(super) fn apply_fail_interrupted_session_requests(

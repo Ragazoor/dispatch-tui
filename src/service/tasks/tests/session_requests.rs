@@ -12,7 +12,7 @@
 //!   to a `requested` row naming it (`pr-workflow.allium: WrapUpRebase`,
 //!   `ExitSessionTeardown`): claim the row, do the host work under the row's
 //!   deadline, report done or failed. The module sets the Conflict
-//!   sub_status, applies the close and runs the epic chain; the host writes no
+//!   sub_status and applies the close; the host writes no
 //!   task field.
 //!
 //! The deadline is driven through the injected clock: a stalled subprocess

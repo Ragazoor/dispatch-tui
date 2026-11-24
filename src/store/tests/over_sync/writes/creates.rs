@@ -323,7 +323,7 @@ async fn clearing_a_verify_command_sends_the_absent_sentinel() {
     );
 }
 
-/// A new epic is born in backlog, not auto-dispatching and manual —
+/// A new epic is born in backlog and manual —
 /// `epics.allium: CreateEpic`. Those are the epic's birth state rather than
 /// defaults somebody forgot, and they are set here so the store has no opinion
 /// about what a new epic looks like.

@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// DispatchingFeedback, UnprovisionedIndicator and the chain's failure report,
+// DispatchingFeedback and UnprovisionedIndicator,
 // driven by this host's dispatch request rows (`store-split.allium: DispatchRequest`)
 // ---------------------------------------------------------------------------
 //
@@ -8,9 +8,7 @@
 // a request that reaches failed raises a popup carrying the row's reason
 // (FailedRequestReported), which REPLACES the in-memory watchdog
 // (DISPATCH_WATCHDOG_TIMEOUT). `UnprovisionedIndicator`'s claim-stamp fallback
-// is re-based on the request timeout (60s). `epics.allium:
-// ReportChainedDispatchFailure` raises AutoDispatchFailed once, from a failed
-// `epic_chain` row, for a task that still exists.
+// is re-based on the request timeout (60s).
 //
 // Rows reach the App as `TaskMessage::DispatchRequestsRefreshed`, sent by the
 // same board reload that refreshes the cards. Its FIRST delivery is the
@@ -56,7 +54,7 @@ fn failed(id: i64, task: i64, reason: &str) -> DispatchRequest {
     }
 }
 
-fn chained(r: DispatchRequest) -> DispatchRequest {
+fn old_chain_row(r: DispatchRequest) -> DispatchRequest {
     DispatchRequest {
         origin: DispatchOrigin::EpicChain,
         ..r
@@ -79,8 +77,8 @@ fn app() -> App {
 // -- Membership from open rows ---------------------------------------------------
 
 /// OPEN part of the membership: a request this board's subscription holds is
-/// shown as dispatching although nothing on this board marked it — the epic
-/// chain's and MCP's requests, and requests that survive a board restart.
+/// shown as dispatching although nothing on this board marked it — MCP's
+/// requests, and requests that survive a board restart.
 #[test]
 fn an_open_request_row_makes_its_task_a_dispatching_member() {
     let mut app = app();
@@ -360,102 +358,30 @@ fn retry_fresh_redispatches_through_the_standard_dispatch() {
     );
 }
 
-// -- ReportChainedDispatchFailure -----------------------------------------------------
+// -- Rows written before the epic chain was removed -------------------------------
 
-fn app_with_epic_subtask() -> App {
-    let mut subtask = make_task(5, TaskStatus::Running);
-    subtask.worktree = None;
-    subtask.tmux_window = None;
-    subtask.epic_id = Some(EpicId(7));
-    let mut app = App::new(vec![subtask, make_task(6, TaskStatus::Backlog)]);
-    app.set_local_host_id(HOST.to_string());
-    app.update(refreshed(vec![]));
-    app
-}
-
-/// A chained request that fails marks its subtask, exactly as the old
-/// in-process AutoDispatchFailed did (SurfaceAutoDispatchFailure), and does so
-/// once.
+/// An old `epic_chain` row that fails is reported like any other failed row:
+/// the popup, and nothing else (`store-split.allium: DispatchRequestOrigin`).
 #[test]
-fn a_failed_epic_chain_row_raises_auto_dispatch_failed_once() {
-    let mut app = app_with_epic_subtask();
-    app.update(refreshed(vec![chained(row(
-        1,
-        5,
-        DispatchRequestState::Provisioning,
-    ))]));
-
-    app.update(refreshed(vec![chained(failed(1, 5, "deadline passed"))]));
-
-    assert!(app.auto_dispatch_failed(TaskId(5)));
-    let status = app.status_message().unwrap_or_default().to_string();
-    assert!(
-        status.contains("#5") || status.contains("Task 5"),
-        "StatusMessageNamesTheSubtask: {status:?}"
-    );
-
-    // Cleared by the operator's own re-dispatch, then the same failed row is
-    // redelivered: it must not mark the subtask again.
-    app.update(Message::Task(TaskMessage::MarkDispatching(TaskId(5))));
-    assert!(!app.auto_dispatch_failed(TaskId(5)));
-    app.update(refreshed(vec![chained(failed(1, 5, "deadline passed"))]));
-    assert!(
-        !app.auto_dispatch_failed(TaskId(5)),
-        "AutoDispatchFailed is raised once per row"
-    );
-}
-
-/// Only `epic_chain` rows are the chain's.
-#[test]
-fn a_failed_user_row_is_not_a_chain_failure() {
-    let mut app = app_with_epic_subtask();
-    app.update(refreshed(vec![row(
-        1,
-        5,
-        DispatchRequestState::Provisioning,
-    )]));
-
-    app.update(refreshed(vec![failed(1, 5, "deadline passed")]));
-
-    assert!(!app.auto_dispatch_failed(TaskId(5)));
-}
-
-/// `requires: exists request.task` — a subtask deleted under its request has
-/// no card to mark.
-#[test]
-fn a_chain_failure_for_a_deleted_task_marks_nothing() {
-    let mut app = app_with_epic_subtask();
-    app.update(refreshed(vec![chained(row(
-        1,
-        99,
-        DispatchRequestState::Provisioning,
-    ))]));
-
-    app.update(refreshed(vec![chained(failed(1, 99, "task deleted"))]));
-
-    assert!(!app.auto_dispatch_failed(TaskId(99)));
-}
-
-/// The restart case the row exists for: the board that started the chain is
-/// gone, and the restarting board's own startup fails the row ("host
-/// restarted") AFTER its first delivery — so the chain's failure is still
-/// reported.
-#[test]
-fn a_chained_row_failed_by_this_boards_restart_is_reported() {
+fn a_failed_old_epic_chain_row_raises_only_the_popup() {
     let mut subtask = make_task(5, TaskStatus::Running);
     subtask.worktree = None;
     subtask.tmux_window = None;
     subtask.epic_id = Some(EpicId(7));
     let mut app = App::new(vec![subtask]);
     app.set_local_host_id(HOST.to_string());
-    // First delivery: the row the dead board left provisioning.
-    app.update(refreshed(vec![chained(row(
+    app.update(refreshed(vec![old_chain_row(row(
         1,
         5,
         DispatchRequestState::Provisioning,
     ))]));
 
-    app.update(refreshed(vec![chained(failed(1, 5, "host restarted"))]));
+    let cmds = app.update(refreshed(vec![old_chain_row(failed(
+        1,
+        5,
+        "host restarted",
+    ))]));
 
-    assert!(app.auto_dispatch_failed(TaskId(5)));
+    assert!(cmds.is_empty(), "{cmds:?}");
+    assert!(app.status.error_popup.is_some());
 }

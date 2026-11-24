@@ -263,8 +263,7 @@ fn epic_action_hints_labels_space_as_enter() {
     );
 }
 
-/// `U` requires `current_epic_id()`, i.e. `ViewMode::Epic` — on a board epic card
-/// it is a dead key, so the footer must not advertise it.
+/// `U` is bound to nothing, so the footer must not advertise it.
 #[test]
 fn epic_action_hints_omits_auto_dispatch() {
     let epic = make_epic(1);

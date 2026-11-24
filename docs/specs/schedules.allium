@@ -7,7 +7,7 @@
 -- Includes: The schedule fields on Task and how they are set and cleared;
 --           when a task is due; which board fires it; what a fire, a
 --           successful launch and a failed launch do to the schedule; how a
---           phoenix successor inherits it; the epic chain passing over a
+--           phoenix successor inherits it; the orchestrator passing over a
 --           waiting task.
 -- Excludes: How the agent turns "every week" into a cron string (the agent's
 --           own judgement; the tool only takes the cron string); the dispatch
@@ -49,8 +49,8 @@
 --   - S7, a failed scheduled launch is marked, not retried. The task stays in
 --     backlog with the failure reason. A one-off stops there; a phoenix task
 --     moves on to its next due time.
---   - S8, the epic chain passes over a task still waiting for its time
---     (epics.allium: AutoDispatchNextSubtask).
+--   - S8, the orchestrator may start a task before its time, as a person
+--     may (orchestrators.allium: SameRulesAsAPerson).
 --   - S9, the TUI shows a schedule and never edits it. Setting and clearing
 --     are MCP-only (task_create and task_update's `schedule` argument).
 
@@ -361,8 +361,7 @@ rule ScheduledLaunchFails {
 -- Two rules owned elsewhere carry the rest of this spec, written into them
 -- rather than restated here:
 --   - store-split.allium: RequestDispatch refuses a schedule-origin request
---     for a task that is not due by the store's clock, and refuses the epic
---     chain a task whose due time is still ahead (S8).
+--     for a task that is not due by the store's clock.
 --   - tasks.allium: PhoenixRespawn gives the successor the predecessor's
 --     schedule and a next_due computed from the moment of the respawn (S4,
 --     S5). So "0 9 * * 1" on a run that finishes Wednesday next fires the

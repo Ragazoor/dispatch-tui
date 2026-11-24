@@ -48,11 +48,11 @@ fn dispatch_to_running(store: &Store, task_id: i64) {
 /// An epic with one running task per entry of `statuses` ("running" or
 /// "review"), each with a worktree, a window and `HOST_A`. Both hosts are
 /// alice's. Returns the epic and the task ids.
-fn wrappable(auto_dispatch: bool, statuses: &[&str]) -> (Store, i64, Vec<i64>) {
+fn wrappable(statuses: &[&str]) -> (Store, i64, Vec<i64>) {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
     store.register_host_for(HOST_B, "alice");
-    let epic = store.create_epic("alice", "E", auto_dispatch);
+    let epic = store.create_epic("alice", "E");
     let ids = statuses
         .iter()
         .map(|status| {
@@ -121,7 +121,7 @@ fn task_count(store: &Store) -> usize {
 /// the epic rolled up, and ONE close row with its timer; no token is touched.
 #[test]
 fn close_task_applies_the_done_close_and_writes_a_close_row() {
-    let (store, epic, ids) = wrappable(false, &["running"]);
+    let (store, epic, ids) = wrappable(&["running"]);
     let id = ids[0];
     patch(
         &store,
@@ -161,7 +161,7 @@ fn close_task_applies_the_done_close_and_writes_a_close_row() {
 /// and the timer goes.
 #[test]
 fn a_close_row_is_claimed_and_reported_like_a_teardown() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     close(&store, id, HOST_A).expect("close_task");
     let row = session_row(&store, id, SESSION_KIND_CLOSE);
@@ -188,7 +188,7 @@ fn a_close_row_is_claimed_and_reported_like_a_teardown() {
 /// No window and no pr url: nothing for a host to do, so no row.
 #[test]
 fn close_task_without_host_work_writes_no_row() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     patch(
         &store,
@@ -208,7 +208,7 @@ fn close_task_without_host_work_writes_no_row() {
 /// A pr-typed url alone is host work, on the caller's host when the task has none.
 #[test]
 fn close_task_with_a_pr_url_and_no_host_writes_a_row_on_the_argument_host() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     patch(
         &store,
@@ -242,7 +242,7 @@ fn hand_to_their_host(store: &Store, id: i64) {
 /// D11: a teammate's host is not the caller's to tear down. The task still closes.
 #[test]
 fn close_task_on_a_teammates_host_closes_without_a_row() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     store.register_host_for("their-host", "bob");
     hand_to_their_host(&store, id);
@@ -257,7 +257,7 @@ fn close_task_on_a_teammates_host_closes_without_a_row() {
 /// timer cancelled, and the close row written after.
 #[test]
 fn close_task_fails_the_open_session_request() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     store
         .call("alice", |ctx| {
@@ -287,7 +287,7 @@ fn close_task_fails_the_open_session_request() {
 /// An earlier close still open is failed by a re-close, so at most one is open.
 #[test]
 fn a_reclose_fails_the_earlier_open_close_row_and_keeps_completed_at() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     close(&store, id, HOST_A).expect("close_task");
     let first = session_row(&store, id, SESSION_KIND_CLOSE).id;
@@ -323,27 +323,9 @@ fn a_reclose_fails_the_earlier_open_close_row_and_keeps_completed_at() {
     assert_eq!(open, 1);
 }
 
-/// No token and no chain: an auto-dispatch epic's backlog subtask is not requested.
-#[test]
-fn close_task_runs_no_epic_chain() {
-    let (store, epic, ids) = wrappable(true, &["running"]);
-    let next = store.create("alice", epic_task("next", epic, "backlog"));
-
-    close(&store, ids[0], HOST_A).expect("close_task");
-
-    let chained = store
-        .db()
-        .dispatch_requests()
-        .iter()
-        .filter(|r| r.task_id == next)
-        .count();
-    assert_eq!(chained, 0);
-    assert_eq!(store.task(next).status, "backlog");
-}
-
 #[test]
 fn close_task_of_a_missing_task_is_refused() {
-    let (store, _, _) = wrappable(false, &["running"]);
+    let (store, _, _) = wrappable(&["running"]);
     assert!(close(&store, 99, HOST_A).is_err());
     assert_eq!(session_count(&store), 0);
 }
@@ -352,7 +334,7 @@ fn close_task_of_a_missing_task_is_refused() {
 /// done -> done re-close does not respawn again.
 #[test]
 fn close_task_respawns_a_phoenix_task_once() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     patch(
         &store,
@@ -376,7 +358,7 @@ fn close_task_respawns_a_phoenix_task_once() {
 /// X2: a patch out of running clears stop_pending, unless it names the field.
 #[test]
 fn patch_task_leaving_running_clears_stop_pending() {
-    let (store, _, ids) = wrappable(false, &["running", "running"]);
+    let (store, _, ids) = wrappable(&["running", "running"]);
     for id in &ids {
         patch(
             &store,
@@ -409,7 +391,7 @@ fn patch_task_leaving_running_clears_stop_pending() {
 /// same transaction; a feed-owned task and a patch that stays done do not.
 #[test]
 fn patch_task_into_done_respawns_a_phoenix_task() {
-    let (store, _, ids) = wrappable(false, &["running", "running"]);
+    let (store, _, ids) = wrappable(&["running", "running"]);
     let (first, feed_owned) = (ids[0], ids[1]);
     for id in &ids {
         patch(
@@ -480,7 +462,7 @@ fn pr_patch() -> TaskPatch {
 /// ONE close row with no window, so the host runs only `gh pr close`.
 #[test]
 fn update_task_into_done_with_a_pr_url_writes_a_windowless_close_row() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     patch(&store, id, pr_patch()).expect("attach the pr");
     patch(
@@ -503,7 +485,7 @@ fn update_task_into_done_with_a_pr_url_writes_a_windowless_close_row() {
 /// A pr-typed url set in the same call as Done is the final url, so it counts.
 #[test]
 fn update_task_attaching_a_pr_url_and_moving_to_done_writes_a_close_row() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     let both = TaskPatch {
         status: Some("done".into()),
@@ -517,7 +499,7 @@ fn update_task_attaching_a_pr_url_and_moving_to_done_writes_a_close_row() {
 /// no transition.
 #[test]
 fn update_task_writes_no_close_row_without_a_transition_or_a_pr_url() {
-    let (store, _, ids) = wrappable(false, &["review", "review", "review"]);
+    let (store, _, ids) = wrappable(&["review", "review", "review"]);
     // The board kills and clears the window it holds as it moves to Done; a
     // window left in the store is HandMoveReleasesAWindowTheBoardDidNotSee's.
     let done_clearing_window = || TaskPatch {
@@ -542,7 +524,7 @@ fn update_task_writes_no_close_row_without_a_transition_or_a_pr_url() {
 /// D11: a teammate's host is not the caller's to act for; the task still goes Done.
 #[test]
 fn update_task_into_done_on_a_teammates_host_writes_no_row() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     store.register_host_for("their-host", "bob");
     patch(&store, id, pr_patch()).expect("pr patch");
@@ -559,7 +541,7 @@ fn update_task_into_done_on_a_teammates_host_writes_no_row() {
 /// clears the window itself and writes a close row naming it.
 #[test]
 fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
 
     update_to(&store, id, status_patch("backlog")).expect("update_task");
@@ -575,7 +557,7 @@ fn a_hand_move_to_backlog_releases_a_window_the_patch_did_not_name() {
 
 #[test]
 fn a_hand_move_to_done_through_patch_task_releases_the_window_too() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
 
     patch(&store, id, status_patch("done")).expect("patch_task");
@@ -591,7 +573,7 @@ fn a_hand_move_to_done_through_patch_task_releases_the_window_too() {
 /// the store has nothing left to release and writes no row.
 #[test]
 fn a_move_that_already_clears_the_window_writes_no_row() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
 
     let moved = TaskPatch {
@@ -606,7 +588,7 @@ fn a_move_that_already_clears_the_window_writes_no_row() {
 /// A move to review keeps the session, so it keeps the window.
 #[test]
 fn a_move_to_review_keeps_the_window() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
 
     update_to(&store, id, status_patch("review")).expect("update_task");
@@ -619,7 +601,7 @@ fn a_move_to_review_keeps_the_window() {
 /// as every close row does, so at most one session request is open.
 #[test]
 fn a_released_window_fails_the_open_session_request() {
-    let (store, _, ids) = wrappable(false, &["running"]);
+    let (store, _, ids) = wrappable(&["running"]);
     let id = ids[0];
     store
         .call("alice", |ctx| {
@@ -642,7 +624,7 @@ fn a_released_window_fails_the_open_session_request() {
 /// so it stands in for `UpdateTaskDoneWritesACloseRow`'s windowless row.
 #[test]
 fn update_task_into_done_releasing_a_window_writes_one_close_row() {
-    let (store, _, ids) = wrappable(false, &["review"]);
+    let (store, _, ids) = wrappable(&["review"]);
     let id = ids[0];
     patch(&store, id, pr_patch()).expect("attach the pr");
 

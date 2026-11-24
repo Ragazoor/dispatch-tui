@@ -38,7 +38,7 @@ fn the_store_refuses_a_user_board_task_with_no_owner() {
 #[test]
 fn an_epics_status_is_derived_from_every_hosts_children() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Shared", false);
+    let epic = store.create_epic("alice", "Shared");
     let a = store.create("alice", epic_task("finished on host-a", epic, "done"));
     let b = store.create("bob", epic_task("still going on host-b", epic, "running"));
     assert_ne!(a, b);
@@ -100,7 +100,7 @@ fn deleting_an_undone_task_is_refused_at_the_reducer() {
 #[test]
 fn deleting_the_last_unfinished_child_lets_the_epic_finish() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let done = store.create("alice", epic_task("done", epic, "done"));
     store.create("alice", epic_task("open", epic, "backlog"));
     assert_eq!(store.epic(epic).status, "backlog");
@@ -136,7 +136,7 @@ fn moving_a_task_into_an_epic_that_does_not_exist_is_refused() {
 #[test]
 fn moving_a_task_that_does_not_exist_is_refused() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Shared", false);
+    let epic = store.create_epic("alice", "Shared");
     let why = store
         .call("alice", |ctx| set_task_epic(ctx, 404, epic, String::new()))
         .expect_err("the caller learns the task is gone");
@@ -190,7 +190,7 @@ fn usage_event(action: &str) -> UsageEvent {
 #[test]
 fn finishing_an_epic_stamps_a_completion_and_reopening_keeps_it() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("t", epic, "running"));
     assert_eq!(store.epic(epic).completed_at, "");
 
@@ -216,7 +216,7 @@ fn finishing_an_epic_stamps_a_completion_and_reopening_keeps_it() {
 #[test]
 fn two_hosts_patching_different_fields_of_one_task_converge() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("original", epic, "backlog"));
 
     let rename = TaskPatch {
@@ -325,7 +325,7 @@ fn pruning_drops_the_oldest_rows_beyond_the_cap() {
 #[test]
 fn update_task_relinks_and_patches_in_one_call() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Shared", false);
+    let epic = store.create_epic("alice", "Shared");
     let id = store.create("alice", user_task("t", "alice"));
     let patch = TaskPatch {
         title: Some("renamed".into()),
@@ -344,7 +344,7 @@ fn update_task_relinks_and_patches_in_one_call() {
 #[test]
 fn update_task_with_an_illegal_patch_leaves_the_relink_undone() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Shared", false);
+    let epic = store.create_epic("alice", "Shared");
     let id = store.create("alice", user_task("t", "alice"));
     // Backlog allows only `none`; `repo_path` makes the call relink first.
     let patch = TaskPatch {
@@ -447,7 +447,7 @@ fn set_epic(store: &Store, id: i64, patch: EpicPatch) {
 #[test]
 fn a_manual_move_into_done_with_an_unfinished_child_stays_done() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.create("alice", epic_task("open", epic, "running"));
 
     set_epic(&store, epic, epic_status_patch("done"));
@@ -457,7 +457,7 @@ fn a_manual_move_into_done_with_an_unfinished_child_stays_done() {
 #[test]
 fn a_done_epic_moved_back_with_every_child_done_stays_where_it_was_put() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.create("alice", epic_task("finished", epic, "done"));
     assert_eq!(store.epic(epic).status, "done");
     let finished_at = store.epic(epic).completed_at;
@@ -472,7 +472,7 @@ fn a_done_epic_moved_back_with_every_child_done_stays_where_it_was_put() {
 #[test]
 fn renaming_an_epic_keeps_its_manual_placement() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.create("alice", epic_task("open", epic, "running"));
     set_epic(&store, epic, epic_status_patch("done"));
 
@@ -490,7 +490,7 @@ fn renaming_an_epic_keeps_its_manual_placement() {
 #[test]
 fn a_sub_epics_status_move_still_recalculates_its_parent() {
     let store = Store::new();
-    let parent = store.create_epic("alice", "P", false);
+    let parent = store.create_epic("alice", "P");
     let sub = store.create_sub_epic("alice", parent);
     assert_eq!(store.epic(parent).status, "backlog");
 
@@ -501,13 +501,13 @@ fn a_sub_epics_status_move_still_recalculates_its_parent() {
 #[test]
 fn reparenting_an_epic_recalculates_both_parents() {
     let store = Store::new();
-    let from = store.create_epic("alice", "From", false);
+    let from = store.create_epic("alice", "From");
     store.create("alice", epic_task("done in from", from, "done"));
     let moved = store.create_sub_epic("alice", from);
     set_epic(&store, moved, epic_status_patch("running"));
     assert_eq!(store.epic(from).status, "backlog");
 
-    let to = store.create_epic("alice", "To", false);
+    let to = store.create_epic("alice", "To");
     store.create("alice", epic_task("done in to", to, "done"));
     assert_eq!(store.epic(to).status, "done");
 
@@ -538,7 +538,7 @@ fn update_epic_on_a_missing_epic_is_refused() {
 #[test]
 fn update_epic_with_a_refused_part_leaves_the_title_unchanged() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Before", false);
+    let epic = store.create_epic("alice", "Before");
     let why = store
         .call("alice", |ctx| {
             update_epic(

@@ -1001,8 +1001,7 @@ Pass command=null to clear it.",
     async destructive "session_exit" => tasks::handle_exit_session,
         "Close your agent session with the token session_wrap-up returned. Applies the terminal mutation \
 atomically with clearing the tmux window: 'rebase'/'done' move the task to Done; 'pr' moves it to \
-Review and sets the PR url. The action must match the one passed to session_wrap-up. If the task belongs \
-to an epic with auto_dispatch enabled, closing it also starts that epic's next backlog subtask.",
+Review and sets the PR url. The action must match the one passed to session_wrap-up.",
         {
             "type": "object",
             "properties": {

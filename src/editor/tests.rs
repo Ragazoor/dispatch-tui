@@ -56,7 +56,6 @@ fn make_epic(title: &str, description: &str) -> Epic {
     EpicBuilder::new(1)
         .title(title)
         .description(description)
-        .auto_dispatch(true)
         .build()
 }
 

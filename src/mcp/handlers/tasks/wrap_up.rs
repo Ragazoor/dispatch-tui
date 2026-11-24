@@ -221,57 +221,27 @@ pub(crate) async fn handle_wrap_up(
     }
 }
 
-/// The accepted close's response: "Session closed.", or, when the epic chain
-/// requested a subtask in the same transaction (the exit_session row's
-/// `chained_task`), the one it names.
-async fn session_closed(
-    state: &McpState,
-    id: Option<Value>,
-    task: &Task,
-    request: SessionRequestId,
-) -> JsonRpcResponse {
+/// The accepted close's response.
+fn session_closed(state: &McpState, id: Option<Value>, task: &Task) -> JsonRpcResponse {
     state.notify_task_changed(task.id);
     if let Some(epic_id) = task.epic_id {
         state.notify_epic_changed(epic_id);
     }
-    let chained = match state
-        .db
-        .session_request(request)
-        .await
-        .and_then(|r| r.chained_task)
-    {
-        Some(next) => {
-            state.notify_task_changed(next);
-            Some(super::super::types::task_ref(state, next).await)
-        }
-        None => None,
-    };
-    let text = match chained {
-        Some(next) => format!("Session closed. Dispatching next epic subtask {next}."),
-        None => "Session closed.".to_string(),
-    };
-    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": "Session closed."}]}),
+    )
 }
 
 /// A call that got no answer from the store may or may not have landed. The
 /// rows settle it: an exit_session row that consumed this token means the close
 /// took effect.
-async fn settled_request(
-    state: &McpState,
-    task_id: TaskId,
-    token: SessionRequestId,
-) -> Option<SessionRequestId> {
-    state
-        .db
-        .session_requests()
-        .await
-        .into_iter()
-        .find(|r| {
-            r.kind == SessionRequestKind::ExitSession
-                && r.task_id == task_id
-                && r.wrap_up_request == Some(token)
-        })
-        .map(|r| r.id)
+async fn settled_request(state: &McpState, task_id: TaskId, token: SessionRequestId) -> bool {
+    state.db.session_requests().await.into_iter().any(|r| {
+        r.kind == SessionRequestKind::ExitSession
+            && r.task_id == task_id
+            && r.wrap_up_request == Some(token)
+    })
 }
 
 pub(crate) async fn handle_exit_session(
@@ -315,25 +285,21 @@ pub(crate) async fn handle_exit_session(
         // The module applied the close, consumed the token and wrote the
         // teardown row. The answer does NOT wait for the teardown: it kills this
         // agent's own window, so a reply that waited would never be read.
-        Ok(SessionRequestAnswer::Requested(request)) => {
-            session_closed(state, id, &task, request).await
-        }
+        Ok(SessionRequestAnswer::Requested(_)) => session_closed(state, id, &task),
         Ok(SessionRequestAnswer::Refused(why)) => JsonRpcResponse::err(id, INVALID_PARAMS, why),
-        Err(e) => match settled_request(state, task_id, token).await {
-            Some(request) => session_closed(state, id, &task, request).await,
-            None => {
-                tracing::warn!(task_id = task_id.0, "exit_session got no answer: {e}");
-                JsonRpcResponse::err(
-                    id,
-                    INTERNAL_ERROR,
-                    format!(
-                        "exit_session got no answer from the shared store and the close did not \
-                         take effect: {} is unchanged, your tmux session is still alive and \
-                         the token is still valid — call session_exit again.",
-                        task.reference()
-                    ),
-                )
-            }
-        },
+        Err(_) if settled_request(state, task_id, token).await => session_closed(state, id, &task),
+        Err(e) => {
+            tracing::warn!(task_id = task_id.0, "exit_session got no answer: {e}");
+            JsonRpcResponse::err(
+                id,
+                INTERNAL_ERROR,
+                format!(
+                    "exit_session got no answer from the shared store and the close did not \
+                     take effect: {} is unchanged, your tmux session is still alive and the \
+                     token is still valid — call session_exit again.",
+                    task.reference()
+                ),
+            )
+        }
     }
 }

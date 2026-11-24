@@ -121,7 +121,7 @@
 --     -> dispatch, else the research tag -> research, else dispatch). quick
 --     is never derived: only quick dispatch names it, for its own prompt
 --     variant. The host reads the mode from the row and never re-derives it.
---     MCP, the epic chain and retry-fresh name no mode (dispatch.allium:
+--     MCP and retry-fresh name no mode (dispatch.allium:
 --     RetryFresh), so a retried research task stays research.
 --   - D4, the timeout. ONE deadline per request,
 --     config.dispatch_request_timeout from requested_at, whatever state the
@@ -149,11 +149,10 @@
 --   - D6, the callers. Every launch path that provisions writes a request
 --     row: the TUI dispatch keys, retry-fresh, research, quick dispatch
 --     (tasks.allium: CreateQuickTask creates the task, then requests), MCP
---     task_dispatch, the epic auto-dispatch chain (epics.allium:
---     AutoDispatchNextSubtask, which advances on a refused request and
---     reports AutoDispatchFailed from the row's outcome) and a board firing a
---     due scheduled task (schedules.allium: FireDueTask). task_dispatch writes
---     the request and waits up to 30 seconds for dispatched or failed; when
+--     task_dispatch (an epic orchestrator's start included:
+--     orchestrators.allium: OrchestratorStartsATask) and a board firing a
+--     due scheduled task (schedules.allium: FireDueTask). task_dispatch
+--     writes the request and waits up to 30 seconds for dispatched or failed; when
 --     the wait ends first it returns the request id and its state, and
 --     task_search shows the request state. The TUI's DispatchingFeedback follows
 --     the row.
@@ -170,11 +169,8 @@
 --     ProvisionDispatch).
 --   - D9, origin. The row records which launch path wrote it (user | mcp |
 --     epic_chain | quick | schedule; user covers the TUI keys, retry-fresh
---     and research; schedule is a board firing a due task). An epic_chain row
---     that fails raises AutoDispatchFailed from the row itself, on the
---     requesting host's board only (epics.allium:
---     ReportChainedDispatchFailure), so a board restart during the chain's
---     wait does not lose it.
+--     and research; schedule is a board firing a due task; epic_chain is
+--     history only, see DispatchRequestOrigin).
 --   - D10, snapshots. dispatch_request and its timer table are in-flight
 --     state and are not in any snapshot (spacetime-seed.allium:
 --     SharedTable); a restore loses request history, by decision.
@@ -210,11 +206,9 @@
 --     CreateTaskNeverAimsAnotherHostsTeardown).
 --   - D12, failures while no board ran. A request whose backstop fired while
 --     its host's board was closed is already failed in the starting board's
---     baseline, and the starting board does NOT raise it: neither
---     FailedRequestReported nor epics.allium's ReportChainedDispatchFailure
---     fires for it, epic_chain rows included, and a chain stalled that way
---     gets no ChainStallMarked. The failed card shows it: the task is back in
---     backlog and the row records the reason.
+--     baseline, and the starting board does NOT raise it:
+--     FailedRequestReported does not fire for it. The failed card shows it:
+--     the task is back in backlog and the row records the reason.
 --
 --   Session requests: wrap-up, exit-session and close (SessionRequest below):
 --   - W1, the row. One session_request row (accessor session_requests) per
@@ -225,10 +219,10 @@
 --     an origin or a worktree, and its failure releases no claim. Folding it
 --     in would leave half of every row's columns meaningless for its kind and
 --     make every dispatch reader filter by kind. wrap_up_request (the wrap_up
---     row an exit_session row consumed), tmux_window (the window to tear
---     down) and chained_task (the subtask the epic chain requested) carry
---     what the flow needs. An optional column is stored as "" for absent, as
---     in D1, and every timestamp comes from the module clock. A task holds at
+--     row an exit_session row consumed) and tmux_window (the window to tear
+--     down) carry what the flow needs. An optional column is stored as ""
+--     for absent, as in D1, and every timestamp comes from the module clock.
+--     A task holds at
 --     most one OPEN session request (requested or running) of any kind;
 --     finished rows stay as history until RequestRowsArePruned removes them.
 --   - W2, the session_wrap-up flow. The MCP handler first runs the
@@ -281,13 +275,6 @@
 --     fails before its host serves it (the backstop, the restart sweep, the
 --     task's deletion, a close that fails an earlier row) leaves the PR open:
 --     KillWindowOfFailedExitSession kills the window only. Accepted as built.
---   - W6, the epic chain. The module owns the epic chain's next
---     auto-dispatch: AutoDispatchNextSubtask's selection runs in
---     request_exit_session's transaction and writes a dispatch request with
---     origin epic_chain naming the same host (epics.allium:
---     AutoDispatchNextSubtask), only for a close that had a session_wrap-up behind
---     it. The exit_session row records the chained subtask for the response.
---     ReportChainedDispatchFailure stays on the requesting board.
 --   - W7, the timeouts. As D4: ONE deadline per row from requested_at,
 --     exposed on the row; THE HOST ENFORCES IT, and the module's timer is
 --     only a backstop. A wrap_up rebase row has
@@ -357,11 +344,11 @@
 --     re-close keeps the task's completed_at — clears stop_pending when the
 --     task leaves running, clears the window, rolls up the epic chain, and
 --     respawns a phoenix task that enters Done (tasks.allium:
---     PhoenixRespawn). It issues, checks and consumes NO exit token and runs
---     NO epic chain. It writes a session request of kind close ONLY when
---     there is host work (a live window or a pr-typed url) and the teardown
---     host is owned by the caller (D11); otherwise the task closes with no
---     row, because a window on a teammate's machine is not ours to kill. The
+--     PhoenixRespawn). It issues, checks and consumes NO exit token. It
+--     writes a session request of kind close ONLY when there is host work
+--     (a live window or a pr-typed url) and the teardown host is owned by
+--     the caller (D11); otherwise the task closes with no row, because a
+--     window on a teammate's machine is not ours to kill. The
 --     host serves a close row exactly as an exit_session teardown (W5).
 --     KillWindowOfFailedExitSession, the teardown timeout and its backstop,
 --     the restart sweep and the task-deletion failure apply to close rows as
@@ -475,9 +462,14 @@ enum DispatchRequestMode { dispatch | research | quick }
 enum DispatchRequestState { requested | provisioning | dispatched | failed }
 
 -- Which launch path wrote the request (D9). user is the TUI keys, including
--- retry-fresh and research; mcp is task_dispatch; epic_chain is
--- epics.allium's AutoDispatchNextSubtask; quick is quick dispatch; schedule
--- is a board firing a due task (schedules.allium: FireDueTask).
+-- retry-fresh and research; mcp is task_dispatch; quick is quick dispatch;
+-- schedule is a board firing a due task (schedules.allium: FireDueTask).
+-- epic_chain is history only: only rows written before the chain was
+-- removed carry it. The store refuses a new request with it
+-- (RequestDispatch); the board reads such a row and serves an open one like
+-- any other request; nothing reports a chain failure. Decided by the epic
+-- orchestrators epic's acting orchestrator while the operator was away;
+-- open to the operator's review.
 enum DispatchRequestOrigin { user | mcp | epic_chain | quick | schedule }
 
 ------------------------------------------------------------
@@ -579,11 +571,9 @@ entity SessionRequest {
     -- task, which the host tears down. Null on a wrap_up row, and on a close
     -- row for a task that had no window (written only for its PR url, X1).
     tmux_window: core/TmuxWindow?
-    -- On an exit_session row: the subtask the epic chain requested in the
-    -- same transaction (epics.allium: AutoDispatchNextSubtask), or null when
-    -- the chain stopped. Null on a wrap_up row and on a close row, which
-    -- runs no chain.
-    chained_task: core/Task?
+    -- The store also has a chained_task column. It is dead: an automigration
+    -- cannot drop a column, so it stays, always 0/null, and nothing writes
+    -- or reads it.
 
     transitions state {
         requested -> running
@@ -784,14 +774,8 @@ rule RequestDispatch {
     requires: not DispatchRequests.any(r => r.task = task and r.is_open)
     -- D11: only the requester's own owner may name it.
     requires: requester.owner != null and requester.owner = caller()
-    -- epics.allium: PhoenixIsNeverChained, enforced where the claim is: the
-    -- epic chain's request for a phoenix subtask is refused, with that
-    -- reason, like any other refused request. Any other origin may request
-    -- a phoenix task.
-    requires: not (origin = epic_chain and task.phoenix)
-    -- schedules.allium (S8): the epic chain passes over a subtask whose
-    -- scheduled time is still ahead. Any other origin may launch it early.
-    requires: not (origin = epic_chain and task.next_due != null and task.next_due > now)
+    -- epic_chain is history only (DispatchRequestOrigin).
+    requires: origin != epic_chain
     -- schedules.allium: FireDueTask, checked by the store's clock. A
     -- schedule-origin request is for a task that is due now: it guards a board
     -- whose clock runs ahead of the store's, and a board acting on a view
@@ -841,17 +825,16 @@ rule RequestDispatch {
         -- The request reducer. Every launch path that provisions reaches it
         -- (D6): dispatch.allium's DispatchTask and DispatchResearchTask (the
         -- TUI keys and retry-fresh), tasks.allium's CreateQuickTask,
-        -- mcp-task-tools.allium's DispatchTaskViaMcp and epics.allium's
-        -- AutoDispatchNextSubtask. Resume paths (ResumeTask, RetryResume)
-        -- reuse an existing worktree, take no claim and write no request.
+        -- and mcp-task-tools.allium's DispatchTaskViaMcp. Resume paths
+        -- (ResumeTask, RetryResume) reuse an existing worktree, take no claim
+        -- and write no request.
         -- requester is the calling client's host, as the store handle
         -- carries it; a client cannot name some other machine as the host.
         --
         -- A refusal is ORDINARY: it is how a caller learns that another entry
         -- point claimed the task first.
         -- The refusal names why (not backlog, owned by another machine, an
-        -- open request already exists, a phoenix task or a task still
-        -- waiting for its scheduled time the epic chain may not take, a
+        -- open request already exists, the history-only epic_chain origin, a
         -- schedule-origin request for a task that is not due, an epic at its
         -- limit), and nothing was written. The limit's refusal reads "epic
         -- <id> already runs <n> of <limit> tasks", naming the orchestrated
@@ -864,9 +847,7 @@ rule RequestDispatch {
         -- Of two requests for one task, from two machines or two entry
         -- points, one wins: the request is one transaction, and the first
         -- claim moves the task out of backlog and leaves an open request, so
-        -- the second is refused. The epic chain treats every refusal
-        -- alike and offers its next candidate (epics.allium:
-        -- AutoDispatchNextSubtask).
+        -- the second is refused.
         --
         -- The module also schedules the request's timer here (D4): one row
         -- in a SpacetimeDB schedule table, due at the request's deadline, and
@@ -1068,7 +1049,7 @@ rule HandMoveReleasesAWindowTheBoardDidNotSee {
         --
         -- THE ROW IS THE CLOSE ROW. Same kind, same host-side service
         -- (ExitSessionTeardown: the host kills the window it names), same
-        -- backstop timer; action stays done, so CloseRowsCarryNoTokenAndNoChain
+        -- backstop timer; action stays done, so CloseRowsCarryNoToken
         -- holds. A backlog move leaves the task not done, so the row's gh pr
         -- close step finds nothing to close; nor does a feed task's
         -- (pr-workflow.allium: ClosePrOnDone). An open session request on the
@@ -1511,7 +1492,7 @@ rule RequestExitSession {
             tmux_window: window
         )
         -- The close itself, in this same transaction: the terminal write,
-        -- the epic rollup, the phoenix respawn and the epic chain
+        -- the epic rollup and the phoenix respawn
         -- (pr-workflow.allium: ExitSession).
         SessionCloseAccepted(task: task, action: action, pr_url: recorded_pr_url, close: close)
 
@@ -1697,7 +1678,7 @@ rule RequestRowsArePruned {
                 not exists request
 
     @guidance
-        -- Emitted by RequestDispatch (the epic chain's request included) and
+        -- Emitted by RequestDispatch and
         -- RequestWrapUp, before the new row is written: the tables only grow
         -- by a write, so pruning on that write bounds them with no schedule
         -- of their own to keep alive. It sweeps the dispatch_requests and
@@ -2026,10 +2007,8 @@ rule RequestCloseTask {
         -- the close took effect whole or not at all, and the board never
         -- guards a teardown against a close that did not land.
         --
-        -- NO TOKEN AND NO CHAIN. No exit token is issued, checked or
-        -- consumed, and SessionClosed is not emitted, so the epic chain
-        -- (epics.allium: AutoDispatchNextSubtask) does not run: only a close
-        -- with a session_wrap-up behind it chains (EveryExitSessionHadAWrapUp).
+        -- NO TOKEN. No exit token is issued, checked or consumed
+        -- (EveryExitSessionHadAWrapUp holds for exit_session rows only).
         --
         -- THE PHOENIX RESPAWN. A task that ENTERS Done here respawns, in this
         -- transaction (tasks.allium: PhoenixRespawn, on its usual terms). A
@@ -2278,7 +2257,7 @@ invariant AnExitTokenIsConsumedOnce {
 -- W4: every exit_session row consumed a done wrap_up row of its own task, so
 -- every close through session_exit had a session_wrap-up behind it. It applies to
 -- exit_session rows ONLY (X1): a close row is a close with no session_wrap-up behind
--- it, by design, and CloseRowsCarryNoTokenAndNoChain below states what it
+-- it, by design, and CloseRowsCarryNoToken below states what it
 -- carries instead.
 invariant EveryExitSessionHadAWrapUp {
     for r in SessionRequests:
@@ -2304,14 +2283,12 @@ invariant OneRequestedRefreshRequestPerEpic {
                 implies not (a.state = requested and b.state = requested)
 }
 
--- X1: a close row consumed no token and ran no chain, and its action is
--- always done.
-invariant CloseRowsCarryNoTokenAndNoChain {
+-- X1: a close row consumed no token, and its action is always done.
+invariant CloseRowsCarryNoToken {
     for r in SessionRequests:
         r.kind = close implies (
             r.action = done
             and r.wrap_up_request = null
-            and r.chained_task = null
             and r.pr_url = null)
 }
 
@@ -2370,7 +2347,7 @@ invariant CloseRowsCarryNoTokenAndNoChain {
 
 -- The module's request-row reducers. Any store client may call them; each
 -- rule above decides from caller() whether the call stands (D11, W11). The
--- writers are the board's launch paths, the MCP tools and the epic chain
+-- writers are the board's launch paths and the MCP tools
 -- (request_dispatch, request_wrap_up, request_exit_session, close_task,
 -- request_feed_refresh); the reporters are the host whose board the row
 -- names (claim_*, report_*). Rules in other specs that raise one of these
@@ -2413,8 +2390,6 @@ surface StoreWriteReducers {
 ------------------------------------------------------------
 
 open question "Teardown window left alive by a task delete: DeletingATaskDeletesItsRequestRows removes an exit_session or close row in the same transaction that fails it, so a host whose teardown had not yet run sees the row vanish rather than fail, KillWindowOfFailedExitSession never fires, and the delete's own teardown has no window to kill (the close already cleared it from the task). Should a host also kill the window of a teardown row it saw open and then sees removed, should the delete keep an open teardown row until its host has acted on it, or is a surviving window acceptable in this narrow case (a task deleted within the teardown's budget of its close)?"
-
-open question "A close failing a chained dispatch: CloseFailsOpenRequests fails an open epic_chain dispatch request 'task closed', and epics.allium's ReportChainedDispatchFailure raises an auto-dispatch failure for every failed epic_chain row whose task still exists, so closing a subtask while its chained dispatch provisions shows the operator a chain failure for a close someone chose. Should ReportChainedDispatchFailure skip the 'task closed' reason, as it skips a deleted task?"
 
 open question "Window left alive (W5, W7, W8): an exit_session or close row the backstop fails because its board was closed or hung, or one the restart sweep fails, may leave the agent's tmux window alive on a task that is already Done or Review. The starting board kills the window of a row its own sweep failed (a row failed by deletion is removed with it, a separate open question above). Should a starting board also kill the windows of teardown rows that failed 'timed out' while it was not running (W8 otherwise treats them as history, as D12 does), or is a surviving window acceptable?"
 

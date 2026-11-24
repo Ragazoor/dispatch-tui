@@ -629,25 +629,6 @@ async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
 }
 
 #[tokio::test]
-async fn patch_epic_auto_dispatch_persists() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "desc", None).await.unwrap();
-    assert!(!epic.auto_dispatch); // default false
-
-    db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false))
-        .await
-        .unwrap();
-    let updated = db.get_epic(epic.id).await.unwrap();
-    assert!(!updated.auto_dispatch);
-
-    db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(true))
-        .await
-        .unwrap();
-    let re_enabled = db.get_epic(epic.id).await.unwrap();
-    assert!(re_enabled.auto_dispatch);
-}
-
-#[tokio::test]
 async fn patch_epic_feed_append_only_defaults_false() {
     let db = Store::open_in_memory().unwrap();
     let epic = db.create_epic("Test", "", None).await.unwrap();
@@ -822,20 +803,12 @@ async fn epic_patch_each_setter_marks_has_changes() {
     assert!(EpicPatch::new().plan_path(None).has_changes());
     assert!(EpicPatch::new().sort_order(Some(1)).has_changes());
     assert!(EpicPatch::new().sort_order(None).has_changes());
-    assert!(EpicPatch::new().auto_dispatch(true).has_changes());
     assert!(EpicPatch::new().group_by_repo(true).has_changes());
     assert!(EpicPatch::new().feed_append_only(true).has_changes());
     assert!(EpicPatch::new().feed_command(Some("cmd")).has_changes());
     assert!(EpicPatch::new().feed_command(None).has_changes());
     assert!(EpicPatch::new().feed_interval_secs(Some(60)).has_changes());
     assert!(EpicPatch::new().feed_interval_secs(None).has_changes());
-}
-
-#[tokio::test]
-async fn row_to_epic_auto_dispatch_defaults_to_false() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "D", None).await.unwrap();
-    assert!(!epic.auto_dispatch, "auto_dispatch should default to false");
 }
 
 // ---------------------------------------------------------------------------

@@ -166,6 +166,9 @@ pub struct Epic {
     pub sort_order: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
+    /// Dead: nothing writes or reads it. It backed the epic chain, which an
+    /// orchestrator replaced (`orchestrators.allium`, O8). A new row writes
+    /// `false`. It stays because an automigration cannot drop a column.
     pub auto_dispatch: bool,
     /// Indexed, for the same walk `Task::epic_id` serves: the sub-epic half of
     /// "which children does this epic have?".

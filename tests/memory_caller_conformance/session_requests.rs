@@ -4,8 +4,7 @@ use super::*;
 /// it). The in-memory caller serves wrap-up and exit-session requests the way
 /// the real module does: the request and its refusals, the claim that clears a
 /// Conflict, both reports with the module setting the conflict, the token
-/// check, the close (terminal write, epic rollup) and the epic chain in one
-/// transaction, the restart rule and the task-delete rule — on the same
+/// check and the close (terminal write, epic rollup) in one transaction, the restart rule and the task-delete rule — on the same
 /// calls, with the same outcome on both sides.
 ///
 /// The module's scheduled backstop (`expire_session_request`) is not driven
@@ -40,8 +39,8 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
         let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
             .with_sender(accepted.identity.clone())
             .with_identity_rules();
-        // sync.allium: SubscribeToThisHostsSessionRequests — and the dispatch
-        // requests the chain writes, which the same host asks for.
+        // sync.allium: SubscribeToThisHostsSessionRequests, and this host's
+        // dispatch requests.
         connector
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
@@ -200,6 +199,8 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
 
         // -- A rebase: request, claim, conflict ----------------------------------
         let epic = {
+            // The dead auto_dispatch column set, as an old store may hold
+            // it: the close starts no next subtask on either side.
             let row = bindings::Epic {
                 created_by: identity.clone(),
                 auto_dispatch: true,
@@ -366,7 +367,7 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
         );
         same_task(task);
 
-        // -- The close, the token and the chain in one transaction ---------------------
+        // -- The close and the token in one transaction -------------------------------
         let r_exit = applied_id(
             real.request_exit_session(task, r_wrap, "rebase".into(), String::new())
                 .await
@@ -381,14 +382,13 @@ fn memory_caller_serves_session_requests_like_the_real_module() {
             .task(task)
             .is_some_and(|t| t.status == TaskStatus::Done));
         wait_for!(rows_real.session_request(r_exit).is_some());
-        wait_for!(rows_real
-            .task(next)
-            .is_some_and(|t| t.status == TaskStatus::Running));
         same_session(r_exit, m_exit);
         same_task(task);
         same_task(next);
-        assert!(rows_real.session_request(r_exit).unwrap().chained_task == Some(next));
-        assert!(rows_mem.session_request(m_exit).unwrap().chained_task == Some(next));
+        assert_eq!(
+            rows_real.task(next).map(|t| t.status),
+            Some(TaskStatus::Backlog)
+        );
         assert_eq!(
             rows_real.epic(epic).map(|e| epic_shape(&e)),
             rows_mem.epic(epic).map(|e| epic_shape(&e)),

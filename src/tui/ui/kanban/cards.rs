@@ -42,8 +42,8 @@ fn format_task_title(task: &Task, max_title: usize) -> String {
 /// `Unprovisioned` sits directly below it because every indicator beneath
 /// describes a state that presupposes a worktree. It is also gated on
 /// [`App::dispatch_may_be_in_flight`], because `Dispatching` membership only
-/// spans the claims this TUI made: the epic chain claims inside the MCP close
-/// path and a board restart empties the set, so the freshness gate covers the
+/// spans the claims this TUI made: an MCP or orchestrator start claims off
+/// the board and a board restart empties the set, so the freshness gate covers the
 /// dispatches `SpansTheClaim` cannot. See `UnprovisionedIndicator` in
 /// `docs/specs/dispatch.allium`.
 #[derive(Debug)]
@@ -53,7 +53,6 @@ enum CardIndicator {
         spinner_frame: u8,
     },
     Unprovisioned,
-    AutoDispatchFailed,
     Conflict,
     DetachedReview {
         pr_label: String,
@@ -150,14 +149,6 @@ fn classify_card_indicator(
     // watchdog window.
     if task.is_unprovisioned() && !app.dispatch_may_be_in_flight(task, now) {
         return CardIndicator::Unprovisioned;
-    }
-    // A subtask an epic chain claimed and then failed to provision. It sits in
-    // backlog looking exactly like one that was never dispatched, so without
-    // this the stalled epic is invisible (AutoDispatchFailureIndicator in
-    // docs/specs/epics.allium). Below the dispatching check on purpose: a retry
-    // in flight outranks the failure it is resolving.
-    if app.auto_dispatch_failed(task.id) {
-        return CardIndicator::AutoDispatchFailed;
     }
     if task.sub_status == SubStatus::Conflict {
         return CardIndicator::Conflict;
@@ -259,7 +250,6 @@ fn classify_card_indicator(
 fn state_border_color(indicator: &CardIndicator) -> Option<Color> {
     match indicator {
         CardIndicator::Unprovisioned
-        | CardIndicator::AutoDispatchFailed
         | CardIndicator::Conflict
         | CardIndicator::Crashed
         | CardIndicator::RespawnFailed
@@ -320,7 +310,6 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
             (format!("{glyph} dispatching\u{2026}"), YELLOW)
         }
         CardIndicator::Unprovisioned => ("\u{26a0} no worktree".to_string(), RED),
-        CardIndicator::AutoDispatchFailed => ("\u{26a0} auto-dispatch failed".to_string(), RED),
         CardIndicator::Conflict => ("\u{26a0} rebase conflict".to_string(), RED),
         CardIndicator::DetachedReview { pr_label } => (format!("\u{25cb} {pr_label}"), CYAN),
         CardIndicator::Detached => ("\u{25cb} detached".to_string(), MUTED),

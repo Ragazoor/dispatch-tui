@@ -12,7 +12,7 @@ use spacetimedb::Table;
 #[test]
 fn an_illegal_sub_status_is_refused_at_the_reducer_with_the_old_wording() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "epic", false);
+    let epic = store.create_epic("alice", "epic");
     let id = store.create("alice", epic_task("task", epic, "backlog"));
 
     let bad = TaskPatch {
@@ -42,7 +42,7 @@ fn an_illegal_sub_status_is_refused_at_the_reducer_with_the_old_wording() {
 #[test]
 fn a_parent_cycle_is_refused_at_the_reducer() {
     let store = Store::new();
-    let a = store.create_epic("alice", "a", false);
+    let a = store.create_epic("alice", "a");
     let b = store
         .call("alice", |ctx| {
             create_epic(
@@ -618,8 +618,8 @@ fn a_later_connection_does_not_reset_again() {
 #[test]
 fn reparenting_onto_a_twin_of_its_role_is_refused() {
     let store = Store::new();
-    let first_parent = store.create_epic("alice", "one", false);
-    let second_parent = store.create_epic("alice", "two", false);
+    let first_parent = store.create_epic("alice", "one");
+    let second_parent = store.create_epic("alice", "two");
     let mut roles = Vec::new();
     for parent in [first_parent, second_parent] {
         store

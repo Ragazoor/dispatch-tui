@@ -944,7 +944,7 @@ rule SplitAgentTreePaneOnAgentLaunch {
     -- Every agent window gets a companion pane the moment it is created, and
     -- only an agent window does. One rule covers every launch path because they
     -- all emit AgentLaunched: fresh dispatch, research dispatch, quick dispatch,
-    -- epic auto-dispatch, resume and retry-resume.
+    -- resume and retry-resume.
     when: dispatch/AgentLaunched(task, mode)
 
     requires: current_agent(task).tmux_window != null

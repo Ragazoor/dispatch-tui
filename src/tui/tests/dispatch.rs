@@ -11,11 +11,6 @@ use crate::tui::messages::{InputMessage, PrMessage, SystemMessage, TaskMessage};
 use crossterm::event::KeyCode;
 use std::time::{Duration, Instant};
 
-// ---------------------------------------------------------------------------
-// Auto-dispatch failure — SurfaceAutoDispatchFailure / AutoDispatchFailureIndicator
-// in docs/specs/epics.allium
-// ---------------------------------------------------------------------------
-
 /// A dispatch request row for task `task` on this (unnamed) host.
 fn request_row(
     id: i64,
@@ -49,7 +44,6 @@ fn requests_refreshed(rows: Vec<crate::models::DispatchRequest>) -> Message {
 }
 
 mod agent_health;
-mod auto_dispatch_failure;
 mod dispatch_lifecycle;
 mod in_flight;
 mod pr_polling;

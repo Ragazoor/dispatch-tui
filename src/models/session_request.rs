@@ -95,9 +95,6 @@ pub struct SessionRequest {
     /// On an exit_session or close row: the window the close cleared from the task,
     /// which the host tears down.
     pub tmux_window: Option<TmuxWindow>,
-    /// On an exit_session row: the subtask the epic chain requested in the
-    /// same transaction, if any, which `exit_session`'s response names.
-    pub chained_task: Option<TaskId>,
     /// `requested_at` plus the timeout of the row's kind, as the module stored
     /// it. The host enforces THIS value (`pr-workflow.allium: WrapUpRebase`,
     /// `ExitSessionTeardown`), never a copy of the config. `None` on a row

@@ -403,7 +403,7 @@ macro_rules! task_service_api {
             ) -> Result<$crate::store::SessionRequestAnswer, $crate::service::ServiceError>;
 
             /// `store-split.allium: RequestExitSession`: the token check, the
-            /// close, the epic chain and the exit_session row in one module
+            /// close and the exit_session row in one module
             /// transaction — whole or absent, the token valid after a refusal.
             /// Tears nothing down.
             async fn request_exit_session(

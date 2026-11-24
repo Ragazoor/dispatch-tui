@@ -93,8 +93,8 @@ fn repo_filter_hides_non_matching_tasks() {
 fn repo_filter_applies_to_epics_in_column_items() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![
-        EpicBuilder::new(1).title("A").auto_dispatch(true).build(),
-        EpicBuilder::new(2).title("B").auto_dispatch(true).build(),
+        EpicBuilder::new(1).title("A").build(),
+        EpicBuilder::new(2).title("B").build(),
     ];
     // Epic A has a task in /repo-a; epic B has a task in /repo-b.
     // Filtering by /repo-a should show only epic A.
@@ -224,8 +224,8 @@ fn repo_filter_exclude_empty_shows_all() {
 fn repo_filter_exclude_applies_to_epics() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![
-        EpicBuilder::new(1).title("A").auto_dispatch(true).build(),
-        EpicBuilder::new(2).title("B").auto_dispatch(true).build(),
+        EpicBuilder::new(1).title("A").build(),
+        EpicBuilder::new(2).title("B").build(),
     ];
     // Epic A has a task in /repo-a; epic B has a task in /repo-b.
     // Excluding /repo-a should hide epic A and show only epic B.

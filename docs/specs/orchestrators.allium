@@ -75,7 +75,14 @@
 -- ask for the closing summary (OrchestratorAskedForItsSummary) are built;
 -- the tool is mcp-task-tools.allium's (OrchestratorMemoryViaMcp:
 -- orchestrator-trouble_record), the prompt's trouble part
--- dispatch-prompt.allium's (OrchestratorSessionPrompt).
+-- dispatch-prompt.allium's (OrchestratorSessionPrompt). Built (step 8):
+-- auto dispatch is gone (O8). The epic chain's phoenix and schedule
+-- refusals did not move to the orchestrator: its start follows the rules a
+-- person's does (OrchestratorStartsATask, SameRulesAsAPerson), decided by
+-- the operator. The epic_chain origin stays on old request rows only
+-- (store-split.allium: DispatchRequestOrigin), decided by the epic's acting
+-- orchestrator while the operator was away; and the close's event that only
+-- the chain consumed is gone from pr-workflow.allium.
 -- Open, for the operator: already_retried is built narrower than its intent
 -- (see its definition); and with several machines a task no machine holds
 -- is woken for and reminded of by each machine's orchestrator, with only
@@ -636,12 +643,20 @@ rule OrchestratorStartsATask {
     @guidance
         -- The start is an ordinary dispatch request, so every refusal of
         -- RequestDispatch applies as it stands: a task another machine holds,
-        -- a task with an open request, a phoenix task, a task still waiting
-        -- for its scheduled time, an epic at its limit. Two machines'
+        -- a task with an open request, an epic at its limit. Two machines'
         -- orchestrators that pick the same task race on that request and the
         -- store accepts one: the request is one transaction, and the first
         -- claim moves the task out of backlog and leaves an open request, so
         -- the second is refused.
+        --
+        -- SameRulesAsAPerson. The orchestrator is an agent with judgement,
+        -- not the removed epic chain, so its start follows the rules a
+        -- person's does and adds none: a phoenix task, and a task still
+        -- waiting for its scheduled time, may be started when it counts as
+        -- ready. Under start_rule = everything a finished phoenix task's
+        -- successor lands in backlog and counts as ready (tasks.allium:
+        -- PhoenixRespawn), so the orchestrator may start it again. Decided by
+        -- the operator.
         --
         -- The limit is every start's, whoever asks (O7; store-split.allium:
         -- RequestDispatch). Ready is not: the store never checks the mark,
@@ -659,7 +674,7 @@ rule OrchestratorStartsATask {
         -- WHICH ready task first is the orchestrator's judgement: it reads
         -- the tasks and the plan and holds back a task that depends on
         -- unfinished work. Between tasks it cannot tell apart it takes board
-        -- order (sort_order, then id), as the chain did.
+        -- order (sort_order, then id).
         --
         -- It starts work when it wakes (agent-health.allium:
         -- OrchestratorWakeEvents) and a slot is
@@ -1433,14 +1448,6 @@ surface OrchestratorNotifications {
 -- then:
 --   - core.allium: the Agent entity stays as it is, for task agents only
 --     (OrchestratorIdentity). (Every entity of this spec is there already.)
---   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
---     toggle key and header indicator, the chain that started the next
---     subtask when a session closed, its failure report and the stalled-chain
---     mark on a card. (The re-parent and delete effects on the switch and
---     the edit form's orchestrator section are there already.)
---   - store-split.allium: the chain's request origin goes (RequestDispatch
---     has the limit already). schedules.allium and
---     mcp-task-tools.allium lose their mentions of the chain.
 
 ------------------------------------------------------------
 -- Open Questions

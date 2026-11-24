@@ -101,16 +101,14 @@ fn wrap_up_step3_still_skips_docs_only_changes_regardless_of_size() {
 }
 
 /// The embedded copy of the wrap-up skill is what agents actually read, so
-/// it is the only thing that catches a regression here: epic chaining is a
-/// server-side effect of `exit_session` and there is no `dispatch_next` tool
-/// left for the skill to name.
+/// it is the only thing that catches a regression here: there is no
+/// `dispatch_next` tool for the skill to name.
 #[test]
 fn wrap_up_skill_does_not_instruct_calling_dispatch_next() {
     let content = skill_body("wrap-up");
     assert!(
         !content.contains("dispatch_next"),
-        "wrap-up skill must not tell the agent to call dispatch_next — \
-         exit_session chains the next epic subtask automatically"
+        "wrap-up skill must not tell the agent to call dispatch_next, which does not exist"
     );
 }
 

@@ -15,7 +15,7 @@ const HOST: &str = "host-a";
 /// (epic, task, orchestrator).
 fn setup(store: &Store) -> (i64, i64, Orchestrator) {
     store.register_host_for(HOST, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     store
         .call("alice", |ctx| switch_orchestrator_on(ctx, epic, None, None))
@@ -134,7 +134,7 @@ fn a_later_start_gives_the_retry_back_but_not_for_a_failed_start() {
 fn a_trouble_record_needs_a_known_trouble_a_text_and_a_covered_task() {
     let store = Store::new();
     let (_, task, o) = setup(&store);
-    let other_epic = store.create_epic("alice", "F", false);
+    let other_epic = store.create_epic("alice", "F");
     let outside = store.create("alice", epic_task("u", other_epic, "backlog"));
 
     assert!(record(&store, &o, task, "bored").is_err());
@@ -173,7 +173,7 @@ fn a_covered_task_entering_review_is_logged_once_per_entry() {
 fn a_task_no_orchestrator_covers_logs_nothing_on_review() {
     let store = Store::new();
     store.register_host_for(HOST, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "running"));
 
     store

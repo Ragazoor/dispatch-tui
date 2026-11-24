@@ -389,12 +389,6 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
     ),
     // ---- board.normal: epic view settings ----
     normal(
-        &["U"],
-        Some(C::InsideEpicView),
-        "toggle_auto_dispatch",
-        "Toggle auto-dispatch for the epic you are inside: chain the next backlog subtask when one finishes",
-    ),
-    normal(
         &["R"],
         Some(C::InsideEpicView),
         "toggle_group_by_repo",

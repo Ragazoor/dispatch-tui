@@ -1,6 +1,6 @@
 //! System / status / editor / quick-dispatch / misc handlers.
 
-use crate::models::{EpicId, Task, TaskId, DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE};
+use crate::models::{EpicId, TaskId, DEFAULT_BASE_BRANCH, DEFAULT_QUICK_TASK_TITLE};
 
 use super::super::types::*;
 use super::super::App;
@@ -290,9 +290,6 @@ impl App {
     ///   and an open row supersedes the task's pending entry (`SpansTheClaim`).
     /// - A row that reached failed is raised once as an error popup carrying
     ///   its reason (`FailedRequestReported`) — every reason the same way.
-    /// - A failed `epic_chain` row for a task this board still holds raises
-    ///   the chain's AutoDispatchFailed (`epics.allium:
-    ///   ReportChainedDispatchFailure`).
     ///
     /// The FIRST delivery is the baseline: rows already failed in it are
     /// history and raise nothing, so a restart does not re-raise every failure
@@ -302,7 +299,7 @@ impl App {
         &mut self,
         rows: Vec<crate::models::DispatchRequest>,
     ) -> Vec<Command> {
-        use crate::models::{DispatchOrigin, DispatchRequestState};
+        use crate::models::DispatchRequestState;
 
         let baseline = !self.dispatch_requests.baselined;
         self.dispatch_requests.baselined = true;
@@ -335,89 +332,33 @@ impl App {
             self.dirty = true;
         }
 
-        let mut cmds = Vec::new();
-        if newly_failed.is_empty() {
-            return cmds;
-        }
         let reason_of = |row: &crate::models::DispatchRequest| {
             row.reason
                 .clone()
                 .unwrap_or_else(|| "no reason recorded".to_string())
         };
-        self.status.error_popup = Some(match newly_failed.as_slice() {
-            [row] => format!(
-                "Dispatch of {} failed: {}",
-                self.board.task_label(row.task_id),
-                reason_of(row)
-            ),
+        match newly_failed.as_slice() {
+            [] => {}
+            [row] => {
+                self.status.error_popup = Some(format!(
+                    "Dispatch of {} failed: {}",
+                    self.board.task_label(row.task_id),
+                    reason_of(row)
+                ));
+            }
             rows => {
                 let each: Vec<String> = rows
                     .iter()
                     .map(|r| format!("{}: {}", self.board.task_label(r.task_id), reason_of(r)))
                     .collect();
-                format!("{} dispatches failed — {}", rows.len(), each.join("; "))
+                self.status.error_popup = Some(format!(
+                    "{} dispatches failed — {}",
+                    rows.len(),
+                    each.join("; ")
+                ));
             }
-        });
-        for row in &newly_failed {
-            if row.origin != DispatchOrigin::EpicChain {
-                continue;
-            }
-            // `requires: exists request.task` — a subtask deleted under its
-            // request has no card to mark.
-            let Some(epic_id) = self.board.find_task(row.task_id).and_then(|t| t.epic_id) else {
-                continue;
-            };
-            cmds.extend(self.handle_auto_dispatch_failed(row.task_id, epic_id, reason_of(row)));
         }
-        cmds
-    }
-
-    /// An epic's auto-dispatch chain requested a subtask and the request
-    /// failed, so the claim was released back to backlog and the epic has
-    /// stopped progressing (`ReportChainedDispatchFailure` and
-    /// `SurfaceAutoDispatchFailure` in docs/specs/epics.allium).
-    ///
-    /// Three surfaces, because they fail at different distances from the board:
-    /// the status message reaches an operator who is looking at it, the
-    /// notification one who is not, and the marker is what is still there an
-    /// hour later. Only the marker is durable; see
-    /// [`crate::tui::types::AgentTracking::auto_dispatch_failed`].
-    ///
-    /// No claim is released here: the module released it when the row failed.
-    pub(in crate::tui) fn handle_auto_dispatch_failed(
-        &mut self,
-        task_id: TaskId,
-        epic_id: crate::models::EpicId,
-        reason: String,
-    ) -> Vec<Command> {
-        self.status.set(format!(
-            "Auto-dispatch of {} failed — epic {} stalled: {reason}",
-            self.board.task_label(task_id),
-            self.board.epic_label(epic_id)
-        ));
-        self.agents.auto_dispatch_failed.insert(task_id, reason);
-
-        if self.notifications_enabled {
-            let title = self.board.task_label(task_id);
-            let title = self.board.find_task(task_id).map_or(title, Task::heading);
-            vec![Command::System(
-                crate::tui::commands::SystemCommand::SendNotification {
-                    title,
-                    body: "Epic auto-dispatch failed — chain stopped".to_string(),
-                    // Urgent, unlike a task becoming reviewable: nothing further
-                    // happens on this epic until a human acts.
-                    urgent: true,
-                },
-            )]
-        } else {
-            vec![]
-        }
-    }
-
-    /// Whether the subtask's last chained dispatch failed and left the epic
-    /// stalled (`AutoDispatchFailureIndicator` in docs/specs/epics.allium).
-    pub fn auto_dispatch_failed(&self, id: TaskId) -> bool {
-        self.agents.auto_dispatch_failed.contains_key(&id)
+        Vec::new()
     }
 
     pub(in crate::tui) fn handle_description_editor_result(

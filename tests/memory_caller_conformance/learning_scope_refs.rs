@@ -92,9 +92,12 @@ fn learning_scope_refs_and_package_links_match_the_module() {
         };
         let task = p.real.create_task(in_root.clone()).await.unwrap();
         p.wait(|r| r.task(task).is_some()).await;
-        p.mem.align_next_task_id(task.0);
-        assert_eq!(p.mem.create_task(in_root).await.unwrap(), task);
+        // The create routes the task into a repo-group sub-epic it makes, so
+        // the twin's next epic id is aligned to that one too.
         let sub = p.rows_real.task(task).unwrap().epic_id.unwrap();
+        p.mem.align_next_task_id(task.0);
+        p.mem.align_next_epic_id(sub.0);
+        assert_eq!(p.mem.create_task(in_root).await.unwrap(), task);
         assert_eq!(p.rows_mem.task(task).unwrap().epic_id, Some(sub));
         let done = || bindings::TaskPatch {
             status: Some("done".into()),

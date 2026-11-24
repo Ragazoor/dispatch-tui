@@ -55,7 +55,7 @@ fn reparent(store: &Store, epic: i64, to: i64) {
 #[test]
 fn switching_on_writes_the_switch_with_its_defaults() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
 
     on(&store, epic, None, None).expect("switch on");
 
@@ -68,7 +68,7 @@ fn switching_on_writes_the_switch_with_its_defaults() {
 #[test]
 fn switching_on_takes_a_start_rule_and_a_limit() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
 
     on(&store, epic, Some("everything"), Some(5)).expect("switch on");
 
@@ -80,7 +80,7 @@ fn switching_on_takes_a_start_rule_and_a_limit() {
 #[test]
 fn switching_on_refuses_a_bad_rule_a_bad_limit_and_a_missing_epic() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
 
     assert!(on(&store, epic, Some("sometimes"), None).is_err());
     assert_eq!(
@@ -94,7 +94,7 @@ fn switching_on_refuses_a_bad_rule_a_bad_limit_and_a_missing_epic() {
 #[test]
 fn one_switch_per_epic() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     on(&store, epic, None, None).expect("switch on");
 
     assert_eq!(
@@ -110,7 +110,7 @@ fn one_switch_per_epic() {
 #[test]
 fn one_orchestrator_on_a_path() {
     let store = Store::new();
-    let root = store.create_epic("alice", "Root", false);
+    let root = store.create_epic("alice", "Root");
     let mid = store.create_sub_epic("alice", root);
     let leaf = store.create_sub_epic("alice", mid);
     on(&store, mid, None, None).expect("switch on the middle");
@@ -130,7 +130,7 @@ fn one_orchestrator_on_a_path() {
 #[test]
 fn changing_settings_changes_only_what_is_named() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     on(&store, epic, None, Some(2)).expect("switch on");
 
     store
@@ -178,7 +178,7 @@ fn changing_settings_changes_only_what_is_named() {
 #[test]
 fn changing_or_switching_off_an_unorchestrated_epic_is_refused() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
 
     assert_eq!(
         store
@@ -200,7 +200,7 @@ fn changing_or_switching_off_an_unorchestrated_epic_is_refused() {
 #[test]
 fn switching_off_removes_the_switch_and_keeps_the_marks() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     on(&store, epic, None, None).expect("switch on");
     mark(&store, task, "operator", "").expect("mark");
@@ -215,9 +215,9 @@ fn switching_off_removes_the_switch_and_keeps_the_marks() {
 #[test]
 fn reparenting_under_an_orchestrated_epic_switches_the_subtree_off() {
     let store = Store::new();
-    let top = store.create_epic("alice", "Top", false);
+    let top = store.create_epic("alice", "Top");
     let under_top = store.create_sub_epic("alice", top);
-    let moved = store.create_epic("alice", "Moved", false);
+    let moved = store.create_epic("alice", "Moved");
     let inside = store.create_sub_epic("alice", moved);
     on(&store, top, None, None).expect("switch on top");
     on(&store, inside, None, None).expect("switch on inside");
@@ -234,8 +234,8 @@ fn reparenting_under_an_orchestrated_epic_switches_the_subtree_off() {
 #[test]
 fn reparenting_where_nothing_orchestrates_switches_nothing_off() {
     let store = Store::new();
-    let plain = store.create_epic("alice", "Plain", false);
-    let moved = store.create_epic("alice", "Moved", false);
+    let plain = store.create_epic("alice", "Plain");
+    let moved = store.create_epic("alice", "Moved");
     on(&store, moved, None, None).expect("switch on");
 
     reparent(&store, moved, plain);
@@ -248,9 +248,9 @@ fn reparenting_where_nothing_orchestrates_switches_nothing_off() {
 #[test]
 fn deleting_an_epic_removes_every_switch_in_its_subtree() {
     let store = Store::new();
-    let root = store.create_epic("alice", "Root", false);
+    let root = store.create_epic("alice", "Root");
     let sub = store.create_sub_epic("alice", root);
-    let other = store.create_epic("alice", "Other", false);
+    let other = store.create_epic("alice", "Other");
     on(&store, sub, None, None).expect("switch on sub");
     on(&store, other, None, None).expect("switch on other");
 
@@ -265,7 +265,7 @@ fn deleting_an_epic_removes_every_switch_in_its_subtree() {
 #[test]
 fn marking_ready_records_the_first_marker() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     mark(&store, task, "agent", "folke3").expect("mark");
@@ -280,7 +280,7 @@ fn marking_ready_records_the_first_marker() {
 #[test]
 fn only_a_backlog_task_can_be_marked_ready() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "review"));
 
     assert_eq!(
@@ -297,7 +297,7 @@ fn only_a_backlog_task_can_be_marked_ready() {
 #[test]
 fn the_marker_and_the_agent_name_go_together() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
 
     assert_eq!(
@@ -315,7 +315,7 @@ fn the_marker_and_the_agent_name_go_together() {
 #[test]
 fn clearing_is_idempotent() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     mark(&store, task, "operator", "").expect("mark");
 
@@ -331,7 +331,7 @@ fn clearing_is_idempotent() {
 #[test]
 fn leaving_backlog_drops_the_mark_and_coming_back_does_not_restore_it() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let task = store.create("alice", epic_task("t", epic, "backlog"));
     let untouched = store.create("alice", epic_task("u", epic, "backlog"));
     mark(&store, task, "operator", "").expect("mark");

@@ -199,7 +199,6 @@ fn blank_epic_patch() -> bindings::EpicPatch {
         status: None,
         plan_path: None,
         sort_order: None,
-        auto_dispatch: None,
         parent_epic_id: None,
         feed_command: None,
         feed_interval_secs: None,
@@ -392,7 +391,6 @@ struct EpicShape {
     plan_path: Option<String>,
     sort_order: Option<i64>,
     parent_epic_id: Option<i64>,
-    auto_dispatch: bool,
     feed_command: Option<String>,
     feed_interval_secs: Option<i64>,
     group_by_repo: bool,
@@ -411,7 +409,6 @@ fn epic_shape(e: &dispatch_tui::models::Epic) -> EpicShape {
         plan_path: e.plan_path.clone(),
         sort_order: e.sort_order,
         parent_epic_id: e.parent_epic_id.map(|p| p.0),
-        auto_dispatch: e.auto_dispatch,
         feed_command: e.feed_command.clone(),
         feed_interval_secs: e.feed_interval_secs,
         group_by_repo: e.group_by_repo,
@@ -425,8 +422,7 @@ fn epic_shape(e: &dispatch_tui::models::Epic) -> EpicShape {
 
 /// What a session request row looks like once both sides wrote it: everything
 /// but the ids and the module-clock timestamps, which differ by construction.
-/// The references to other rows (the token, the chained subtask) are compared
-/// as presence, because the two sides number their rows independently.
+/// The reference to another row (the token) is compared as presence, because the two sides number their rows independently.
 #[derive(Debug, PartialEq)]
 struct SessionShape {
     task_id: TaskId,
@@ -439,7 +435,6 @@ struct SessionShape {
     pr_url: Option<String>,
     tmux_window: Option<String>,
     has_wrap_up_request: bool,
-    has_chained_task: bool,
     has_claimed_at: bool,
     has_finished_at: bool,
     deadline_after_requested: Option<chrono::Duration>,
@@ -457,7 +452,6 @@ fn session_shape(r: &dispatch_tui::models::SessionRequest) -> SessionShape {
         pr_url: r.pr_url.clone(),
         tmux_window: r.tmux_window.as_ref().map(|w| w.as_str().to_string()),
         has_wrap_up_request: r.wrap_up_request.is_some(),
-        has_chained_task: r.chained_task.is_some(),
         has_claimed_at: r.claimed_at.is_some(),
         has_finished_at: r.finished_at.is_some(),
         deadline_after_requested: r.deadline.map(|d| d - r.requested_at),

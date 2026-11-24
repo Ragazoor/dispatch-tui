@@ -999,9 +999,11 @@ entity SubagentEntry {
 -- One person uses the store, so no epic, task, package or learning is
 -- withheld from anyone for access reasons; what a board receives narrows by
 -- follows and ownership only (sync.allium: SubscribeOnceIdentityIsSettled).
--- The store's epics table still has workspace_id and visibility columns; they are dead
--- schema (an automigration cannot drop a column): a new row writes the
--- column default and nothing reads them.
+-- The store's epics table still has workspace_id, visibility and
+-- auto_dispatch columns; they are dead schema (an automigration cannot drop
+-- a column): a new row writes the column default and nothing reads them.
+-- auto_dispatch backed the epic chain, which an orchestrator replaced
+-- (orchestrators.allium, O8).
 entity Epic {
     title: String
     description: String
@@ -1009,7 +1011,6 @@ entity Epic {
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
     completed_at: Timestamp?  -- when this epic last entered done, on the same terms as Task.completed_at, manual reorder of the card in the Done column included (board-layout.allium, "Done Column Ordering"). Unlike the task field, an override written here is not permanent: epics.allium: RecalculateEpicStatus rewrites it when the epic itself transitions into done
-    auto_dispatch: Boolean = false
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
     feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval

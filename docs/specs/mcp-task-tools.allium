@@ -524,8 +524,8 @@ rule MarkTaskDoneViaMcp {
         and ready = null
 
     -- A dispatched agent may not close its OWN task through this call — that
-    -- route stays session_wrap-up + session_exit, with its token, its ordering
-    -- guarantees and its epic chain all in one place (ExitSession,
+    -- route stays session_wrap-up + session_exit, with its token and its
+    -- ordering guarantees in one place (ExitSession,
     -- pr-workflow.allium). A session caller (a human's own Claude Code
     -- session, or a script/orchestrator with no dispatched identity of its
     -- own) may close ANY task this way, including one with a live tmux
@@ -551,32 +551,8 @@ rule MarkTaskDoneViaMcp {
     -- ("task closed"), and writes a close row for the host's teardown when
     -- the task had a window or carries a pr-typed url. The close either
     -- landed whole or not at all: a task whose close did not land keeps its
-    -- prior status, sub_status, completed_at and any live window. (No
-    -- SessionClosed is emitted on this path on either outcome — see the note
-    -- after the ensures.)
+    -- prior status, sub_status, completed_at and any live window.
     ensures: split/CloseTaskRequested(task: task, host: core/local_host())
-
-    -- No SessionClosed, therefore no epic chain. This is where this path
-    -- deliberately diverges from ExitSession: the terminal fields and a tmux
-    -- teardown are common to both (applied by the module and torn down by the
-    -- host on both routes), the chain is not.
-    --
-    -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
-    -- keys on, and the chain's whole value is that the successor starts from a
-    -- base_branch already carrying the closed task's work. Only session_exit
-    -- can promise that: it is reachable exclusively through session_wrap-up, which
-    -- rebased onto base_branch, opened a PR, or was told explicitly that the
-    -- task needed neither. This call has no session_wrap-up ahead of it — no rebase,
-    -- no PR, no exit token, and (by its own requires) no relationship at all
-    -- between the caller and the work being closed. A chain fired from here
-    -- launches an agent against whatever base_branch happened to hold, on the
-    -- say-so of a caller who was never in that task's session.
-    --
-    -- The epic is not stuck, and this is not a stall: it is the same untouched
-    -- epic the chain's other normal stopping conditions produce, with the same
-    -- recovery — the human dispatches the next subtask from the TUI. So it
-    -- raises no AutoDispatchFailed and shows no chain-stalled marker; nothing
-    -- failed.
 
     @guidance
         -- The MCP `task_update` tool's dedicated done-only path. The tool
@@ -592,15 +568,8 @@ rule MarkTaskDoneViaMcp {
         -- does not close: both closes are module
         -- transactions, and both teardowns are the host's, from a session
         -- request row (pr-workflow.allium: ExitSessionTeardown). Only the
-        -- request validation (the two requires above), the response text,
-        -- the missing token and the missing epic chain are specific to this
-        -- path.
-        --
-        -- The chain is not part of this path at all. It is not suppressed by
-        -- a flag: it runs inside the module's session_exit
-        -- transaction (epics.allium: AutoDispatchNextSubtask), which this
-        -- path never reaches. See the no-SessionClosed note above for why
-        -- this path must not chain.
+        -- request validation (the two requires above), the response text
+        -- and the missing token are specific to this path.
         --
         -- No exit token is issued, checked, or consumed anywhere on this
         -- path — unlike session_exit, there is no session_wrap-up call first. That is
@@ -666,9 +635,7 @@ rule MarkTaskDoneViaMcp {
         -- is left to its own machine (store-split.allium, X1). Boards learn of
         -- the close through their subscriptions; this board also sends its
         -- own task-changed notification (and epic-changed, for a task in an
-        -- epic) after the call, on either outcome. No epic auto-dispatch chain runs on either
-        -- outcome, so the response text never names a chained subtask —
-        -- unlike session_exit's, which does.
+        -- epic) after the call, on either outcome.
         --
         -- The schema's advertised status enum is backlog | running | review |
         -- done, which is every TaskStatus there is. There is no delete
@@ -928,7 +895,7 @@ rule CreateTaskViaMcp {
     -- dispatch already detects (tasks.allium: CreateQuickTask). Assuming
     -- "main" here produced tasks in "master" repos that could not be
     -- dispatched at all -- `git worktree add` rejected the ref, and because
-    -- the failing dispatch was usually the epic auto-dispatch chain, the only
+    -- the failing dispatch often had no human watching, the only
     -- trace was a server-side warning. See
     -- dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed.
     --
@@ -1463,11 +1430,8 @@ rule DispatchTaskViaMcp {
         -- has_plan = false (spec-first prompt) variants — the prompt builder
         -- branches internally — and a plan-less research-tagged task gets the
         -- research mode from the module's derivation.
-        -- task_dispatch is the only remaining MCP dispatch tool: it stays the
-        -- explicit "dispatch this specific task" call, while epic chaining is
-        -- automatic on a session close that takes effect
-        -- (AutoDispatchNextSubtask in epics.allium, keyed on the SessionClosed
-        -- that only a close which took effect emits).
+        -- task_dispatch is the only MCP dispatch tool: the explicit
+        -- "dispatch this specific task" call.
         --
         -- == A request, then a capped wait (store-split.allium: DispatchRequest) ==
         -- The call writes a dispatch request (store-split.allium:
@@ -1889,9 +1853,8 @@ rule ExitSessionViaMcp {
     -- The tool ASKS: one request_exit_session call
     -- (store-split.allium: RequestExitSession). The module checks the token
     -- against the request rows, and in the same transaction applies the
-    -- close (pr-workflow.allium: ExitSession), consumes the token, runs the
-    -- epic chain (epics.allium: AutoDispatchNextSubtask) and writes the
-    -- exit_session row whose host tears the window down
+    -- close (pr-workflow.allium: ExitSession), consumes the token and writes
+    -- the exit_session row whose host tears the window down
     -- (pr-workflow.allium: ExitSessionTeardown).
     ensures: split/ExitSessionRequested(task: task, token: token, action: action, pr_url: pr_url)
 
@@ -1936,9 +1899,6 @@ rule ExitSessionViaMcp {
         --
         -- == The response ==
         -- Accepted: the close took effect. The response is "Session closed."
-        -- or, when the epic chain requested a subtask (the exit_session row's
-        -- chained_task), "Session closed. Dispatching next epic subtask <task ref>."
-        -- (the ref carries the subtask's name and title)
         --
         -- DECISION (with the user, store-split W4): the tool does NOT wait for
         -- the window teardown. It answers as soon as the module accepts the
@@ -1969,18 +1929,6 @@ rule ExitSessionViaMcp {
         -- review with a pr-typed url until the exact same transaction that
         -- also nulls tmux_window, so PollPrStatus (which filters on status =
         -- review and url.url_type = pr) can never observe it mid-session.
-        --
-        -- The close emits SessionClosed, which drives automatic epic chaining
-        -- (AutoDispatchNextSubtask in epics.allium) in the same transaction.
-        -- A chain that stops, or fails, never turns a successful close into
-        -- an error. All three actions chain — for action = pr the finished
-        -- work sits on a PR branch rather than base_branch, so the chained
-        -- subtask still will not see it, but that is inherent to choosing the
-        -- PR path rather than something this close does wrong. There is no
-        -- agent-facing tool to dispatch the next subtask. The tool
-        -- description states the positive fact — that session_exit starts the
-        -- epic's next backlog subtask when the epic auto-dispatches — which is
-        -- what an agent needs to not go looking for one.
 }
 
 rule SetVerifyCommandViaMcp {
@@ -2685,17 +2633,15 @@ surface McpTaskTools {
         --
         -- The session_wrap-up and session_exit tool DESCRIPTIONS say only what each
         -- tool does: session_wrap-up performs the chosen action and returns an exit
-        -- token; session_exit closes the session with that token and, when the
-        -- task's epic auto-dispatches, starts the epic's next backlog subtask.
+        -- token; session_exit closes the session with that token.
         -- Neither carries MUST, "never stop after", or a restatement of the
         -- other's role. Those words reach every agent on every tools/list, on
         -- sessions that never wrap up, and repeating an instruction three
         -- times in capitals reads as distrust rather than as information.
         --
         -- The /wrap-up skill does not tell the agent to leave the epic's
-        -- next subtask alone. session_exit owns that behaviour and its
-        -- description says it happens; there is no tool an agent could
-        -- misuse to do it anyway.
+        -- next subtask alone: in an orchestrated epic the orchestrator
+        -- starts it (orchestrators.allium: OrchestratorStartsATask).
 
     @guarantee WrapUpRefusesUnfinishedWork
         -- An agent that skips the commit goes idle with its work stranded on

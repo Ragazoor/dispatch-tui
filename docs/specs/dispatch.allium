@@ -58,7 +58,7 @@ contract DispatchRequestServing {
         -- The backlog precondition is not a read: it is an atomic claim, and it
         -- is the same claim on every entry point (the TUI dispatch key and its
         -- trust-confirmed, retry-fresh and quick-dispatch siblings,
-        -- DispatchTaskViaMcp, and AutoDispatchNextSubtask in epics.allium).
+        -- and DispatchTaskViaMcp).
         -- The claim IS the request: one module
         -- transaction applies backlog -> running, the default running
         -- sub_status and the seeded last_pre_tool_use_at, conditionally on the
@@ -74,8 +74,8 @@ contract DispatchRequestServing {
         -- at once (DispatchClaimExclusive below). A request that is refused
         -- provisions nothing and launches no agent: DispatchTaskViaMcp reports
         -- that the task is no longer in backlog, the TUI clears its
-        -- DispatchingFeedback entry with a failure message, and the chain moves
-        -- to its next candidate. Second, a task being dispatched is running
+        -- DispatchingFeedback entry with a failure message. Second, a task
+        -- being dispatched is running
         -- with worktree = null until the report lands (see
         -- RunningTaskHasWorktree below).
         --
@@ -548,9 +548,7 @@ contract WorktreeProvisioner {
         -- default is "master" — lands here. Left unchecked it surfaced as
         -- git's own `fatal: invalid reference: <base_branch>`, wrapped in a
         -- dispatch failure that named neither the ref it wanted nor the field
-        -- holding it. When the failing dispatch was the epic auto-dispatch
-        -- chain (epics.allium: AutoDispatchNextSubtask), which cannot fail its
-        -- caller, that message was the whole of the evidence.
+        -- holding it.
         --
         -- Scoped to the FRESH path deliberately. On the REUSED path no ref is
         -- consumed to create anything — the selected ref feeds only the
@@ -2121,7 +2119,7 @@ surface DispatchingFeedback {
     --   - OPEN: this board's subscription holds an open request for the task
     --     (requested or provisioning). Every request this host makes is
     --     delivered to it (sync.allium: SubscribeToThisHostsDispatchRequests),
-    --     including those the epic chain and MCP task_dispatch make, and they
+    --     including those MCP task_dispatch makes, and they
     --     survive a board restart.
     -- The surface contract is the visible behaviour of the status bar and
     -- card line-2 indicator.

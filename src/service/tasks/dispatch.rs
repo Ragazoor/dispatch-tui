@@ -5,7 +5,7 @@
 //!
 //! - **Asking** — [`TaskService::request_dispatch`], the one call every launch
 //!   path makes (`store-split.allium: RequestDispatch`, D6): the TUI keys and
-//!   retry-fresh, quick dispatch, MCP `task_dispatch` and the epic chain. The
+//!   retry-fresh, quick dispatch and MCP `task_dispatch`. The
 //!   module claims the task and writes a `requested` row naming this host in
 //!   one transaction. Nothing is provisioned here, so `DispatchClaimExclusive`
 //!   (`docs/specs/dispatch.allium`) is the module's: a second request for a

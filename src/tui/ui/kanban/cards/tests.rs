@@ -11,16 +11,11 @@ use crate::tui::tests::{make_task, make_unprovisioned_task};
 /// the mistake and the test says which.
 fn every_indicator() -> Vec<(CardIndicator, Option<Color>, &'static str)> {
     vec![
-        // The six hard failures. This is the *membership* claim: these six
+        // The five hard failures. This is the *membership* claim: these five
         // and no others are red. Only `Crashed` is exercised through the
         // renderer, so without this a state quietly promoted into or dropped
         // out of the set would pass every other test.
         (CardIndicator::Unprovisioned, Some(RED), "unprovisioned"),
-        (
-            CardIndicator::AutoDispatchFailed,
-            Some(RED),
-            "auto-dispatch failed",
-        ),
         (CardIndicator::Conflict, Some(RED), "rebase conflict"),
         (CardIndicator::Crashed, Some(RED), "crashed"),
         (CardIndicator::RespawnFailed, Some(RED), "respawn failed"),
@@ -207,7 +202,7 @@ fn every_indicator_claims_the_border_its_severity_earns() {
 }
 
 #[test]
-fn exactly_six_indicators_are_hard_failures() {
+fn exactly_five_indicators_are_hard_failures() {
     // The counts are the membership claim stated a second way: the per-variant
     // test above would still pass if a variant were *added* to the red set and
     // its expectation updated in the same edit. These numbers make that edit
@@ -216,7 +211,10 @@ fn exactly_six_indicators_are_hard_failures() {
     let red = all.iter().filter(|(_, c, _)| *c == Some(RED)).count();
     let amber = all.iter().filter(|(_, c, _)| *c == Some(YELLOW)).count();
     let none = all.iter().filter(|(_, c, _)| c.is_none()).count();
-    assert_eq!(red, 6, "the hard-failure set must have exactly six members");
+    assert_eq!(
+        red, 5,
+        "the hard-failure set must have exactly five members"
+    );
     assert_eq!(amber, 2, "the attention set must have exactly two members");
     assert_eq!(
         red + amber + none,
@@ -299,10 +297,9 @@ fn dispatching_outranks_unprovisioned() {
     );
 }
 
-/// The epic auto-dispatch chain claims its next subtask inside the MCP
-/// handler and never enters `app.dispatching`, so the map alone would let
-/// every chained subtask render as broken for its whole provisioning
-/// window. A fresh claim stamp keeps it on the ordinary running card.
+/// A task claimed off the board (task_dispatch, or an orchestrator's start)
+/// never enters `app.dispatching`, so the map alone would let it render as
+/// broken for its whole provisioning window. A fresh claim stamp keeps it on the ordinary running card.
 #[test]
 fn freshly_claimed_task_not_in_dispatching_map_still_shows_running() {
     let now = Utc::now();

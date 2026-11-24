@@ -466,9 +466,8 @@ impl App {
 
     /// Whether `id` is a DispatchingFeedback member: this board has asked and
     /// the request has not reached it yet (pending), or this host's
-    /// subscription holds an open request for it — including the epic
-    /// chain's and MCP's requests, and requests that survived a board
-    /// restart. Not the whole "may be in flight" picture — see
+    /// subscription holds an open request for it — including MCP's and
+    /// orchestrators' requests, and requests that survived a board restart. Not the whole "may be in flight" picture — see
     /// [`Self::dispatch_may_be_in_flight`].
     pub fn is_dispatching(&self, id: TaskId) -> bool {
         self.dispatching.contains(&id) || self.dispatch_requests.open.contains_key(&id)
@@ -773,11 +772,6 @@ impl App {
             return;
         }
         self.dispatching.insert(id);
-        // A retry is the resolution to a stalled chain, so starting one clears
-        // the failure marker (PersistsUntilRedispatched in
-        // docs/specs/epics.allium) — and keeps a stale marker from masking the
-        // retry's own spinner.
-        self.agents.auto_dispatch_failed.remove(&id);
         if let Some(msg) = self.dispatching_status_text() {
             self.status.set_sticky(msg);
         }

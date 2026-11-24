@@ -216,12 +216,6 @@ pub struct AgentTracking {
     /// [`Self::message_flash`]. See `docs/specs/board-visuals.allium`'s "Message
     /// flash".
     pub message_flash_sent: HashMap<TaskId, Instant>,
-    /// Subtasks whose epic auto-dispatch chain claimed them and then failed to
-    /// provision them, mapped to why (`AutoDispatchFailureIndicator` in
-    /// docs/specs/epics.allium). Unlike every other entry here this one carries
-    /// no timestamp: a stalled chain stays stalled until a human acts, so the
-    /// marker decays on re-dispatch rather than on a clock.
-    pub auto_dispatch_failed: HashMap<TaskId, String>,
 }
 
 impl AgentTracking {
@@ -237,7 +231,6 @@ impl AgentTracking {
         self.pr_poll.remove(&id);
         self.message_flash.remove(&id);
         self.message_flash_sent.remove(&id);
-        self.auto_dispatch_failed.remove(&id);
     }
 }
 

@@ -231,7 +231,7 @@ Most of it renders a board to a buffer and reads colours back off it, the right 
 | `cursor_on_a_bookmarked_task_clears_nothing` | the bookmark outlives the cursor landing on it |
 | **`src/tui/ui/kanban/cards/tests.rs`**, against `state_border_color` | |
 | `every_indicator_claims_the_border_its_severity_earns` | every `CardIndicator` variant paired with the border it claims |
-| `exactly_six_indicators_are_hard_failures` | the counts: six red, two amber, every variant in {red, amber, none} |
+| `exactly_five_indicators_are_hard_failures` | the counts: five red, two amber, every variant in {red, amber, none} |
 
 The two `cards/tests.rs` tests are a pair. The first walks a hand-written list of variants, for the same reason `state_border_color` matches exhaustively: a new variant forces a deliberate entry. But it would still pass if someone moved a variant into the red set and updated its expectation in the same edit, which is how a state gets promoted to a hard failure without anyone deciding to. The counts make that edit visible: it has to change a number that says six. Dispatching's entry is an explicit "no border", with its reason: it renders an amber *indicator* but claims no border, the rule's one judgement-rather-than-category exclusion, and an asserted absence is the only kind that survives someone "fixing" it.
 

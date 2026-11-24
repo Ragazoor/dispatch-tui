@@ -27,10 +27,6 @@ pub enum EpicCommand {
         /// `App::handle_reorder_item`.
         completed_at: Option<chrono::DateTime<chrono::Utc>>,
     },
-    ToggleAutoDispatch {
-        id: EpicId,
-        auto_dispatch: bool,
-    },
     ToggleGroupByRepo {
         id: EpicId,
         group_by_repo: bool,

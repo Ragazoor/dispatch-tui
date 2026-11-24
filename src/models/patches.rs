@@ -145,7 +145,6 @@ patch_struct! {
         nullable plan_path:          &'a str,
         nullable sort_order:         i64,
         nullable completed_at:       chrono::DateTime<chrono::Utc>,
-        plain    auto_dispatch:      bool,
         plain    group_by_repo:      bool,
         plain    feed_append_only:   bool,
         plain    feed_role:          crate::models::FeedRole,

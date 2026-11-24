@@ -104,8 +104,7 @@ impl TuiRuntime {
         .await;
     }
 
-    /// Routing chokepoint for `exec_persist_epic`, `exec_toggle_epic_auto_dispatch`,
-    /// and `exec_reparent_epic`. Writes any service-computed `completed_at` (the
+    /// Routing chokepoint for `exec_persist_epic` and `exec_reparent_epic`. Writes any service-computed `completed_at` (the
     /// Done-transition rule in `EpicService::update_epic`) back into the
     /// in-memory board immediately, via the same `EpicMessage::Updated` splice
     /// `spawn_refresh_epic` uses — not a direct `App.board` mutation, since only
@@ -155,23 +154,6 @@ impl TuiRuntime {
         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
             Box::new(epic),
         )));
-    }
-
-    pub(super) async fn exec_toggle_epic_auto_dispatch(
-        &self,
-        app: &mut App,
-        id: models::EpicId,
-        auto_dispatch: bool,
-    ) {
-        self.exec_patch_epic(
-            app,
-            crate::service::UpdateEpicParams {
-                auto_dispatch: Some(auto_dispatch),
-                ..crate::service::UpdateEpicParams::for_epic(id)
-            },
-            "toggling auto dispatch",
-        )
-        .await;
     }
 
     pub(super) async fn exec_toggle_epic_group_by_repo(

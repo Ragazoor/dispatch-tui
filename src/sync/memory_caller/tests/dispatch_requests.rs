@@ -139,7 +139,7 @@ async fn request_dispatch_derives_the_mode_only_when_none_is_named() {
     let quick = caller.create_task(blank_task()).await.unwrap();
 
     let r = request_id(request(&caller, research, HOST, "mcp", "").await);
-    let p = request_id(request(&caller, plain, HOST, "epic_chain", "").await);
+    let p = request_id(request(&caller, plain, HOST, "user", "").await);
     let q = request_id(request(&caller, quick, HOST, "quick", "quick").await);
 
     assert_eq!(
@@ -153,7 +153,7 @@ async fn request_dispatch_derives_the_mode_only_when_none_is_named() {
     assert_eq!(rows.dispatch_request(q).unwrap().mode, DispatchMode::Quick);
     assert_eq!(
         rows.dispatch_request(p).unwrap().origin,
-        DispatchOrigin::EpicChain
+        DispatchOrigin::User
     );
     assert_eq!(
         rows.dispatch_request(q).unwrap().origin,
@@ -391,27 +391,19 @@ async fn a_dispatched_report_past_the_deadline_is_refused() {
     assert!(rows.task(task).unwrap().worktree.is_none());
 }
 
-/// `PhoenixIsNeverChained`, enforced by the request: the epic chain's request
-/// for a phoenix task is refused and writes nothing; the TUI's is accepted.
+/// `store-split.allium: DispatchRequestOrigin`: `epic_chain` stays on old rows
+/// only, so a new request naming it is refused and writes nothing.
 #[tokio::test]
-async fn the_epic_chain_may_not_request_a_phoenix_task() {
+async fn a_new_epic_chain_request_is_refused() {
     let (caller, rows) = caller();
-    let task = caller
-        .create_task(bindings::Task {
-            phoenix: true,
-            ..blank_task()
-        })
-        .await
-        .unwrap();
+    let task = caller.create_task(blank_task()).await.unwrap();
 
     match request(&caller, task, HOST, "epic_chain", "").await {
-        ReducerOutcome::Refused(why) => assert!(why.contains("phoenix"), "{why}"),
-        other => panic!("the chain must not take a phoenix task, got {other:?}"),
+        ReducerOutcome::Refused(why) => assert!(why.contains("epic_chain"), "{why}"),
+        other => panic!("a new epic_chain request must be refused, got {other:?}"),
     }
     assert!(rows.dispatch_requests().is_empty());
     assert_eq!(rows.task(task).unwrap().status, TaskStatus::Backlog);
-
-    request_id(request(&caller, task, HOST, "user", "dispatch").await);
 }
 
 /// Only the row's host reports, and only while it is provisioning.

@@ -214,9 +214,7 @@ rule StartAgentOnFreshLaunch {
         -- Only the replaced agent's entries can exist then, so this is a
         -- safety net: the task starts its new session with no subagents.
         --
-        -- Every claim gets an agent, whichever path wrote the request: the
-        -- request_dispatch reducer and the epic chain inside
-        -- request_exit_session share one write
+        -- Every claim gets an agent: the request_dispatch reducer's write
         -- (spacetime/module/src/dispatch_request.rs::create_dispatch_request),
         -- and the agent is created or launched there. The claim's own task
         -- write runs first, so a refused claim touches no agent and picks no
@@ -595,8 +593,7 @@ surface NamesForPeople {
         -- the board or the agent tree shows names a task by its display
         -- name, or by its title when it has none yet, and an epic by its
         -- title. None shows a bare `#<id>` or `task <id>`: "Bookmarked
-        -- nevena2", not "Bookmarked #99056"; "Auto-dispatch of nevena2
-        -- failed — epic Dispatch stalled", not "#99056 … epic #314". Exact wording is each
+        -- nevena2", not "Bookmarked #99056". Exact wording is each
         -- message's own spec.
 
     @guarantee McpRepliesNameWhatTheyTouch

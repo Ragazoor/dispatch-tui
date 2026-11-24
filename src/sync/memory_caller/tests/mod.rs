@@ -108,7 +108,6 @@ fn blank_epic_patch() -> bindings::EpicPatch {
         status: None,
         plan_path: None,
         sort_order: None,
-        auto_dispatch: None,
         parent_epic_id: None,
         feed_command: None,
         feed_interval_secs: None,

@@ -8,9 +8,8 @@
 //! naming THIS host, each handed out once however often the row pump
 //! redelivers the whole set.
 //!
-//! What the board does with FAILED rows (the DispatchingFeedback popup and
-//! `epics.allium: ReportChainedDispatchFailure`) is the App's, pinned in
-//! `src/tui/tests/dispatch_requests.rs`.
+//! What the board does with FAILED rows (the DispatchingFeedback popup) is
+//! the App's, pinned in `src/tui/tests/dispatch_requests.rs`.
 
 use chrono::{TimeZone, Utc};
 

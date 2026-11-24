@@ -190,29 +190,6 @@ async fn update_epic_no_fields_returns_error() {
 }
 
 #[tokio::test]
-async fn update_epic_auto_dispatch_persists() {
-    let db = test_db().await;
-    let svc = epic_svc(&db);
-
-    let epic = svc
-        .create_epic(CreateEpicParams::fixture("E"))
-        .await
-        .unwrap();
-
-    // Default is false.
-    assert!(!db.get_epic(epic.id).await.unwrap().auto_dispatch);
-
-    svc.update_epic(UpdateEpicParams {
-        auto_dispatch: Some(true),
-        ..UpdateEpicParams::for_epic(epic.id)
-    })
-    .await
-    .unwrap();
-
-    assert!(db.get_epic(epic.id).await.unwrap().auto_dispatch);
-}
-
-#[tokio::test]
 async fn list_epics_with_progress() {
     let db = test_db().await;
     let task_svc = task_svc(&db);

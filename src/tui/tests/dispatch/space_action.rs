@@ -130,10 +130,9 @@ fn space_on_dispatching_unprovisioned_running_does_not_offer_retry() {
     );
 }
 
-/// The epic auto-dispatch chain claims its subtask inside the MCP handler, so
-/// it is never in `app.dispatching` — the map alone would leave a chained
-/// subtask one keypress from a duplicate agent for its whole provisioning
-/// window. A fresh claim stamp closes that hole.
+/// A task claimed off the board (task_dispatch, or an orchestrator's start)
+/// is never in `app.dispatching` — the map alone would leave it one keypress
+/// from a duplicate agent for its whole provisioning window. A fresh claim stamp closes that hole.
 #[test]
 fn space_on_freshly_claimed_task_outside_dispatching_map_does_not_offer_retry() {
     let mut task = make_unprovisioned_task(4, TaskStatus::Running);

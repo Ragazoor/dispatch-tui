@@ -176,7 +176,6 @@ mirror!(
         status,
         plan_path,
         sort_order,
-        auto_dispatch,
         parent_epic_id,
         feed_command,
         feed_interval_secs,

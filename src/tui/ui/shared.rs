@@ -241,23 +241,9 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     {
         parts.push(span);
     }
-    // Auto dispatch indicator — only in epic view
+    // Epic indicators — only in epic view
     if let ViewMode::Epic { epic_id, .. } = app.view_mode() {
         if let Some(epic) = app.epics().iter().find(|e| e.id == *epic_id) {
-            let auto = key(in_epic, "toggle_auto_dispatch", "U");
-            let (label, style) = if epic.auto_dispatch {
-                (
-                    format!("auto dispatch [{auto}]  "),
-                    Style::default().fg(GREEN),
-                )
-            } else {
-                (
-                    format!("manual dispatch [{auto}]  "),
-                    Style::default().fg(MUTED),
-                )
-            };
-            parts.push(Span::styled(label, style));
-
             // Feed routing role — for managed feed epics (parent + role sub-epics)
             if let Some(role_label) = feed_role_label(epic.feed_role) {
                 parts.push(Span::styled(role_label, Style::default().fg(MUTED)));

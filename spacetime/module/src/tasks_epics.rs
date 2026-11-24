@@ -263,7 +263,6 @@ impl EpicPatch {
             status,
             plan_path,
             sort_order,
-            auto_dispatch,
             parent_epic_id,
             feed_command,
             feed_interval_secs,
@@ -278,7 +277,6 @@ impl EpicPatch {
             && status.is_none()
             && plan_path.is_none()
             && sort_order.is_none()
-            && auto_dispatch.is_none()
             && parent_epic_id.is_none()
             && feed_command.is_none()
             && feed_interval_secs.is_none()
@@ -298,7 +296,6 @@ pub struct EpicPatch {
     pub status: Patch<String>,
     pub plan_path: Patch<String>,
     pub sort_order: Patch<Option<i64>>,
-    pub auto_dispatch: Patch<bool>,
     pub parent_epic_id: Patch<i64>,
     pub feed_command: Patch<String>,
     pub feed_interval_secs: Patch<i64>,
@@ -367,7 +364,6 @@ pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
         status,
         plan_path,
         sort_order,
-        auto_dispatch,
         parent_epic_id,
         feed_command,
         feed_interval_secs,
@@ -1371,27 +1367,6 @@ pub fn validate_claim_acceptance(task: &Task, host: &str) -> Result<(), String> 
 pub(crate) fn is_bare_claim(task: &Task) -> bool {
     task.status == RUNNING && task.worktree.is_empty()
 }
-
-// THERE IS NO `claim_next_backlog_task`, AND THAT IS DELIBERATE.
-//
-// The obvious design is a reducer that picks the next candidate and claims it
-// in one transaction. It was written, and then removed, because a reducer
-// returns no value: the chain's caller needs to know WHICH task it claimed —
-// it is about to provision that task's worktree — and there is no channel to
-// tell it.
-//
-// The named claim (`request_dispatch`) is enough, because a board choosing a candidate for an
-// epic is NOT choosing from a partial view. A subscription to an epic is
-// `WHERE epic_id = N`, which returns every subtask of it regardless of who
-// owns them, so a board that is chaining an epic can see all of that epic's
-// direct children. The visibility problem that forced the status derivation
-// server-side (`derive_epic_status`) is about ANCESTORS and descendants across
-// epics; it does not reach one epic's own subtask list.
-//
-// So the client orders the candidates by `claim_order_key`'s rule and offers
-// them one at a time, and `request_dispatch` arbitrates: a task another host
-// already took is refused, and the client moves to the next. Exclusivity is still the
-// store's, which is the part that had to move.
 
 /// `HandMoveReleasesAWindowTheBoardDidNotSee`: clear the current agent's
 /// window and write a `close` row naming it, so the host kills it. Nothing

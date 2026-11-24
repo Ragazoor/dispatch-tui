@@ -47,7 +47,6 @@ fn row(
         tmux_window: kind
             .is_teardown()
             .then(|| TmuxWindow::parse(&format!("task-{}", id * 10)).unwrap()),
-        chained_task: None,
         deadline: has_host_work.then(|| requested_at + chrono::Duration::seconds(30)),
     }
 }

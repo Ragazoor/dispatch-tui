@@ -243,9 +243,8 @@ async fn update_task_rejects_archived_as_an_unknown_status() {
 // A dedicated close-only path (mcp-task-tools.allium: MarkTaskDoneViaMcp),
 // distinct from ExitSessionViaMcp: no exit token, reachable for a session
 // caller or a dispatched agent acting on a task other than its own, never for
-// a dispatched agent closing itself. See dispatch.rs's ChainFixture-based
-// tests for the tmux-teardown and epic-auto-dispatch-chain parity with
-// exit_session.
+// a dispatched agent closing itself. See dispatch.rs's CloseFixture-based
+// tests for the tmux-teardown parity with exit_session.
 
 #[tokio::test]
 async fn update_task_done_marks_task_done_for_session_caller() {

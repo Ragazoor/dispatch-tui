@@ -526,8 +526,8 @@ pub trait SessionRequestStore: SessionRequestRead {
         task: TaskId,
         action: WrapUpMode,
     ) -> Result<SessionRequestAnswer>;
-    /// `RequestExitSession`: the token check, the close, the epic chain and the
-    /// exit_session row, in one module transaction. `pr_url` is only read for
+    /// `RequestExitSession`: the token check, the close and the exit_session
+    /// row, in one module transaction. `pr_url` is only read for
     /// the `pr` action.
     async fn request_exit_session(
         &self,
@@ -1395,9 +1395,8 @@ impl<
 /// serve it: each method below is the implementation, not a hop to one.
 pub struct Store {
     /// What this board can see. Every read, and the pre-reads a few writes
-    /// take (the chain's candidates, a drain's prior status, a feed sync's
-    /// removal candidates), answer from these rows — the same rows the board
-    /// draws, so the chain takes the task the column shows as next.
+    /// take (a drain's prior status, a feed sync's removal candidates), answer
+    /// from these rows — the same rows the board draws.
     rows: Arc<crate::sync::SharedRows>,
     /// The transport every mutation goes through.
     caller: Arc<dyn crate::sync::ReducerCaller>,

@@ -446,21 +446,6 @@ impl App {
     }
 }
 
-/// Flip an epic's auto-dispatch flag in the board's copy and emit the store
-/// write. No such epic: nothing happens.
-pub(in crate::tui) fn toggle_epic_auto_dispatch(epics: &mut [Epic], id: EpicId) -> Vec<Command> {
-    let Some(epic) = epics.iter_mut().find(|e| e.id == id) else {
-        return vec![];
-    };
-    epic.auto_dispatch = !epic.auto_dispatch;
-    vec![Command::Epic(
-        crate::tui::commands::EpicCommand::ToggleAutoDispatch {
-            id,
-            auto_dispatch: epic.auto_dispatch,
-        },
-    )]
-}
-
 /// Flip an epic's group-by-repo flag in the board's copy and emit the store
 /// write. No such epic: nothing happens.
 pub(in crate::tui) fn toggle_epic_group_by_repo(epics: &mut [Epic], id: EpicId) -> Vec<Command> {

@@ -36,7 +36,7 @@ use super::types::{JsonRpcRequest, JsonRpcResponse};
 /// The single `McpState` constructor the test module builds on: an in-memory DB
 /// plus whichever of the three injectable seams a test cares about. Everything
 /// else here (`test_state`, `test_state_with_db`, `state_with_mock_task_svc`,
-/// `ChainFixture`) delegates, so the wiring exists once.
+/// `CloseFixture`) delegates, so the wiring exists once.
 async fn test_state_with_overrides(
     runner: Arc<dyn ProcessRunner>,
     notify_tx: Option<mpsc::UnboundedSender<crate::board_event::BoardEvent>>,
@@ -124,8 +124,8 @@ fn with_clean_status(
 /// This board's host reactor, as the runtime runs it (`store-split.allium`:
 /// `HostClaimsDispatch`, `HostClaimsSessionRequest`): serve every `requested`
 /// dispatch and session row naming this host, once, as the rows arrive. The
-/// tools only WRITE requests (`store-split.allium` D6, W2) — `task_dispatch`, the
-/// epic chain, `wrap_up(rebase)`, the `exit_session` teardown — so a test that
+/// tools only WRITE requests (`store-split.allium` D6, W2) — `task_dispatch`,
+/// `wrap_up(rebase)`, the `exit_session` teardown — so a test that
 /// wants an agent launched, a branch rebased or a window killed runs this beside
 /// them, over the same service. Dropped with the test's runtime.
 fn spawn_host(state: &Arc<McpState>) -> tokio::task::JoinHandle<()> {
@@ -962,12 +962,7 @@ fn no_tool_description_cites_internal_symbol_names() {
     // Settings and enum values a caller sets or reads, not internal items.
     // `caller_task_id` is here because task_create's description exists partly
     // to say that argument does NOT exist — naming it is the point.
-    allowed.extend([
-        "auto_dispatch",
-        "saved_repo_paths",
-        "verify_command",
-        "caller_task_id",
-    ]);
+    allowed.extend(["saved_repo_paths", "verify_command", "caller_task_id"]);
 
     for tool in tools {
         let name = tool["name"].as_str().unwrap();
@@ -1100,8 +1095,7 @@ fn wrap_up_description_leaves_the_review_refusal_reason_to_the_error() {
 }
 
 /// TheNextCallIsNamedJustInTime: the exit_session description says what the
-/// tool does — closes the session with the token and, when the epic
-/// auto-dispatches, starts its next backlog subtask. It carries no MUST, no
+/// tool does — closes the session with the token. It carries no MUST, no
 /// "final step" instruction, no "must not dispatch it yourself", and nothing
 /// about how to react to its responses (the failed-close response carries
 /// that itself).
@@ -1119,6 +1113,7 @@ fn exit_session_description_says_only_what_the_tool_does() {
         "did not take effect",
         "not treat",
         "never stop",
+        "subtask",
     ] {
         assert!(
             !lower.contains(needle),
@@ -1126,9 +1121,8 @@ fn exit_session_description_says_only_what_the_tool_does() {
         );
     }
     assert!(
-        lower.contains("next backlog subtask") && lower.contains("auto"),
-        "exit_session's description must state the positive fact that it starts the \
-epic's next backlog subtask when the epic auto-dispatches, got: {desc}"
+        lower.contains("close"),
+        "exit_session's description must say it closes the session, got: {desc}"
     );
 }
 

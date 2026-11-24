@@ -9,7 +9,7 @@
 //! `OneOpenSessionRequestPerTask`, `AnExitTokenIsConsumedOnce` and
 //! `EveryExitSessionHadAWrapUp`; the close is `pr-workflow.allium:
 //! ExitSession`. The board's tests drive wrap-up and exit-session through this
-//! double, so it must refuse, close and chain exactly where the module does;
+//! double, so it must refuse and close exactly where the module does;
 //! `tests/memory_caller_conformance.rs` diffs the two.
 //!
 //! `expire_session_request` is the double's stand-in for the module's
@@ -17,8 +17,8 @@
 
 use super::*;
 use crate::models::{
-    DispatchOrigin, DispatchRequestState, SessionRequestId, SessionRequestKind,
-    SessionRequestState, SubStatus, TaskStatus, WrapUpMode,
+    DispatchRequestState, SessionRequestId, SessionRequestKind, SessionRequestState, SubStatus,
+    TaskStatus, WrapUpMode,
 };
 
 const HOST: &str = "host-a";
@@ -585,7 +585,6 @@ async fn an_exit_session_applies_the_close_and_writes_the_teardown_row() {
         chrono::Duration::seconds(30),
         "config.exit_session_teardown_timeout"
     );
-    assert!(row.chained_task.is_none());
 }
 
 /// action pr takes the task to Review with the pr url and leaves
@@ -792,12 +791,10 @@ async fn an_exit_session_recalculates_the_epic() {
     );
 }
 
-/// W6: the module owns the epic chain. A close that had a wrap_up behind it
-/// requests the epic's next backlog subtask as an `epic_chain` dispatch request
-/// naming the same host, passing over a phoenix subtask, and records it on the
-/// exit_session row for the tool's response.
+/// A close starts no next subtask, even in an epic whose dead
+/// `auto_dispatch` column an old store still holds as true.
 #[tokio::test]
-async fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
+async fn an_exit_session_starts_no_next_subtask() {
     let (caller, rows) = caller();
     let epic = caller
         .create_epic(bindings::Epic {
@@ -806,67 +803,6 @@ async fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
         })
         .await
         .unwrap();
-    let task = dispatched_task_in(
-        &caller,
-        bindings::Task {
-            epic_id: epic.0,
-            owner: String::new(),
-            ..blank_task()
-        },
-    )
-    .await;
-    let phoenix = caller
-        .create_task(bindings::Task {
-            epic_id: epic.0,
-            owner: String::new(),
-            phoenix: true,
-            sort_order: Some(1),
-            ..blank_task()
-        })
-        .await
-        .unwrap();
-    let next = caller
-        .create_task(bindings::Task {
-            epic_id: epic.0,
-            owner: String::new(),
-            sort_order: Some(2),
-            ..blank_task()
-        })
-        .await
-        .unwrap();
-    let token = token_for(&caller, task, "done").await;
-
-    let close = applied_id(exit(&caller, task, token, "done", "").await);
-
-    assert_eq!(
-        rows.session_request(close).unwrap().chained_task,
-        Some(next),
-        "the exit_session row names the subtask the chain requested"
-    );
-    assert_eq!(rows.task(phoenix).unwrap().status, TaskStatus::Backlog);
-    let claimed = rows.task(next).unwrap();
-    assert_eq!(
-        claimed.status,
-        TaskStatus::Running,
-        "the request is the claim"
-    );
-    let chained: Vec<_> = rows
-        .dispatch_requests()
-        .into_iter()
-        .filter(|r| r.task_id == next)
-        .collect();
-    assert_eq!(chained.len(), 1);
-    assert_eq!(chained[0].origin, DispatchOrigin::EpicChain);
-    assert_eq!(chained[0].host, HOST);
-    assert_eq!(chained[0].state, DispatchRequestState::Requested);
-}
-
-/// An epic that does not auto-dispatch, or one with nothing left in backlog,
-/// stops the chain; the close stands.
-#[tokio::test]
-async fn the_chain_stops_without_auto_dispatch_or_a_backlog_subtask() {
-    let (caller, rows) = caller();
-    let epic = caller.create_epic(blank_epic()).await.unwrap();
     let task = dispatched_task_in(
         &caller,
         bindings::Task {
@@ -886,10 +822,13 @@ async fn the_chain_stops_without_auto_dispatch_or_a_backlog_subtask() {
         .unwrap();
     let token = token_for(&caller, task, "done").await;
 
-    let close = applied_id(exit(&caller, task, token, "done", "").await);
+    applied_id(exit(&caller, task, token, "done", "").await);
 
-    assert!(rows.session_request(close).unwrap().chained_task.is_none());
     assert_eq!(rows.task(waiting).unwrap().status, TaskStatus::Backlog);
+    assert!(rows
+        .dispatch_requests()
+        .iter()
+        .all(|r| r.task_id != waiting));
     assert_eq!(rows.task(task).unwrap().status, TaskStatus::Done);
 }
 
@@ -1128,7 +1067,7 @@ fn close_rows(rows: &SharedRows, task: TaskId) -> Vec<crate::models::SessionRequ
 
 /// A running task with a window closes whole in one call: Done, window cleared,
 /// completed, `stop_pending` cleared, and ONE close row naming the window the
-/// close cleared, with no token (`wrap_up_request`) and no chain.
+/// close cleared, with no token (`wrap_up_request`).
 #[tokio::test]
 async fn close_task_applies_the_done_close_and_writes_a_close_row() {
     let (caller, rows) = caller();
@@ -1163,7 +1102,6 @@ async fn close_task_applies_the_done_close_and_writes_a_close_row() {
         Some(format!("task-{}", task.0).as_str())
     );
     assert!(row.wrap_up_request.is_none(), "no token is consumed");
-    assert!(row.chained_task.is_none(), "no epic chain runs");
     assert_eq!(
         row.deadline.unwrap() - row.requested_at,
         chrono::Duration::seconds(30),

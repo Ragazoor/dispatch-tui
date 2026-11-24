@@ -57,19 +57,9 @@ async fn close_task_recalculates_the_parent_epic() {
     );
 }
 
-// -- The epic chain (`store-split.allium: SessionRequest`) ----------------------------------------
-//
-// The chain runs in the module, inside `request_exit_session`'s
-// transaction (`store-split.allium: RequestExitSession`,
-// `epics.allium: AutoDispatchNextSubtask`): it requests the epic's next backlog
-// subtask through the same dispatch request every entry point writes
-// (`RequestDispatch`) and records it on the exit_session row. The request is
-// what makes the "at most one agent per closed session" guarantee hold under
-// concurrent closes (docs/specs/epics.allium). Its candidate ordering is
-// pinned in `src/store/tests/tasks_patch.rs`.
+// -- Closing a session in an epic ---------------------------------------------
 
-/// Create an auto-dispatching epic with `count` backlog subtasks, sort_order
-/// 1..=count.
+/// Create an epic with `count` backlog subtasks, sort_order 1..=count.
 async fn epic_with_backlog_subtasks(
     db: &Arc<dyn store::TaskStore>,
     count: i64,
@@ -78,9 +68,6 @@ async fn epic_with_backlog_subtasks(
     let task_svc = task_svc(db);
     let epic = epic_svc
         .create_epic(CreateEpicParams::fixture("E"))
-        .await
-        .unwrap();
-    db.patch_epic(epic.id, &crate::store::EpicPatch::new().auto_dispatch(true))
         .await
         .unwrap();
     let mut ids = Vec::new();
@@ -98,15 +85,6 @@ async fn epic_with_backlog_subtasks(
     (epic.id, ids)
 }
 
-fn asked_session(answer: crate::store::SessionRequestAnswer) -> crate::models::SessionRequestId {
-    match answer {
-        crate::store::SessionRequestAnswer::Requested(id) => id,
-        crate::store::SessionRequestAnswer::Refused(why) => {
-            panic!("expected the request to apply: {why}")
-        }
-    }
-}
-
 /// A running task of `epic_id` on this host, whose session is about to close.
 async fn closing_task_in(db: &Arc<dyn store::TaskStore>, epic_id: EpicId) -> TaskId {
     let (closing, _) = running_task_with_window(db, Some(epic_id)).await;
@@ -119,120 +97,8 @@ async fn closing_task_in(db: &Arc<dyn store::TaskStore>, epic_id: EpicId) -> Tas
     closing
 }
 
-/// Close `closing`'s session through the module — a done wrap-up, then
-/// `request_exit_session` — and answer the subtask the chain requested in the
-/// same transaction.
-async fn close_session_of(db: &Arc<dyn store::TaskStore>, closing: TaskId) -> Option<TaskId> {
-    let svc = task_svc(db);
-    let token = asked_session(
-        svc.request_wrap_up(closing, crate::models::WrapUpMode::Done)
-            .await
-            .unwrap(),
-    );
-    let close = asked_session(
-        svc.request_exit_session(closing, token, crate::models::WrapUpMode::Done, None)
-            .await
-            .unwrap(),
-    );
-    db.session_request(close).await.unwrap().chained_task
-}
-
-#[tokio::test]
-async fn the_chain_requests_its_first_subtask_and_marks_it_running() {
-    let db = test_db().await;
-    let (epic_id, ids) = epic_with_backlog_subtasks(&db, 2).await;
-    let closing = closing_task_in(&db, epic_id).await;
-
-    let chained = close_session_of(&db, closing).await;
-
-    assert_eq!(
-        chained,
-        Some(ids[0]),
-        "requests the first subtask by sort_order"
-    );
-    let claimed = db.get_task(ids[0]).await.unwrap();
-    assert_eq!(claimed.status, TaskStatus::Running);
-    assert_eq!(
-        claimed.sub_status,
-        SubStatus::default_for(TaskStatus::Running)
-    );
-    assert!(
-        claimed.last_pre_tool_use_at.is_some(),
-        "the claim seeds last_pre_tool_use_at so the tick classifier keeps the task Active"
-    );
-    let row = db.latest_dispatch_request_for_task(ids[0]).await.unwrap();
-    assert_eq!(row.origin, crate::models::DispatchOrigin::EpicChain);
-    assert!(
-        db.get_task(ids[0]).await.unwrap().worktree.is_none(),
-        "the request does not provision"
-    );
-    assert_eq!(
-        db.get_task(ids[1]).await.unwrap().status,
-        TaskStatus::Backlog,
-        "only one subtask may be chained per closed session"
-    );
-}
-
-#[tokio::test]
-async fn the_chain_finds_nothing_once_no_backlog_remains() {
-    let db = test_db().await;
-    let (epic_id, _) = epic_with_backlog_subtasks(&db, 1).await;
-    let first = closing_task_in(&db, epic_id).await;
-    let second = closing_task_in(&db, epic_id).await;
-
-    assert!(close_session_of(&db, first).await.is_some());
-    assert!(
-        close_session_of(&db, second).await.is_none(),
-        "a requested task is out of contention"
-    );
-}
-
-#[tokio::test]
-async fn the_chain_is_exclusive_under_concurrency() {
-    let db = test_db().await;
-    let (epic_id, _) = epic_with_backlog_subtasks(&db, 2).await;
-    let first_closer = closing_task_in(&db, epic_id).await;
-    let second_closer = closing_task_in(&db, epic_id).await;
-    let third_closer = closing_task_in(&db, epic_id).await;
-
-    let a = {
-        let db = db.clone();
-        tokio::spawn(async move { close_session_of(&db, first_closer).await })
-    };
-    let b = {
-        let db = db.clone();
-        tokio::spawn(async move { close_session_of(&db, second_closer).await })
-    };
-    let first = a.await.unwrap().expect("first request");
-    let second = b.await.unwrap().expect("second request");
-
-    assert_ne!(
-        first, second,
-        "two concurrent closes must never request the same subtask"
-    );
-    assert!(
-        close_session_of(&db, third_closer).await.is_none(),
-        "both subtasks are requested, so a third close chains nothing"
-    );
-}
-
-#[tokio::test]
-async fn the_chain_passes_over_a_phoenix_subtask() {
-    let db = test_db().await;
-    let (epic_id, ids) = epic_with_backlog_subtasks(&db, 2).await;
-    db.patch_task(ids[0], &crate::store::TaskPatch::new().phoenix(true))
-        .await
-        .unwrap();
-    let closing = closing_task_in(&db, epic_id).await;
-
-    let claimed = close_session_of(&db, closing).await;
-
-    assert_eq!(claimed, Some(ids[1]), "epics.allium: PhoenixIsNeverChained");
-}
-
-/// A store that is DOWN fails the close rather than reporting a close with no
-/// chain: an outage must not look like a finished epic, and nothing was
-/// applied, so the token is still valid for a retry.
+/// A store that is DOWN fails the close rather than reporting it closed:
+/// nothing was applied, so the token is still valid for a retry.
 #[tokio::test]
 async fn a_close_with_the_store_down_fails_loudly() {
     let db = test_db().await;

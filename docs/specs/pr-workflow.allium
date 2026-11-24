@@ -958,27 +958,15 @@ rule ExitSession {
     -- NOT: it lands in review, and the respawn waits for the PR to merge
     -- (PrMerged above) or for a human to complete the task by hand.
     --
-    -- Where the respawn sits relative to the chain below is deliberately NOT
-    -- specified, because it cannot matter: AutoDispatchNextSubtask skips
-    -- phoenix subtasks (PhoenixIsNeverChained), so whether the successor row
-    -- exists yet when the chain runs its selection changes nothing it would
-    -- pick. Any implementation ordering is correct, and none of them should be
-    -- relied on.
-    --
-    -- SessionClosed drives the epic chain (AutoDispatchNextSubtask in
-    -- epics.allium), which also runs in this transaction and records
-    -- the subtask it requested on close.chained_task. It follows the terminal
-    -- write, so the chain sees the closed task in its terminal state. The
-    -- window teardown is NOT ordered against it: the host tears the window
-    -- down only after this transaction commits, when its subscription
-    -- delivers the exit_session row.
-    ensures: SessionClosed(task: task, close: close)
+    -- The window teardown is NOT part of this transaction: the host tears the
+    -- window down only after it commits, when its subscription delivers the
+    -- exit_session row.
 
     @guidance
         -- == Where the close runs ==
         -- The token is a request row, and the token check, the
-        -- consumption, the terminal write, the epic rollup, the phoenix
-        -- respawn and the chain are one module transaction
+        -- consumption, the terminal write, the epic rollup and the phoenix
+        -- respawn are one module transaction
         -- (store-split.allium: RequestExitSession). The tmux teardown is the
         -- host's, from the exit_session row (ExitSessionTeardown).
         --
@@ -996,10 +984,6 @@ rule ExitSession {
         --     normal tick path (ClassifyAgentActivity in agent-health.allium).
         --     A review task stays in Review with a live window. Either way the
         --     board still shows work outstanding;
-        --   • SessionClosed is NOT emitted, so no epic chain fires — see
-        --     AutoDispatchNextSubtask in epics.allium for why compounding a
-        --     broken close into a fresh dispatch is worse than the broken close
-        --     alone;
         --   • the exit token is NOT consumed. The token stays valid, so the
         --     agent may call session_exit again;
         --   • because the window is left alive, agent-health.allium's
@@ -1034,7 +1018,7 @@ rule ExitSession {
         -- (mcp-task-tools.allium) — task_update's dedicated status="done"
         -- path — closes in the module too (store-split.allium:
         -- RequestCloseTask, X1): the same terminal fields as this rule's done
-        -- branch, in one transaction, with no token and no chain, and a close
+        -- branch, in one transaction, with no token, and a close
         -- row for the host's teardown when there is a window to kill or a PR
         -- to close (ExitSessionTeardown). A teardown must not be withheld
         -- from a task that IS closed because some unrelated follow-up step of
@@ -1042,12 +1026,6 @@ rule ExitSession {
         -- it: the close row is written by the same write that closes the
         -- task, or neither lands. Keep the close a dedicated reducer; do not
         -- fold it into patch_task.
-        --
-        -- The chain does NOT apply there. This rule is the sole emitter of
-        -- SessionClosed, so AutoDispatchNextSubtask (epics.allium) fires only
-        -- for a close that came through session_exit — which means only for a
-        -- close that had a session_wrap-up ahead of it, whatever action that session_wrap-up
-        -- took (store-split.allium: EveryExitSessionHadAWrapUp).
         --
         -- Single-call session close. session_exit returns no reflection
         -- prompt: the mandatory reflection is the /retro skill, which the
@@ -1120,19 +1098,6 @@ rule ExitSession {
         -- state and the session-ended state become true in the same instant.
         -- (The window itself dies a moment later, at the host's teardown;
         -- tmux_window is already null by then.)
-        --
-        -- SessionClosed's only consumer is automatic epic chaining
-        -- (AutoDispatchNextSubtask in epics.allium): if the closed task belongs
-        -- to an epic with auto_dispatch = true, the epic's next backlog subtask
-        -- is requested — so a subtask's successor always starts from a
-        -- base_branch that already contains this task's work. A chain that
-        -- stops, or fails, must never turn a successful close into an error;
-        -- the module swallows every chain problem inside the transaction.
-        -- There is deliberately no agent-facing tool for triggering it, and the
-        -- /wrap-up skill carries no section telling the agent not to dispatch
-        -- the next subtask itself — session_exit owns the chain, and its own
-        -- description says so (mcp-task-tools.allium:
-        -- TheNextCallIsNamedJustInTime).
 }
 
 rule ExitSessionTeardown {

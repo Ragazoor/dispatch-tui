@@ -282,9 +282,7 @@ impl BaseRef<'_> {
 /// as a plain string, and "main" against a repo whose default is "master" has
 /// neither ref. Before this check it reached `git worktree add` and came back
 /// as git's own `fatal: invalid reference: main`, naming neither the refs that
-/// were tried nor the field holding the bad value — and when the dispatch was
-/// the epic auto-dispatch chain, which cannot fail its caller, that line was
-/// the entire evidence a human ever saw.
+/// were tried nor the field holding the bad value.
 ///
 /// Returning `Err` here aborts before `.worktrees/` is created, so nothing is
 /// left on disk, exactly as for the infra-class fetch abort.

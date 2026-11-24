@@ -168,7 +168,7 @@ impl App {
     /// Start a dispatch from the board.
     ///
     /// The Backlog filter here is optimism, not the guard: it reads the board's
-    /// snapshot, which a chain or an MCP `task_dispatch` can have invalidated
+    /// snapshot, which an MCP or orchestrator `task_dispatch` can have invalidated
     /// already. The real guard is the atomic claim
     /// `TuiRuntime::exec_dispatch_agent` takes before provisioning
     /// (`DispatchClaimExclusive` in `docs/specs/dispatch.allium`) — this check

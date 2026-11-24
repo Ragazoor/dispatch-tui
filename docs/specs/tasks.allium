@@ -620,9 +620,8 @@ rule MoveTaskForward {
         -- Manual movement (forward or backward) clears the task's agent
         -- notification/poll tracking flags: the review-notified and
         -- needs-input-notified markers, the last PR-poll timestamp and the
-        -- PR-poll failure bookkeeping, the card message flash and its sent
-        -- marker, and the epic chain's auto-dispatch failure marker
-        -- (src/tui/types/state.rs::AgentTracking::clear). There is no
+        -- PR-poll failure bookkeeping, and the card message flash and its sent
+        -- marker (src/tui/types/state.rs::AgentTracking::clear). There is no
         -- separate tmux-output or crash-detection state.
         -- A move out of running also voids any deferred Stop
         -- (current_agent(task).stop_pending), because the bit belongs to the turn the task
@@ -673,9 +672,8 @@ rule MoveTaskBackward {
         -- Manual movement (forward or backward) clears the task's agent
         -- notification/poll tracking flags: the review-notified and
         -- needs-input-notified markers, the last PR-poll timestamp and the
-        -- PR-poll failure bookkeeping, the card message flash and its sent
-        -- marker, and the epic chain's auto-dispatch failure marker
-        -- (src/tui/types/state.rs::AgentTracking::clear). There is no
+        -- PR-poll failure bookkeeping, and the card message flash and its sent
+        -- marker (src/tui/types/state.rs::AgentTracking::clear). There is no
         -- separate tmux-output or crash-detection state.
         -- A move out of running also voids any deferred Stop — see
         -- MoveTaskForward's guidance and core/Task's
@@ -949,10 +947,9 @@ rule PhoenixRespawn {
         -- module they are copied as stored, already normalised when they were
         -- written (see "Where it hooks" above).
         --
-        -- The successor is never auto-dispatched. AutoDispatchNextSubtask
-        -- (epics.allium) skips phoenix subtasks outright, so a phoenix task
-        -- inside an auto_dispatch epic cannot chain into itself forever. See
-        -- that rule for why the guard lives there rather than here.
+        -- In an orchestrated epic the successor is an ordinary backlog task:
+        -- when it counts as ready, the orchestrator may start it
+        -- (orchestrators.allium: SameRulesAsAPerson).
 }
 
 -- == Build Output Cleanup ==
@@ -2579,8 +2576,8 @@ rule HandStatusWriteReachesTheSchedule {
 --   - task_update's dedicated status="done" call (mcp-task-tools.allium:
 --     MarkTaskDoneViaMcp): a session caller, or a dispatched agent acting on
 --     a task other than its own. It closes through the module's close_task
---     (store-split.allium: RequestCloseTask) without session_exit's epic
---     chaining (epics.allium: AutoDispatchNextSubtask).
+--     (store-split.allium: RequestCloseTask) without session_exit's exit
+--     token.
 -- Deletion is never reachable over MCP: there is no MCP delete tool, so
 -- removing a task stays a human act at the board (DeleteTask, BatchDelete).
 

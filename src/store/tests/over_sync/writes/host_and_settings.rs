@@ -390,10 +390,6 @@ async fn the_settled_identity_is_none_until_the_store_names_us() {
 /// calls each mutation once, through the store traits, and names the reducer
 /// call each one produced — in order, so a method that sends nothing or sends
 /// the wrong call shows up as a mismatch at its position.
-///
-/// The epic chain's candidate loop is absent: it is the service's, not a
-/// store method, and `a_chain_refused_on_every_candidate_requests_nothing` and
-/// its neighbours in `src/store/tests/tasks_patch.rs` cover it.
 #[tokio::test]
 async fn every_store_mutation_reaches_the_transport() {
     let (db, caller) = writer_with(RecordingCaller::default());

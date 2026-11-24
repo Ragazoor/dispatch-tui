@@ -29,7 +29,7 @@ fn running_task() -> (Store, i64) {
 fn running_epic_task() -> (Store, i64) {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "e", false);
+    let epic = store.create_epic("alice", "e");
     let id = store.create("alice", epic_task("t", epic, "backlog"));
     dispatch_running(store, id)
 }

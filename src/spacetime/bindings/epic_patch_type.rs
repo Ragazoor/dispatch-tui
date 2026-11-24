@@ -12,7 +12,6 @@ pub struct EpicPatch {
     pub status: Option<String>,
     pub plan_path: Option<String>,
     pub sort_order: Option<Option<i64>>,
-    pub auto_dispatch: Option<bool>,
     pub parent_epic_id: Option<i64>,
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,

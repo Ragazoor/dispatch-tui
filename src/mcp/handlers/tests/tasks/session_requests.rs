@@ -418,43 +418,6 @@ async fn exit_session_pr_takes_the_task_to_review_with_the_url() {
     );
 }
 
-/// The chained subtask is named from the exit_session row's `chained_task`:
-/// the module ran the chain in the same transaction.
-#[tokio::test]
-async fn exit_session_response_names_the_chained_subtask() {
-    let (state, db) = state_with_wait_cap(Duration::ZERO, 1);
-    let epic = db.create_epic("E", "d", None).await.unwrap();
-    db.patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(true))
-        .await
-        .unwrap();
-    let task = wrappable_task(&db).await;
-    db.set_task_epic_id(task, Some(epic.id)).await.unwrap();
-    let next = db
-        .create_task(CreateTaskRequest {
-            epic_id: Some(epic.id),
-            sort_order: Some(10),
-            ..CreateTaskRequest::fixture("Wire up the widget", "/repo")
-        })
-        .await
-        .unwrap();
-    let text = extract_response_text(&answer(wrap_up_call(&state, task, "done")).await);
-
-    let resp = exit_call(&state, task, &token_in(&text), "done", None).await;
-
-    assert_eq!(
-        extract_response_text(&resp),
-        format!(
-            "Session closed. Dispatching next epic subtask {}.",
-            task_ref_of(&state, next).await
-        )
-    );
-    assert_eq!(
-        db.get_task(next).await.unwrap().status,
-        TaskStatus::Running,
-        "the module's request is the claim"
-    );
-}
-
 /// The tool itself refuses a missing token or action, with today's text,
 /// before asking the module anything.
 #[tokio::test]
@@ -627,7 +590,7 @@ async fn an_unsent_exit_session_is_an_error_saying_the_token_is_still_valid() {
 
 /// `task_update` status="done" closes in the module (`MarkTaskDoneViaMcp`,
 /// `RequestCloseTask`): the Done write and ONE `close` row for the host's
-/// teardown, with no token (no wrap_up or exit_session row) and no chain.
+/// teardown, with no token (no wrap_up or exit_session row).
 #[tokio::test]
 async fn update_tasks_done_closes_in_the_module_and_writes_a_close_row_without_a_token() {
     let db: Arc<dyn store::TaskStore> = Arc::new(Store::open_in_memory().unwrap());

@@ -25,7 +25,6 @@ impl EpicBuilder {
                 plan_path: None,
                 sort_order: None,
                 completed_at: None,
-                auto_dispatch: false,
                 parent_epic_id: None,
                 feed_command: None,
                 feed_interval_secs: None,
@@ -68,11 +67,6 @@ impl EpicBuilder {
 
     pub fn sort_order(mut self, sort_order: Option<i64>) -> Self {
         self.epic.sort_order = sort_order;
-        self
-    }
-
-    pub fn auto_dispatch(mut self, auto_dispatch: bool) -> Self {
-        self.epic.auto_dispatch = auto_dispatch;
         self
     }
 
@@ -121,7 +115,6 @@ mod tests {
         assert_eq!(epic.plan_path, None);
         assert_eq!(epic.sort_order, None);
         assert_eq!(epic.completed_at, None);
-        assert!(!epic.auto_dispatch);
         assert_eq!(epic.parent_epic_id, None);
         assert_eq!(epic.feed_command, None);
         assert_eq!(epic.feed_interval_secs, None);
@@ -140,7 +133,6 @@ mod tests {
             .status(TaskStatus::Running)
             .plan(Some("p.md"))
             .sort_order(Some(9))
-            .auto_dispatch(true)
             .parent(Some(2))
             .feed_command(Some("echo hi"))
             .feed_interval_secs(Some(30))
@@ -151,7 +143,6 @@ mod tests {
         assert_eq!(epic.status, TaskStatus::Running);
         assert_eq!(epic.plan_path.as_deref(), Some("p.md"));
         assert_eq!(epic.sort_order, Some(9));
-        assert!(epic.auto_dispatch);
         assert_eq!(epic.parent_epic_id, Some(EpicId(2)));
         assert_eq!(epic.feed_command.as_deref(), Some("echo hi"));
         assert_eq!(epic.feed_interval_secs, Some(30));

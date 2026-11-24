@@ -1051,53 +1051,8 @@ mod feed_epic_trigger {
     }
 }
 
-mod epic_auto_dispatch_and_group_by_repo {
+mod epic_group_by_repo {
     use super::*;
-
-    #[tokio::test]
-    async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
-        let (rt, mut app) = test_runtime().await;
-        let epic = rt
-            .db_write()
-            .create_epic("AutoDispatch Epic", "desc", None)
-            .await
-            .unwrap();
-        // Default is false; opt in first so the toggle-to-false is meaningful.
-        rt.db_write()
-            .patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(true))
-            .await
-            .unwrap();
-        let enabled = rt.database.get_epic(epic.id).await.unwrap();
-        assert!(enabled.auto_dispatch);
-
-        rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, false)
-            .await;
-
-        let updated = rt.database.get_epic(epic.id).await.unwrap();
-        assert!(!updated.auto_dispatch);
-        assert!(app.error_popup().is_none());
-    }
-
-    #[tokio::test]
-    async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
-        let (rt, mut app) = test_runtime().await;
-        let epic = rt
-            .db_write()
-            .create_epic("AutoDispatch Epic", "desc", None)
-            .await
-            .unwrap();
-        rt.db_write()
-            .patch_epic(epic.id, &store::EpicPatch::new().auto_dispatch(false))
-            .await
-            .unwrap();
-
-        rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, true)
-            .await;
-
-        let updated = rt.database.get_epic(epic.id).await.unwrap();
-        assert!(updated.auto_dispatch);
-        assert!(app.error_popup().is_none());
-    }
 
     #[tokio::test]
     async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {

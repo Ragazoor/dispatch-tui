@@ -22,7 +22,6 @@ pub struct UpdateEpicParams {
     /// the exception is a manual reorder of this epic's card in the Done
     /// column, which persists an override here.
     pub completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
-    pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<Option<i64>>,
     pub group_by_repo: Option<bool>,
@@ -44,7 +43,6 @@ impl UpdateEpicParams {
             plan_path: None,
             sort_order: None,
             completed_at: None,
-            auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
             group_by_repo: None,
@@ -69,7 +67,6 @@ impl UpdateEpicParams {
             plan_path,
             sort_order,
             completed_at,
-            auto_dispatch,
             feed_command,
             feed_interval_secs,
             group_by_repo,
@@ -84,7 +81,6 @@ impl UpdateEpicParams {
             ("plan_path", plan_path.is_some()),
             ("sort_order", sort_order.is_some()),
             ("completed_at", completed_at.is_some()),
-            ("auto_dispatch", auto_dispatch.is_some()),
             ("feed_command", feed_command.is_some()),
             ("feed_interval_secs", feed_interval_secs.is_some()),
             ("group_by_repo", group_by_repo.is_some()),
@@ -417,9 +413,6 @@ impl EpicService {
         }
         if let Some(at) = params.completed_at {
             patch = patch.completed_at(at);
-        }
-        if let Some(ad) = params.auto_dispatch {
-            patch = patch.auto_dispatch(ad);
         }
         if let Some(ref fc) = params.feed_command {
             patch = patch.feed_command(fc.as_option());

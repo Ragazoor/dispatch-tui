@@ -1688,7 +1688,7 @@ surface OrchestratorSessionPrompt {
         --     the operator's review.);
         --   the first-turn check (FirstTurnChecksTheBoard): look for what
         --     happened while no session ran before anything else.
-        -- Under start rule everything, every backlog task reads ready.
+        -- Under start rule everything, every other backlog task reads ready.
 
     @guarantee ItIsGivenOnEveryStart
         -- A resumed session gets the same prompt as its next message, so the

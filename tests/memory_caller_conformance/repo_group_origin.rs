@@ -92,9 +92,10 @@ fn memory_caller_keeps_the_repo_group_origin_and_clears_marks_on_relink() {
         };
         let task = real.create_task(in_root("/x/alpha")).await.unwrap();
         wait_for!(rows_real.task(task).is_some());
-        mem.align_next_task_id(task.0);
-        assert_eq!(mem.create_task(in_root("/x/alpha")).await.unwrap(), task);
         let sub = rows_real.task(task).unwrap().epic_id.unwrap().0;
+        mem.align_next_task_id(task.0);
+        mem.align_next_epic_id(sub);
+        assert_eq!(mem.create_task(in_root("/x/alpha")).await.unwrap(), task);
         wait_for!(rows_real.epic(EpicId(sub)).is_some());
         same_epic(sub);
 

@@ -15,7 +15,7 @@ fn two_hosts() -> Store {
     store.register_host_for(HOST_A, "alice");
     store.register_host_for(HOST_B, "alice");
     assert_eq!(store.create("alice", user_task("t", "alice")), 1);
-    assert_eq!(store.create_epic("alice", "e", false), 1);
+    assert_eq!(store.create_epic("alice", "e"), 1);
     store
 }
 

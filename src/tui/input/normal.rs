@@ -194,15 +194,8 @@ impl App {
             "toggle_ready" => keyed(self, Message::Epic(EpicMessage::ToggleReady)),
             "open_orchestrator" => keyed(self, Message::Epic(EpicMessage::OpenOrchestrator)),
             "resolve_waiting_item" => keyed(self, Message::Epic(EpicMessage::ResolveItemKey)),
-            "toggle_auto_dispatch" | "toggle_group_by_repo" => match self.current_epic_id() {
-                Some(id) => {
-                    let msg = if action == "toggle_auto_dispatch" {
-                        EpicMessage::ToggleAutoDispatch(id)
-                    } else {
-                        EpicMessage::ToggleGroupByRepo(id)
-                    };
-                    keyed(self, Message::Epic(msg))
-                }
+            "toggle_group_by_repo" => match self.current_epic_id() {
+                Some(id) => keyed(self, Message::Epic(EpicMessage::ToggleGroupByRepo(id))),
                 None => vec![],
             },
             "reparent_epic" => match self.selected_epic_id() {

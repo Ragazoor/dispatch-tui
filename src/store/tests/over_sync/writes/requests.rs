@@ -31,12 +31,6 @@ async fn a_request_names_the_machine_making_it() {
     );
 }
 
-// The chain's candidate loop runs in the module
-// (`store-split.allium: RequestExitSession` runs
-// `AutoDispatchNextSubtask` in its own transaction): its ordering, phoenix and
-// refusal rules are pinned in `src/sync/memory_caller/tests/session_requests.rs`
-// and the module's own tests.
-
 /// `store-split.allium: RequestWrapUp`, `RequestExitSession` and the host
 /// rules after them. A wrap-up names the machine making it, with the action in
 /// the module's spelling; an exit_session carries the token and the url only

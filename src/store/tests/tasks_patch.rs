@@ -124,7 +124,7 @@ mod property_tests {
             p = p.sort_order(Some(1));
         }
         if bits & (1 << 5) != 0 {
-            p = p.auto_dispatch(true);
+            p = p.group_by_repo(true);
         }
         if bits & (1 << 6) != 0 {
             p = p.feed_command(Some("cmd"));
@@ -256,7 +256,6 @@ mod property_tests {
             description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
             plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
             sort_order  in proptest::option::of(proptest::option::of(any::<i64>())),
-            auto_dispatch in proptest::option::of(any::<bool>()),
             feed_command  in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
             feed_interval in proptest::option::of(proptest::option::of(1i64..86_400)),
         ) {
@@ -273,7 +272,6 @@ mod property_tests {
                 if let Some(d)  = description.as_deref() { p = p.description(d); }
                 if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
                 if let Some(so) = sort_order    { p = p.sort_order(so); }
-                if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
                 if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
                 if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
 
@@ -284,7 +282,6 @@ mod property_tests {
                 prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
                 prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
                 prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
-                prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
                 prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
                 prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
                 Ok::<(), proptest::test_runner::TestCaseError>(())
@@ -531,8 +528,7 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
 // The claim IS the dispatch request (`store-split.allium:
 // RequestDispatch`): one module transaction that claims the task and writes
 // the row. These pin the claim's guarantees at the store, through
-// `request_dispatch`, and the epic chain's ordering through the close that now
-// runs it in the module (`store-split.allium: RequestExitSession`).
+// `request_dispatch`.
 
 /// Helper: a subtask of `epic_id` in `status`, with an explicit `sort_order`.
 async fn subtask(
@@ -584,197 +580,10 @@ fn applied(answer: &RequestDispatchAnswer) -> bool {
     matches!(answer, RequestDispatchAnswer::Requested(_))
 }
 
-/// Close a session of `epic` through the module and answer the subtask its
-/// chain requested in the same transaction (`RequestExitSession`,
-/// `AutoDispatchNextSubtask`): a task of the epic running here is wrapped up
-/// (`done`, so the token is a row at once) and then closed.
-async fn next_in_chain(db: &std::sync::Arc<Store>, epic: EpicId) -> Option<TaskId> {
-    use crate::models::WrapUpMode;
-    use crate::store::{SessionRequestAnswer, SessionRequestRead, SessionRequestStore};
-    db.patch_epic(epic, &crate::store::EpicPatch::new().auto_dispatch(true))
-        .await
-        .unwrap();
-    let closing = db
-        .create_task(CreateTaskRequest {
-            status: TaskStatus::Running,
-            epic_id: Some(epic),
-            ..CreateTaskRequest::fixture("closing", "/tmp/r")
-        })
-        .await
-        .unwrap();
-    let window = crate::models::TmuxWindow::for_task(closing);
-    db.give_agent(closing);
-    db.patch_task(
-        closing,
-        &TaskPatch::new()
-            .worktree(Some("/tmp/r/.worktrees/closing"))
-            .host(Some(MEMORY_HOST_ID))
-            .tmux_window(Some(&window)),
-    )
-    .await
-    .unwrap();
-    let SessionRequestAnswer::Requested(token) =
-        db.request_wrap_up(closing, WrapUpMode::Done).await.unwrap()
-    else {
-        panic!("the wrap-up must apply");
-    };
-    let SessionRequestAnswer::Requested(close) = db
-        .request_exit_session(closing, token, WrapUpMode::Done, None)
-        .await
-        .unwrap()
-    else {
-        panic!("the close must apply");
-    };
-    db.session_request(close).await.unwrap().chained_task
-}
-
+/// A person may start a phoenix task, which is the entire point of the flag:
+/// the request reducer accepts it.
 #[tokio::test]
-async fn the_chain_requests_the_lowest_sort_order_subtask() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let third = subtask(&db, epic.id, "c", TaskStatus::Backlog, Some(30)).await;
-    let first = subtask(&db, epic.id, "a", TaskStatus::Backlog, Some(10)).await;
-    let second = subtask(&db, epic.id, "b", TaskStatus::Backlog, Some(20)).await;
-
-    assert_eq!(next_in_chain(&db, epic.id).await, Some(first));
-    for untouched in [second, third] {
-        assert_eq!(
-            db.get_task(untouched).await.unwrap().status,
-            TaskStatus::Backlog,
-            "only the selected row may be claimed"
-        );
-    }
-}
-
-/// The ordering key is `COALESCE(sort_order, id)` then `id`: a
-/// null-sort_order subtask sorts by its own id, so it loses to an explicitly
-/// lower sort_order and wins against a higher one, regardless of insertion
-/// order.
-#[tokio::test]
-async fn the_chain_falls_back_to_id_when_sort_order_is_null() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let unordered = subtask(&db, epic.id, "no sort_order", TaskStatus::Backlog, None).await;
-    let above = subtask(&db, epic.id, "sorts after", TaskStatus::Backlog, Some(500)).await;
-    let below = subtask(&db, epic.id, "sorts before", TaskStatus::Backlog, Some(0)).await;
-
-    assert_eq!(
-        next_in_chain(&db, epic.id).await,
-        Some(below),
-        "sort_order 0 must beat a null whose fallback key is its own id"
-    );
-    assert_eq!(
-        next_in_chain(&db, epic.id).await,
-        Some(unordered),
-        "the null-sort_order subtask beats sort_order 500 via its id fallback"
-    );
-    assert_eq!(next_in_chain(&db, epic.id).await, Some(above));
-    assert_eq!(next_in_chain(&db, epic.id).await, None);
-}
-
-#[tokio::test]
-async fn the_chain_skips_non_backlog_subtasks() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    subtask(&db, epic.id, "running", TaskStatus::Running, Some(1)).await;
-    subtask(&db, epic.id, "review", TaskStatus::Review, Some(2)).await;
-    subtask(&db, epic.id, "done", TaskStatus::Done, Some(3)).await;
-    let backlog = subtask(&db, epic.id, "backlog", TaskStatus::Backlog, Some(4)).await;
-
-    assert_eq!(next_in_chain(&db, epic.id).await, Some(backlog));
-}
-
-/// `PhoenixIsNeverChained` (docs/specs/epics.allium): the chain passes OVER a
-/// phoenix subtask and takes the next ordinary one behind it — and stops when
-/// only phoenix ones remain, rather than looping.
-#[tokio::test]
-async fn the_chain_skips_phoenix_subtasks() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let recurring = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;
-    let ordinary = subtask(&db, epic.id, "ordinary", TaskStatus::Backlog, Some(2)).await;
-
-    assert_eq!(
-        next_in_chain(&db, epic.id).await,
-        Some(ordinary),
-        "the phoenix subtask sorts first but is not a candidate"
-    );
-    assert_eq!(
-        db.get_task(recurring).await.unwrap().status,
-        TaskStatus::Backlog,
-        "and it is left in backlog, unclaimed"
-    );
-    assert_eq!(next_in_chain(&db, epic.id).await, None);
-}
-
-#[tokio::test]
-async fn the_chain_ignores_other_epics_subtasks() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let mine = db.create_epic("mine", "", None).await.unwrap();
-    let other = db.create_epic("other", "", None).await.unwrap();
-    let theirs = subtask(&db, other.id, "theirs", TaskStatus::Backlog, Some(1)).await;
-
-    assert_eq!(next_in_chain(&db, mine.id).await, None);
-    assert_eq!(
-        db.get_task(theirs).await.unwrap().status,
-        TaskStatus::Backlog
-    );
-}
-
-/// The module refuses a foreign-owned subtask, and the chain moves on to the
-/// next ordinary one behind it, leaving the foreign one untouched.
-#[tokio::test]
-async fn the_chain_moves_past_a_foreign_owned_subtask() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    let foreign = subtask(&db, epic.id, "foreign", TaskStatus::Backlog, Some(10)).await;
-    db.patch_task(
-        foreign,
-        &TaskPatch::new()
-            .worktree(Some("/elsewhere/wt"))
-            .host(Some("some-other-machine")),
-    )
-    .await
-    .unwrap();
-    let next = subtask(&db, epic.id, "next", TaskStatus::Backlog, Some(20)).await;
-
-    assert_eq!(next_in_chain(&db, epic.id).await, Some(next));
-    assert_eq!(
-        db.get_task(foreign).await.unwrap().status,
-        TaskStatus::Backlog,
-        "the foreign-owned subtask is left untouched, not claimed"
-    );
-}
-
-/// THE RACE. Every candidate is refused — here, every one's worktree is on
-/// another machine — so the loop offers each once, runs out, and reports an
-/// empty backlog rather than claiming something it was refused.
-#[tokio::test]
-async fn a_chain_refused_on_every_candidate_requests_nothing() {
-    let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    for (title, order) in [("a", 1), ("b", 2)] {
-        let id = subtask(&db, epic.id, title, TaskStatus::Backlog, Some(order)).await;
-        db.patch_task(
-            id,
-            &TaskPatch::new()
-                .worktree(Some("/elsewhere/wt"))
-                .host(Some("some-other-machine")),
-        )
-        .await
-        .unwrap();
-    }
-
-    assert_eq!(next_in_chain(&db, epic.id).await, None);
-    assert!(db.dispatch_requests().await.is_empty());
-}
-
-/// The phoenix skip belongs to the CHAIN, not to dispatch. `PhoenixIsNeverChained`
-/// stops an epic launching agents at a recurring task on its own; it does not
-/// stop a human doing it, which is the entire point of the flag. The request
-/// reducer accepts a phoenix task.
-#[tokio::test]
-async fn a_phoenix_task_the_chain_would_skip_can_be_requested_by_hand() {
+async fn a_phoenix_task_can_be_requested_by_hand() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let id = phoenix_subtask(&db, epic.id, "recurring", Some(1)).await;

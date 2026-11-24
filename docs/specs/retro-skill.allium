@@ -18,8 +18,9 @@
 --           RunRetro) and what refuses a dirty tree
 --           (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork, which holds a
 --           retro fix to the commit but cannot tell whether retro ran); that
---           a retro task sorts after planned subtasks (epics.allium:
---           AutoDispatchNextSubtask); how the skill's copy reaches an agent
+--           a retro task sorts after planned subtasks (orchestrators.allium:
+--           OrchestratorStartsATask, board order); how the skill's copy
+--           reaches an agent
 --           (mcp-task-tools.allium: SkillCopyIsJustInTime); what task_create
 --           and learning_record do (mcp-task-tools.allium: CreateTaskViaMcp;
 --           learnings.allium: RecordLearningViaMcp); the knowledge base itself (learnings.allium);

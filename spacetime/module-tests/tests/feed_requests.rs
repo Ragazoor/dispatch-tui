@@ -15,7 +15,7 @@ fn world() -> (Store, i64) {
     store.register_host_for(HOST_A, "alice");
     store.register_host_for(HOST_B, "alice");
     store.register_host_for("host-bob", "bob");
-    let epic = store.create_epic("alice", "Feed", false);
+    let epic = store.create_epic("alice", "Feed");
     store
         .call("alice", |ctx| {
             patch_epic(

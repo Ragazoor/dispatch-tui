@@ -331,7 +331,6 @@ fn every_field_of_an_epic_patch_reaches_the_row() {
             status: Some(DONE.into()),
             plan_path: Some(MARK.into()),
             sort_order: Some(Some(3)),
-            auto_dispatch: Some(true),
             parent_epic_id: Some(9),
             feed_command: Some(MARK.into()),
             feed_interval_secs: Some(60),
@@ -349,7 +348,6 @@ fn every_field_of_an_epic_patch_reaches_the_row() {
     assert_eq!(row.status, DONE);
     assert_eq!(row.plan_path, MARK);
     assert_eq!(row.sort_order, Some(3));
-    assert!(row.auto_dispatch);
     assert_eq!(row.parent_epic_id, 9);
     assert_eq!(row.feed_command, MARK);
     assert_eq!(row.feed_interval_secs, 60);

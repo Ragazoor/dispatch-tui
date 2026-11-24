@@ -77,13 +77,6 @@ fn update_epic_params_every_field_covered() {
             },
         ),
         (
-            "auto_dispatch",
-            UpdateEpicParams {
-                auto_dispatch: Some(true),
-                ..UpdateEpicParams::for_epic(EpicId(1))
-            },
-        ),
-        (
             "feed_command",
             UpdateEpicParams {
                 feed_command: Some(FieldUpdate::Set("cmd".to_string())),

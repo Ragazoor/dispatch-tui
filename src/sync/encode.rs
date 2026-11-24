@@ -292,8 +292,7 @@ pub const DEFAULT_CREATE_STATUS: TaskStatus = TaskStatus::Backlog;
 
 /// Build the row a `create_epic` reducer inserts.
 ///
-/// Backlog, not auto-dispatching, and manual: `epics.allium: CreateEpic`. Those
-/// three are the epic's birth state rather than defaults the caller forgot, and
+/// Backlog and manual: `epics.allium: CreateEpic`. Those two are the epic's birth state rather than defaults the caller forgot, and
 /// spelling them here keeps them out of the module — the store should not have
 /// an opinion about what a new epic looks like.
 pub fn create_epic_row(
@@ -371,7 +370,6 @@ pub fn epic_patch(patch: &crate::models::EpicPatch<'_>) -> bindings::EpicPatch {
         status: patch.status.map(|s| s.as_str().to_string()),
         plan_path: nullable(patch.plan_path, str::to_string, String::new()),
         sort_order: patch.sort_order,
-        auto_dispatch: patch.auto_dispatch,
         // `0` is the absent parent, not epic zero — `#[auto_inc]` never hands
         // out an id of zero, which is what makes the sentinel unreachable as a
         // real value.

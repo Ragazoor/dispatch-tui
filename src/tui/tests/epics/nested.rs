@@ -1,37 +1,17 @@
 use super::*;
 
+/// Auto dispatch is gone (`orchestrators.allium`, O8): the header has no
+/// dispatch indicator.
 #[test]
-fn epic_view_header_shows_auto_dispatch_indicator() {
+fn epic_view_header_shows_no_dispatch_indicator() {
     let mut app = App::new(vec![]);
-    let mut epic = make_epic(1);
-    epic.auto_dispatch = true;
-    app.board.epics = vec![epic];
+    app.board.epics = vec![make_epic(1)];
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(1),
     )));
 
     let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "auto dispatch [U]"),
-        "Expected 'auto dispatch [U]' in header"
-    );
-}
-
-#[test]
-fn epic_view_header_shows_manual_dispatch_indicator() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(1);
-    epic.auto_dispatch = false;
-    app.board.epics = vec![epic];
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
-        EpicId(1),
-    )));
-
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "manual dispatch [U]"),
-        "Expected 'manual dispatch [U]' in header"
-    );
+    assert!(!buffer_contains(&buf, "dispatch [U]"));
 }
 
 #[test]

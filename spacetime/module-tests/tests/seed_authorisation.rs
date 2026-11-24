@@ -135,7 +135,7 @@ fn init_records_the_first_publisher_only() {
 #[test]
 fn a_board_cannot_subscribe_someone_else_to_an_epic() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let err = store
         .call("alice", |ctx| {
@@ -154,7 +154,7 @@ fn a_board_cannot_subscribe_someone_else_to_an_epic() {
 #[test]
 fn the_store_itself_may_subscribe_anyone() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store
         .call_as_scheduler(|ctx| subscribe_to_epic(ctx, identity_of("bob"), epic))
         .expect("operator");
@@ -163,7 +163,7 @@ fn the_store_itself_may_subscribe_anyone() {
 #[test]
 fn a_board_cannot_clear_someone_elses_unseen_marks() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     store.enrol("bob");
     let task = store.create_signalled("alice", epic_task("t", epic, "backlog"));
     let err = store

@@ -189,27 +189,25 @@ mod render_glue {
     }
 
     /// The same app, switched into epic view on an epic that lights up every
-    /// epic-only badge: `auto dispatch [U]  ` (19), `role:my-reviews  ` (17)
-    /// and `group:on [R]  ` (14), on top of `[1/2 repos]  ` (13) and the bell
-    /// (5 codepoints, 6 display columns). That is the widest the top row ever
-    /// gets — 68 codepoints of pre-existing badges, so `render_top_indicators`
-    /// hands the budget span only `width - 69` (68 plus the emoji-undercount
-    /// reserve).
+    /// epic-only badge: `role:my-reviews  ` (17) and `group:on [R]  ` (14), on
+    /// top of `[1/2 repos]  ` (13) and the bell (5 codepoints, 6 display
+    /// columns). That is the widest the top row ever gets — 49 codepoints of
+    /// pre-existing badges, so `render_top_indicators` hands the budget span
+    /// only `width - 50` (49 plus the emoji-undercount reserve).
     ///
     /// The `append-only` marker (epics.allium: AppendOnlyEpicIndicator) cannot
     /// widen this. The write path refuses append-only together with grouping
     /// or a feed role (epics.allium: UpdateEpicViaMcp), so the marker's widest
-    /// row is `manual dispatch [U]  append-only  group:off [R]  ` — 49
-    /// codepoints against the 50 this one spends on its three epic badges. A
-    /// refused `R` press can flash `append-only  group:on [R]` before the
-    /// rollback lands (ToggleGroupByRepo), and even that is only 48.
+    /// row is `append-only  group:off [R]  ` — 28 codepoints against the 31
+    /// this one spends on its two epic badges. A refused `R` press can flash
+    /// `append-only  group:on [R]  ` before the rollback lands
+    /// (ToggleGroupByRepo), and even that is only 27.
     fn epic_view_app_with_every_badge_and_budget() -> crate::tui::App {
         use crate::models::{EpicId, FeedRole};
         use crate::tui::types::{BoardSelection, ViewMode};
 
         let mut app = app_with_badges_and_budget();
         let mut epic = crate::tui::tests::helpers::make_epic(10);
-        epic.auto_dispatch = true;
         epic.group_by_repo = true;
         epic.feed_role = FeedRole::MyReviews;
         app.board.epics = vec![epic];
@@ -224,14 +222,13 @@ mod render_glue {
     }
 
     /// Epic view is the case the design called for alongside board view, and the
-    /// one most likely to squeeze the budget span: at width 88 the budget gets
+    /// one most likely to squeeze the budget span: at width 69 the budget gets
     /// 19 columns, so the full two-window form (27, with countdowns) cannot fit
     /// but the countdown-less form (16) can. Every epic badge must survive.
     #[test]
     fn epic_view_badges_squeeze_the_budget_but_are_never_dropped() {
         let mut app = epic_view_app_with_every_badge_and_budget();
-        let row = top_row(&mut app, 88);
-        assert!(row.contains("auto dispatch [U]"), "got {row:?}");
+        let row = top_row(&mut app, 69);
         assert!(row.contains("role:my-reviews"), "got {row:?}");
         assert!(row.contains("group:on [R]"), "got {row:?}");
         assert!(row.contains("[1/2 repos]"), "got {row:?}");
@@ -247,15 +244,14 @@ mod render_glue {
         );
     }
 
-    /// At width 72 the budget span gets 3 columns — no degradation level fits,
+    /// At width 53 the budget span gets 3 columns — no degradation level fits,
     /// so it must vanish entirely rather than push an epic badge off-screen.
     #[test]
     fn very_narrow_epic_view_drops_budget_entirely_but_keeps_epic_badges() {
         let mut app = epic_view_app_with_every_badge_and_budget();
-        let row = top_row(&mut app, 72);
+        let row = top_row(&mut app, 53);
         assert!(!row.contains("5h"), "budget badge must be gone: {row:?}");
         assert!(!row.contains("7d"), "budget badge must be gone: {row:?}");
-        assert!(row.contains("auto dispatch [U]"), "got {row:?}");
         assert!(row.contains("role:my-reviews"), "got {row:?}");
         assert!(row.contains("group:on [R]"), "got {row:?}");
         assert!(row.contains("[1/2 repos]"), "got {row:?}");

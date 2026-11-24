@@ -13,7 +13,7 @@ use spacetimedb::Table;
 #[test]
 fn batch_patch_sub_status_applies_the_whole_batch_in_one_call() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let a = store.create("alice", epic_task("a", epic, "running"));
     let b = store.create("alice", epic_task("b", epic, "running"));
 

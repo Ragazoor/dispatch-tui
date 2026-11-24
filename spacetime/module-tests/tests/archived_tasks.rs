@@ -148,7 +148,7 @@ fn an_archived_task_keeps_its_learnings_retrievals_and_verdicts() {
 #[test]
 fn deleting_an_epic_archives_every_task_of_its_subtree_with_the_epic_title() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "Parent", false);
+    let epic = store.create_epic("alice", "Parent");
     store
         .call("alice", |ctx| {
             create_epic(
@@ -183,7 +183,7 @@ fn deleting_an_epic_archives_every_task_of_its_subtree_with_the_epic_title() {
 fn a_batch_delete_archives_its_plain_tasks_and_epic_subtrees() {
     let store = Store::new();
     let plain = done_user_task(&store, "plain", "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let inner = store.create("alice", epic_task("inner", epic, "done"));
 
     store
@@ -215,7 +215,7 @@ fn every_record_is_read_and_listed_by_anyone() {
 #[test]
 fn the_listing_filters_by_epic_and_repo() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let in_epic = store.create("alice", epic_task("in epic", epic, "done"));
     let other = store.create(
         "alice",

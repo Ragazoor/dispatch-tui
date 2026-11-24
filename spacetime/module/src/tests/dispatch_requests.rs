@@ -100,11 +100,13 @@ fn an_unparseable_requested_at_has_no_deadline() {
 }
 
 #[test]
-fn only_the_four_launch_paths_are_origins() {
-    for origin in ["user", "mcp", "epic_chain", "quick"] {
+fn only_the_launch_paths_are_origins() {
+    for origin in ["user", "mcp", "quick", "schedule"] {
         assert!(validate_dispatch_origin(origin).is_ok(), "{origin}");
     }
-    for origin in ["", "tui", "Quick"] {
+    // epic_chain stays on old rows only (store-split.allium:
+    // DispatchRequestOrigin); a new request may not name it.
+    for origin in ["", "tui", "Quick", "epic_chain"] {
         assert!(validate_dispatch_origin(origin).is_err(), "{origin:?}");
     }
 }
@@ -151,24 +153,20 @@ fn a_task_with_an_open_request_is_refused_even_in_backlog() {
     assert!(why.contains("open dispatch request"), "{why}");
 }
 
-/// `epics.allium: PhoenixIsNeverChained`, enforced by the request: the
-/// epic chain's request for a phoenix task is refused with that reason,
-/// and every other origin may take it.
+/// The request takes a phoenix task from any origin (`orchestrators.allium:
+/// SameRulesAsAPerson`).
 #[test]
-fn the_epic_chain_may_not_request_a_phoenix_task() {
+fn any_origin_may_request_a_phoenix_task() {
     let phoenix = Task {
         phoenix: true,
         ..backlog_task()
     };
-    let why = validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false, NOW).unwrap_err();
-    assert!(why.contains("phoenix"), "{why}");
     for origin in ["user", "mcp", "quick"] {
         assert!(
             validate_dispatch_request(&phoenix, HOST_A, origin, false, NOW).is_ok(),
             "{origin}"
         );
     }
-    assert!(validate_dispatch_request(&backlog_task(), HOST_A, "epic_chain", false, NOW).is_ok());
 }
 
 // -- RequestDispatch: the mode (D3) ----------------------------------

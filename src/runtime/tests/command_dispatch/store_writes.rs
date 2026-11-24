@@ -618,15 +618,6 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     dispatch_one(
         &rt,
         &mut app,
-        Command::Epic(EpicCommand::ToggleAutoDispatch {
-            id: epic.id,
-            auto_dispatch: true,
-        }),
-    )
-    .await;
-    dispatch_one(
-        &rt,
-        &mut app,
         Command::Epic(EpicCommand::ToggleGroupByRepo {
             id: epic.id,
             group_by_repo: true,
@@ -637,7 +628,6 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
     let stored = rt.database.get_epic(epic.id).await.unwrap();
     assert_eq!(stored.status, models::TaskStatus::Review);
     assert_eq!(stored.sort_order, Some(3));
-    assert!(stored.auto_dispatch);
     assert!(stored.group_by_repo);
 
     // RefreshFromDb must make the App agree with the DB.

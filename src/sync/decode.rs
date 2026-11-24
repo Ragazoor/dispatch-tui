@@ -291,7 +291,6 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         status,
         plan_path: text(&row.plan_path).map(str::to_owned),
         sort_order: row.sort_order,
-        auto_dispatch: row.auto_dispatch,
         parent_epic_id: id(row.parent_epic_id).map(EpicId),
         feed_command: text(&row.feed_command).map(str::to_owned),
         feed_interval_secs: id(row.feed_interval_secs),
@@ -642,7 +641,6 @@ pub fn session_request(row: &bindings::SessionRequest) -> Decoded<SessionRequest
         pr_url: text(&row.pr_url).map(str::to_owned),
         wrap_up_request: id(row.wrap_up_request).map(SessionRequestId),
         tmux_window: tmux_window(&row.tmux_window),
-        chained_task: id(row.chained_task).map(TaskId),
         deadline: timestamp(T, row.id, "deadline", &row.deadline)?,
     })
 }

@@ -732,16 +732,8 @@ fn a_done_close_ignores_a_pr_url() {
 // -- ExitSession: the exit_session row -----------------------------------
 
 #[test]
-fn an_exit_session_row_names_the_token_window_host_and_chained_subtask() {
-    let row = new_exit_session_request(
-        &running_task(),
-        WINDOW,
-        10,
-        "pr",
-        "https://x/pull/1",
-        42,
-        NOW,
-    );
+fn an_exit_session_row_names_the_token_window_and_host() {
+    let row = new_exit_session_request(&running_task(), WINDOW, 10, "pr", "https://x/pull/1", NOW);
     assert_eq!(row.task_id, 1);
     assert_eq!(row.kind, "exit_session");
     assert_eq!(row.action, "pr");
@@ -752,26 +744,17 @@ fn an_exit_session_row_names_the_token_window_host_and_chained_subtask() {
     assert_eq!(row.pr_url, "https://x/pull/1");
     assert_eq!(row.wrap_up_request, 10);
     assert_eq!(row.tmux_window, "task-1");
-    assert_eq!(row.chained_task, 42);
+    assert_eq!(row.chained_task, 0, "a dead column");
     assert_eq!(row.claimed_at, "");
     assert_eq!(row.finished_at, "");
     assert!(session_request_has_host_work(&row));
 }
 
-/// pr_url is recorded only for action pr; no chained subtask is 0.
+/// pr_url is recorded only for action pr.
 #[test]
 fn an_exit_session_row_records_the_pr_url_only_for_pr() {
-    let row = new_exit_session_request(
-        &running_task(),
-        WINDOW,
-        10,
-        "done",
-        "https://x/pull/1",
-        0,
-        NOW,
-    );
+    let row = new_exit_session_request(&running_task(), WINDOW, 10, "done", "https://x/pull/1", NOW);
     assert_eq!(row.pr_url, "");
-    assert_eq!(row.chained_task, 0);
 }
 
 // -- PhoenixRespawn through the close -------------------------------------
@@ -880,58 +863,6 @@ fn the_successor_owner_follows_the_epic() {
     };
     assert_eq!(phoenix_successor(&owned, 0, NOW, "c").owner, "alice");
     assert_eq!(phoenix_successor(&owned, 9, NOW, "c").owner, "");
-}
-
-// -- AutoDispatchNextSubtask: candidate selection --------------------------
-
-fn subtask(id: i64, status: &str, sort_order: Option<i64>) -> Task {
-    Task {
-        id,
-        status: status.into(),
-        sort_order,
-        ..blank_task()
-    }
-}
-
-/// First backlog subtask ordered by sort_order (nulls fall back to the
-/// task id), then by id.
-#[test]
-fn candidates_are_the_backlog_subtasks_in_board_order() {
-    let tasks = vec![
-        subtask(3, "backlog", None),
-        subtask(1, "backlog", Some(5)),
-        subtask(2, "backlog", Some(1)),
-        subtask(4, "running", Some(0)),
-        subtask(5, "done", None),
-        subtask(6, "backlog", Some(3)),
-    ];
-    let ids: Vec<i64> = chain_candidates(tasks).into_iter().map(|t| t.id).collect();
-    assert_eq!(ids, vec![2, 3, 6, 1]);
-}
-
-/// A phoenix subtask is a candidate in the list and refused by the request
-/// itself (`PhoenixIsNeverChained`), so the chain passes over it.
-#[test]
-fn the_chains_request_refuses_a_phoenix_candidate_and_one_on_another_host() {
-    let phoenix = Task {
-        phoenix: true,
-        host: String::new(),
-        ..subtask(1, "backlog", None)
-    };
-    assert!(validate_dispatch_request(&phoenix, HOST_A, "epic_chain", false, NOW).is_err());
-    let elsewhere = Task {
-        host: HOST_B.into(),
-        ..subtask(2, "backlog", None)
-    };
-    assert!(validate_dispatch_request(&elsewhere, HOST_A, "epic_chain", false, NOW).is_err());
-    assert!(validate_dispatch_request(
-        &subtask(3, "backlog", None),
-        HOST_A,
-        "epic_chain",
-        false,
-        NOW
-    )
-    .is_ok());
 }
 
 // -- PR state (pr-workflow.allium: ReportPrStatus, ReportPrUnreadable) ----

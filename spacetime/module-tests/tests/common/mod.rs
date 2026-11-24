@@ -122,10 +122,9 @@ impl Store {
     }
 
     /// Create a top-level epic and return the id the store gave it.
-    pub fn create_epic(&self, who: &str, title: &str, auto_dispatch: bool) -> i64 {
+    pub fn create_epic(&self, who: &str, title: &str) -> i64 {
         let row = Epic {
             title: title.into(),
-            auto_dispatch,
             ..blank_epic()
         };
         self.call(who, |ctx| create_epic(ctx, row))

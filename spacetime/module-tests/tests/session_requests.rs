@@ -1,5 +1,5 @@
-//! The session-request reducers (`request_wrap_up`, `request_exit_session`,
-//! the epic chain and the backstop), run against the in-memory store.
+//! The session-request reducers (`request_wrap_up`, `request_exit_session`
+//! and the backstop), run against the in-memory store.
 
 mod common;
 
@@ -169,10 +169,23 @@ fn exit_session_with_a_token_for_another_action_is_refused_and_writes_nothing() 
 }
 
 #[test]
-fn closing_a_task_in_an_auto_dispatch_epic_requests_the_next_subtask() {
+fn closing_a_task_starts_no_next_subtask() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "Chain", true);
+    // The dead auto_dispatch column set, as an old store may hold it.
+    store
+        .call("alice", |ctx| {
+            create_epic(
+                ctx,
+                Epic {
+                    title: "Chain".into(),
+                    auto_dispatch: true,
+                    ..blank_epic()
+                },
+            )
+        })
+        .expect("create_epic");
+    let epic = store.db().epics().iter().map(|e| e.id).max().expect("an epic");
     let first = store.create("alice", epic_task("first", epic, "backlog"));
     let second = store.create("alice", epic_task("second", epic, "backlog"));
     dispatch_to_running(&store, first);
@@ -185,15 +198,12 @@ fn closing_a_task_in_an_auto_dispatch_epic_requests_the_next_subtask() {
         .expect("request_exit_session");
 
     assert_eq!(store.task(first).status, "done");
-    let chained: Vec<_> = store
-        .db()
-        .dispatch_requests()
-        .iter()
-        .filter(|r| r.task_id == second)
-        .collect();
-    assert_eq!(chained.len(), 1, "the chain requested the next subtask");
-    assert_eq!(chained[0].origin, DISPATCH_ORIGIN_EPIC_CHAIN);
-    assert_eq!(store.task(second).status, "running");
+    assert!(store.db().dispatch_requests().iter().all(|r| r.task_id != second));
+    assert_eq!(store.task(second).status, "backlog");
+    assert_eq!(
+        only_row(&store, first, SESSION_KIND_EXIT_SESSION).chained_task,
+        0
+    );
 }
 
 #[test]
@@ -351,28 +361,13 @@ fn set_sub_status(store: &Store, id: i64, sub_status: &str) {
 }
 
 /// A running task inside a fresh epic, on `HOST_A`.
-fn ready_in_epic(auto_dispatch: bool) -> (Store, i64, i64) {
+fn ready_in_epic() -> (Store, i64, i64) {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "E", auto_dispatch);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("t", epic, "backlog"));
     dispatch_to_running(&store, id);
     (store, epic, id)
-}
-
-/// A backlog subtask of `epic`, in board position `order`.
-fn backlog_subtask(store: &Store, epic: i64, order: i64, phoenix: bool) -> i64 {
-    let id = store.create("alice", epic_task("next", epic, "backlog"));
-    patch(
-        store,
-        id,
-        TaskPatch {
-            sort_order: Some(Some(order)),
-            phoenix: Some(phoenix),
-            ..TaskPatch::default()
-        },
-    );
-    id
 }
 
 #[test]
@@ -579,7 +574,7 @@ fn a_conflict_report_leaves_a_task_that_moved_on_alone() {
 
 #[test]
 fn an_exit_session_applies_the_close_and_writes_the_teardown_row() {
-    let (store, epic, id) = ready_in_epic(false);
+    let (store, epic, id) = ready_in_epic();
     let token = finished_rebase_wrap_up(&store, id);
 
     exit_session(&store, id, token, "rebase", "").expect("request_exit_session");
@@ -833,110 +828,10 @@ fn a_teardown_reported_done_finishes_the_row_and_cancels_the_timer() {
 }
 
 #[test]
-fn an_exit_session_chains_the_next_subtask_passing_over_a_phoenix_one() {
-    let (store, epic, id) = ready_in_epic(true);
-    let phoenix = backlog_subtask(&store, epic, 1, true);
-    let next = backlog_subtask(&store, epic, 2, false);
-    let later = backlog_subtask(&store, epic, 3, false);
-    let token = finished_rebase_wrap_up(&store, id);
-
-    exit_session(&store, id, token, "rebase", "").expect("request_exit_session");
-
-    assert_eq!(
-        only_row(&store, id, SESSION_KIND_EXIT_SESSION).chained_task,
-        next
-    );
-    let chained: Vec<_> = store
-        .db()
-        .dispatch_requests()
-        .iter()
-        .filter(|r| r.task_id == next)
-        .collect();
-    assert_eq!(chained.len(), 1);
-    assert_eq!(chained[0].origin, DISPATCH_ORIGIN_EPIC_CHAIN);
-    assert_eq!(chained[0].host, HOST_A);
-    assert_eq!(chained[0].state, DISPATCH_REQUESTED);
-    assert_eq!(chained[0].requested_by, identity_of("alice"));
-    assert_eq!(store.task(next).status, "running");
-    assert_eq!(store.task(phoenix).status, "backlog");
-    assert_eq!(store.task(later).status, "backlog");
-    // The first dispatch's request is finished, so only the chained one is open.
-    let open: Vec<_> = store
-        .db()
-        .dispatch_requests()
-        .iter()
-        .filter(|r| r.task_id != id)
-        .collect();
-    assert_eq!(open.len(), 1);
-    assert_eq!(
-        store
-            .db()
-            .dispatch_request_timeouts()
-            .iter()
-            .filter(|t| t.request_id == chained[0].id)
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn the_chain_stops_quietly_without_auto_dispatch_or_candidates() {
-    let (off, epic, id) = ready_in_epic(false);
-    let waiting = backlog_subtask(&off, epic, 2, false);
-    wrap_up(&off, id, "done").expect("request_wrap_up");
-    let token = only_row(&off, id, SESSION_KIND_WRAP_UP).id;
-    exit_session(&off, id, token, "done", "").expect("close");
-    assert_eq!(off.task(waiting).status, "backlog");
-    assert!(off.db().dispatch_requests().iter().all(|r| r.task_id == id));
-    assert_eq!(
-        only_row(&off, id, SESSION_KIND_EXIT_SESSION).chained_task,
-        0
-    );
-
-    let (only_phoenix, epic, id) = ready_in_epic(true);
-    let phoenix = backlog_subtask(&only_phoenix, epic, 1, true);
-    wrap_up(&only_phoenix, id, "done").expect("request_wrap_up");
-    let token = only_row(&only_phoenix, id, SESSION_KIND_WRAP_UP).id;
-    exit_session(&only_phoenix, id, token, "done", "").expect("close");
-    assert_eq!(only_phoenix.task(phoenix).status, "backlog");
-    assert!(only_phoenix
-        .db()
-        .dispatch_requests()
-        .iter()
-        .all(|r| r.task_id == id));
-    assert_eq!(only_phoenix.task(id).status, "done");
-}
-
-#[test]
-fn the_chain_passes_over_a_subtask_on_another_host() {
-    let (store, epic, id) = ready_in_epic(true);
-    store.register_host_for(HOST_B, "alice");
-    let elsewhere = backlog_subtask(&store, epic, 1, false);
-    patch(
-        &store,
-        elsewhere,
-        TaskPatch {
-            host: Some(HOST_B.into()),
-            ..TaskPatch::default()
-        },
-    );
-    let next = backlog_subtask(&store, epic, 2, false);
-    wrap_up(&store, id, "done").expect("request_wrap_up");
-    let token = only_row(&store, id, SESSION_KIND_WRAP_UP).id;
-
-    exit_session(&store, id, token, "done", "").expect("close");
-    assert_eq!(
-        only_row(&store, id, SESSION_KIND_EXIT_SESSION).chained_task,
-        next
-    );
-    assert_eq!(store.task(elsewhere).status, "backlog");
-}
-
-#[test]
 fn a_phoenix_task_respawns_with_a_done_close_but_not_a_pr_close() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let ids: Vec<i64> = (0..2)
         .map(|_| {
             let id = store.create("alice", epic_task("weekly", epic, "backlog"));
@@ -1042,7 +937,7 @@ fn deleting_a_task_fails_its_open_session_request_and_cancels_its_timer() {
 fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let ids: Vec<i64> = (0..2)
         .map(|_| {
             let id = store.create("alice", epic_task("t", epic, "backlog"));
@@ -1077,7 +972,7 @@ fn batch_delete_fails_the_open_session_requests_of_the_tasks_it_deletes() {
 fn a_feed_ingest_that_keeps_a_stale_task_fails_its_open_session_request() {
     let store = Store::new();
     store.register_host_for(HOST_A, "alice");
-    let epic = store.create_epic("alice", "Feed", false);
+    let epic = store.create_epic("alice", "Feed");
     store
         .call("alice", |ctx| {
             patch_epic(

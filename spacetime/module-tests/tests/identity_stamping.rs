@@ -51,7 +51,7 @@ fn a_signalled_epic_less_create_takes_the_caller_as_owner() {
 #[test]
 fn a_created_task_is_stamped_with_its_creator() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let forged = Task {
         created_by: identity_of("carol"),
         ..epic_task("T", epic, "backlog")
@@ -63,7 +63,7 @@ fn a_created_task_is_stamped_with_its_creator() {
 #[test]
 fn a_tasks_creator_detaches_it_onto_their_own_board_whatever_owner_is_named() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
     store
@@ -77,7 +77,7 @@ fn a_tasks_creator_detaches_it_onto_their_own_board_whatever_owner_is_named() {
 #[test]
 fn a_person_who_did_not_create_a_task_may_detach_it() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
     store
@@ -90,7 +90,7 @@ fn a_person_who_did_not_create_a_task_may_detach_it() {
 #[test]
 fn update_task_detaches_onto_the_callers_board() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
     store
         .call("bob", |ctx| {
@@ -111,7 +111,7 @@ fn update_task_detaches_onto_the_callers_board() {
 #[test]
 fn the_store_itself_may_name_the_owner_of_a_detached_task() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let id = store.create("alice", epic_task("T", epic, "backlog"));
 
     store
@@ -123,7 +123,7 @@ fn the_store_itself_may_name_the_owner_of_a_detached_task() {
 #[test]
 fn unsubscribe_refuses_a_subscriber_that_is_not_the_caller() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     subscribe(&store, "bob", epic);
 
     let err = store
@@ -138,7 +138,7 @@ fn unsubscribe_refuses_a_subscriber_that_is_not_the_caller() {
 #[test]
 fn unsubscribe_removes_the_callers_own_follow() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     subscribe(&store, "bob", epic);
     store
         .call("bob", |ctx| {
@@ -151,7 +151,7 @@ fn unsubscribe_removes_the_callers_own_follow() {
 #[test]
 fn unsubscribe_answers_a_missing_epic_as_missing() {
     let store = Store::new();
-    let epic = store.create_epic("alice", "E", false);
+    let epic = store.create_epic("alice", "E");
     let err = store
         .call("carol", |ctx| {
             unsubscribe_from_epic(ctx, identity_of("carol"), epic + 100)

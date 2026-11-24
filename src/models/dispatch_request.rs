@@ -49,8 +49,9 @@ impl DispatchRequestState {
 }
 
 /// Which launch path wrote the request (D9). `User` covers the TUI keys,
-/// retry-fresh and research; `Mcp` is `task_dispatch`; `EpicChain` is
-/// `epics.allium: AutoDispatchNextSubtask`; `Quick` is quick dispatch.
+/// retry-fresh and research; `Mcp` is `task_dispatch`; `Quick` is quick
+/// dispatch. `EpicChain` is read from rows written before the epic chain was
+/// removed; nothing writes it (`store-split.allium: DispatchRequestOrigin`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DispatchOrigin {
     User,

@@ -45,7 +45,8 @@ pub struct DispatchRequest {
     pub host: String,
     /// `dispatch`, `research` or `quick` (D3), fixed when the row is written.
     pub mode: String,
-    /// `user`, `mcp`, `epic_chain` or `quick` (D9).
+    /// `user`, `mcp`, `quick` or `schedule` (D9); `epic_chain` on a row written
+    /// before the epic chain was removed.
     pub origin: String,
     /// `requested`, `provisioning`, `dispatched` or `failed`.
     pub state: String,
@@ -110,14 +111,10 @@ pub const DISPATCH_DISPATCHED: &str = "dispatched";
 pub const DISPATCH_FAILED: &str = "failed";
 
 pub const DISPATCH_MODES: [&str; 3] = ["dispatch", "research", "quick"];
-pub const DISPATCH_ORIGIN_EPIC_CHAIN: &str = "epic_chain";
-pub const DISPATCH_ORIGINS: [&str; 5] = [
-    "user",
-    "mcp",
-    DISPATCH_ORIGIN_EPIC_CHAIN,
-    "quick",
-    DISPATCH_ORIGIN_SCHEDULE,
-];
+/// The origins a new request may name. `epic_chain` is not one: it stays on
+/// rows written before the epic chain was removed (`store-split.allium:
+/// DispatchRequestOrigin`).
+pub const DISPATCH_ORIGINS: [&str; 4] = ["user", "mcp", "quick", DISPATCH_ORIGIN_SCHEDULE];
 
 /// The backstop's reason (`DispatchRequestTimesOut`).
 pub const DISPATCH_REASON_TIMED_OUT: &str = "timed out";
@@ -220,14 +217,8 @@ pub fn validate_dispatch_origin(origin: &str) -> Result<(), String> {
 /// about them. `has_open_request` is whether the task already holds an open
 /// request (`OneOpenDispatchRequestPerTask`).
 ///
-/// `epics.allium: PhoenixIsNeverChained` lives here, keyed on the origin: the
-/// epic chain's request for a phoenix task is refused like any other refusal,
-/// and the chain moves on to its next candidate. Every other origin may take
-/// a phoenix task.
-///
-/// `schedules.allium` adds two more, both read against the store's clock
-/// `now`: the epic chain passes over a task still waiting for its scheduled
-/// time (S8), and a schedule-origin request is for a task that is due.
+/// `schedules.allium` adds one more, read against the store's clock `now`: a
+/// schedule-origin request is for a task that is due.
 pub fn validate_dispatch_request(
     task: &Task,
     requester: &str,
@@ -239,18 +230,6 @@ pub fn validate_dispatch_request(
     if has_open_request {
         return Err(format!(
             "task {} already holds an open dispatch request",
-            task.id
-        ));
-    }
-    if origin == DISPATCH_ORIGIN_EPIC_CHAIN && task.phoenix {
-        return Err(format!(
-            "task {} is a phoenix task, which the epic chain never dispatches",
-            task.id
-        ));
-    }
-    if origin == DISPATCH_ORIGIN_EPIC_CHAIN && task_awaits_schedule(task, now) {
-        return Err(format!(
-            "task {} is waiting for its scheduled time, which the epic chain does not dispatch early",
             task.id
         ));
     }
@@ -715,13 +694,11 @@ pub fn request_dispatch(
 }
 
 /// The writes of `RequestDispatch` once every `requires` has passed: claim the
-/// task, write the `requested` row and schedule its backstop timer. Shared by
-/// the reducer above and the epic chain inside `request_exit_session`
-/// (`session_request.rs`), so both write the identical request.
+/// task, write the `requested` row and schedule its backstop timer.
 ///
 /// The one fallible step, the claim's [`write_task`], runs FIRST, so an `Err`
-/// has written nothing and the chain can move on to its next candidate.
-pub(crate) fn create_dispatch_request(
+/// has written nothing.
+fn create_dispatch_request(
     ctx: &ReducerContext,
     task: Task,
     requester: &str,

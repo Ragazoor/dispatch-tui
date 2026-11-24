@@ -297,8 +297,6 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
    "description": "Resume the task in its existing worktree and go to it"},
   {"namespace": "board.normal", "action": "activate_unavailable", "keys": ["Space"], "when": "noWorktree", "label": "resume",
    "description": "Report that there is no worktree to resume; move the task to Backlog and re-dispatch"},
-  {"namespace": "board.normal", "action": "toggle_auto_dispatch", "keys": ["U"], "when": "epicView", "label": "auto-dispatch",
-   "description": "Toggle auto-dispatch for the epic you are inside: chain the next backlog subtask when one finishes"},
   {"namespace": "board.normal", "action": "toggle_ready", "keys": ["Y"], "when": "taskCard", "label": "ready",
    "description": "Mark the backlog task ready for its epic's orchestrator to start, or clear the mark. A ready card says so, and names the agent when an agent marked it"},
   {"namespace": "board.normal", "action": "toggle_help", "keys": ["?"], "when": "any", "label": "help",
@@ -403,7 +401,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
     <p><kbd>z</kbd> folds a section away when you do not want to see it.</p>
 
     <h3>Epics keep a huge backlog in order</h3>
-    <p>An epic groups tasks, and it can hold other epics. An epic's card shows up in every column where it has work, so you see its spread at a glance. <kbd>Space</kbd> steps into it, <kbd>q</kbd> steps out, <kbd>Q</kbd> goes straight back to the top. Inside an epic, <kbd>U</kbd> turns on auto-dispatch: when one subtask finishes, the next one starts by itself, on a branch that already holds the work before it.</p>
+    <p>An epic groups tasks, and it can hold other epics. An epic's card shows up in every column where it has work, so you see its spread at a glance. <kbd>Space</kbd> steps into it, <kbd>q</kbd> steps out, <kbd>Q</kbd> goes straight back to the top.</p>
     <p>An epic can also have an orchestrator: an agent of its own that starts the epic's ready tasks, answers their agents' questions and tells you when a person is needed. <kbd>Y</kbd> on a backlog card marks it ready. In the real TUI, <kbd>O</kbd> opens the orchestrator's window (or offers to switch one on), the epic view's header shows what it did and what waits for you, and <kbd>I</kbd> resolves an item that waited for you.</p>
 
     <h3>Work packages cut across epics</h3>
@@ -435,7 +433,7 @@ footer { color: var(--page-muted); font-size: 13px; padding: 24px 0 40px; border
 // ------------------------------------------------------------------ data
 // Epics: [id, parent, title, repo, description]
 const EPIC_ROWS = [
-  [3101, null, "Payments v2", "shop-api", "Rebuild payments on the new provider APIs. Auto-dispatch is on: finishing one subtask starts the next."],
+  [3101, null, "Payments v2", "shop-api", "Rebuild payments on the new provider APIs."],
   [3102, 3101, "Refunds", "shop-api", "Partial and full refunds, with reasons and customer emails."],
   [3103, 3101, "Stripe Billing migration", "shop-api", "Move subscriptions from the old API to Billing without double charges."],
   [3110, null, "Checkout redesign", "shop-web", "A one-page checkout that tells you the delivery date before you pay."],
@@ -449,7 +447,6 @@ const EPIC_ROWS = [
   [3150, null, "Mobile beta", "shop-app", "Get the app into TestFlight for the first hundred customers."],
   [3160, null, "Tech debt", "shop-api", "Small things that make everything else slower."],
 ];
-const AUTO = new Set([3101]);
 const READY = new Set();
 
 // Tasks: [id, epic, status, sub_status, tag, title, flags, age]
@@ -786,11 +783,6 @@ const ACTIONS = {
     followTask(t.id);
   },
   activate_unavailable() { toast("No worktree to resume. In the real TUI you move the task back to Backlog and dispatch it again."); },
-  toggle_auto_dispatch() {
-    const id = viewTop().id;
-    if (AUTO.has(id)) AUTO.delete(id); else AUTO.add(id);
-    toast(`Auto-dispatch ${AUTO.has(id) ? "on" : "off"} for ${epics.get(id).title}`);
-  },
   toggle_ready() {
     const t = current().task;
     if (t.status !== "backlog") { toast("Only a backlog task can be marked ready."); return; }
@@ -902,9 +894,8 @@ function cardHtml(r, sel, ci) {
   if (r.kind === "epic") {
     const [d, n] = epicProgress(r.epic.id);
     cls.push("epic");
-    const auto = AUTO.has(r.epic.id) ? " · auto" : "";
     const subs = r.epic.children.length ? ` · ${r.epic.children.length} sub-epics` : "";
-    return `<div class="${cls.join(" ")}"><div class="ttl"><span class="id">#${r.epic.id}</span> ◆ ${esc(r.epic.title)}</div><div class="meta">epic · ${d}/${n} done${subs}${auto}</div></div>`;
+    return `<div class="${cls.join(" ")}"><div class="ttl"><span class="id">#${r.epic.id}</span> ◆ ${esc(r.epic.title)}</div><div class="meta">epic · ${d}/${n} done${subs}</div></div>`;
   }
   if (r.kind === "package") {
     cls.push("wp");
@@ -954,10 +945,9 @@ function renderBoard() {
     if (sel && ci === state.col) sel.scrollIntoView({ block: "nearest" });
   }
   const top = viewTop();
-  const auto = top?.kind === "epic" ? (AUTO.has(top.id) ? '<span class="on">auto-dispatch [U]</span>' : "manual dispatch [U]") : "";
   const running = [...tasks.values()].filter(t => t.window).length;
   $("t-top-left").innerHTML = top ? `inside ${top.kind === "epic" ? "epic" : "work package"} · q back · Q board` : "the whole board";
-  $("t-top-right").innerHTML = `<span class="ok">${running} agents live</span> &nbsp; ${auto} &nbsp; [${tasks.size} tasks · ${epics.size} epics · ${packages.length} packages]`;
+  $("t-top-right").innerHTML = `<span class="ok">${running} agents live</span> &nbsp; [${tasks.size} tasks · ${epics.size} epics · ${packages.length} packages]`;
 }
 
 // The status bar shows each motion pair once, under its first row.

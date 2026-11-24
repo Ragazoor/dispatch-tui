@@ -991,8 +991,7 @@ impl TuiRuntime {
         // The App's first look at this host's dispatch requests is its
         // BASELINE: finished rows in it are history and raise nothing. Taken
         // before the restart sweep below, so the rows that sweep fails ("host
-        // restarted") are reported like any later failure — the epic chain's
-        // among them (epics.allium: ReportChainedDispatchFailure).
+        // restarted") are reported like any later failure.
         app.update(Message::Task(
             crate::tui::messages::TaskMessage::DispatchRequestsRefreshed(
                 store::DispatchRequestRead::dispatch_requests(&*database).await,

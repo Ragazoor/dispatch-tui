@@ -191,7 +191,7 @@ async fn request_dispatch_writes_a_row_naming_this_host_and_provisions_nothing()
     );
 }
 
-/// No mode: the module derives it (MCP and the epic chain ask this way).
+/// No mode: the module derives it (MCP asks this way).
 #[tokio::test]
 async fn request_dispatch_without_a_mode_lets_the_module_derive_it() {
     let fx = fx();

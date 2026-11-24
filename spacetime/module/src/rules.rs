@@ -375,8 +375,15 @@ use super::*;
 /// A board on an older build lacks the reducer and refuses the 0 in its
 /// mirror.
 ///
+/// Bumped: auto dispatch is gone (`orchestrators.allium`, O8). A new request
+/// may not name the `epic_chain` origin, `request_exit_session` starts no
+/// next subtask, `update_epic` takes no `auto_dispatch`, and the store no
+/// longer refuses a phoenix task or one waiting for its scheduled time on
+/// the chain's start. A board on an older build would mirror a chain the
+/// store no longer runs.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 70;
+pub const RULES_VERSION: i64 = 71;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

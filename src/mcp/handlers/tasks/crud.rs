@@ -411,8 +411,6 @@ async fn handle_mark_task_done(
                 ),
             )
         }
-        // No chain runs on this path, so unlike session_exit's, this response
-        // never names a next subtask.
         Ok(()) => JsonRpcResponse::ok(
             id,
             json!({"content": [{"type": "text", "text": format!("{} marked done.", task.reference())}]}),

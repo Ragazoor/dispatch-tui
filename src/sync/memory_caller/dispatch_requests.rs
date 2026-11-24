@@ -221,12 +221,10 @@ impl MemoryReducerCaller {
         Ok(vec![id])
     }
 
-    /// Mirrors the module's `create_dispatch_request`, shared by
-    /// `request_dispatch` and the epic chain `request_exit_session` runs: claim
-    /// the task, roll up its epic chain, write the `requested` row. The one
-    /// fallible step, the claim's write, runs first, so an `Err` has written
-    /// nothing and the chain can move on to its next candidate.
-    pub(super) fn create_dispatch_request_body(
+    /// Mirrors the module's `create_dispatch_request`: claim the task, roll up
+    /// its epic chain, write the `requested` row. The one fallible step, the
+    /// claim's write, runs first, so an `Err` has written nothing.
+    fn create_dispatch_request_body(
         &self,
         tables: &mut Tables,
         task: module::Task,
