@@ -145,6 +145,9 @@ rule PrLearningsGate {
         -- even when the installed plugin is older than the board. An agent
         -- that already wrote the PR with the skill (the /wrap-up pr path
         -- loads it before it gets here) just runs the command again.
+        --
+        -- The rule and task.pr_learnings_gate_shown_at keep their
+        -- "learnings" name: renaming the stored field is a module migration.
 }
 
 rule PollPrStatus {

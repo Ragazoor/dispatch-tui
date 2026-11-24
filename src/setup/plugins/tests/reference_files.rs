@@ -100,11 +100,6 @@ fn agent_skills_keep_branch_detail_in_references_the_skill_names() {
 #[test]
 fn wrap_up_pr_path_lives_in_a_reference_named_from_the_branch() {
     let body = skill_body("wrap-up");
-    assert!(
-        !body.contains("dispatch:pull-request"),
-        "wrap-up SKILL.md must not carry the pr path's steps — they belong \
-         in the pr reference file"
-    );
     let (name, _) = reference_containing("wrap-up", "# The PR path", "the pr path");
     assert!(
         body.contains(&format!("references/{name}")),

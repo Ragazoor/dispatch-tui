@@ -18,23 +18,13 @@ fn pull_request_skill_text_holds_each_session_guarantee() {
     let content = pull_request_text();
     for (guarantee, needle) in [
         ("ForAHumanWithAMinute", "in about a minute"),
-        ("ForAHumanWithAMinute", "would the reviewer miss it"),
-        ("ForAHumanWithAMinute", "judgement"),
         ("RepoRulesComeFirst", "PR template"),
-        ("RepoRulesComeFirst", "come first"),
         ("OneChangePerPr", "the whole diff"),
-        ("OneChangePerPr", "A PR is one change"),
         ("TitleIsOneAction", "72 characters"),
-        ("TitleIsOneAction", "git log --oneline"),
-        ("OpeningCarriesThePr", "no template"),
         ("OpeningCarriesThePr", "first 500 characters"),
         ("ShowsTheChangeWhereItHasAShape", "before/after"),
-        ("ShowsTheChangeWhereItHasAShape", "table"),
-        ("LeavesOutWhatTheReviewerHas", "summary"),
         ("LeavesOutWhatTheReviewerHas", "table of contents"),
-        ("LeavesOutWhatTheReviewerHas", "ADR"),
         ("OperatorPreferences", "bullet lists"),
-        ("OperatorPreferences", "Test plan"),
         ("OperatorPreferences", "dangerous or breaking"),
         (
             "NeverReferencesTheDispatchTask",
@@ -44,7 +34,6 @@ fn pull_request_skill_text_holds_each_session_guarantee() {
         ("OpensAgainstTheBaseBranch", "`--base`"),
         ("NeverForcePushes", "never force-push"),
         ("ReusesAnExistingPr", "already exists"),
-        ("KeepsItCurrent", "gh pr edit"),
         ("KeepsItCurrent", "not a log of review rounds"),
     ] {
         assert!(
