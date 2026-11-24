@@ -572,6 +572,20 @@ contract ManagedStoreHost {
         -- upgrade. A change that makes startup abort, or that hides a user's
         -- existing rows, fails the suite rather than the operator's next
         -- launch.
+
+    @invariant ThePreviousStoreIsTheModuleTheBranchLeftMainAt
+        -- The upgrade test starts from a store written by the module local
+        -- `main` had where the branch under test left it (their merge base):
+        -- `main`'s current module once the branch has merged it, never an
+        -- unmerged branch's, and never a newer one than the branch builds on. Rows in a store can only be written by a build of the
+        -- module that store runs, so every test run saves a store written by
+        -- its own module, once per run, in a store cache shared by all
+        -- worktrees of the checkout and kept out of git; the upgrade test
+        -- takes the merge base's entry from it. A branch's own store is therefore
+        -- already saved when the branch lands. The cache keeps the five most
+        -- recently used entries and drops the rest. With no entry for
+        -- that module, or no local `main`, the upgrade test skips and
+        -- says why; it never falls back to an older store.
 }
 
 -- The record of which NAMED store the board on this data directory is using, kept

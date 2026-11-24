@@ -5,6 +5,8 @@
 /spacetime/module/target
 /spacetime/module-tests/target
 /.worktrees
+# Saved stores the upgrade smoke test starts from (src/runtime/tests/store_cache.rs).
+/.test-stores
 # tarpaulin output: `--output-dir coverage/` (the CI invocation), the default
 # drop point for a local `--out Html` run, and the raw profiles the llvm engine
 # leaves behind (build scripts drop one in the repo root, not under target/).

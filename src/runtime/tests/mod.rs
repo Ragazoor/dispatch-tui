@@ -1138,4 +1138,5 @@ mod refresh;
 mod session_requests;
 mod split_mode;
 mod startup_smoke;
+mod store_cache;
 mod task_exec;

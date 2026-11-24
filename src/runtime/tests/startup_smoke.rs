@@ -11,7 +11,7 @@
 //! The store is never the operator's: a free port, and a data directory, CLI
 //! config and JWT key pair of the test's own. The fresh-install test leaves
 //! the port empty and lets bootstrap start the store; the upgrade test starts
-//! it itself (`LiveStore`) so it can copy a committed directory in first. The board's `StartupPaths` are
+//! it itself (`LiveStore`) so it can copy a saved store in first (`store_cache`). The board's `StartupPaths` are
 //! temp paths too, so the configuration check never reaches `$HOME`.
 
 use std::path::Path;
@@ -227,13 +227,31 @@ async fn a_fresh_install_starts_against_a_real_store() {
 }
 
 // ---------------------------------------------------------------------------
-// The previous-store fixture
+// The previous store
 // ---------------------------------------------------------------------------
 
-/// `tests/fixtures/previous-store/`, the committed store directory the
-/// upgrade test starts from.
-fn previous_store_fixture() -> std::path::PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/previous-store")
+/// The repo checkout these tests were built from.
+fn repo() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// This build's own module's store, from the store cache, built once per test
+/// run when the cache has none. `None` outside a git checkout.
+async fn own_module_store() -> Option<std::path::PathBuf> {
+    static OWN: tokio::sync::OnceCell<Option<std::path::PathBuf>> =
+        tokio::sync::OnceCell::const_new();
+    OWN.get_or_init(|| async {
+        let root = super::store_cache::cache_root(repo())?;
+        let entry =
+            super::store_cache::take_or_build(&root, &embedded_module_hash(), |out| async move {
+                build_previous_store(&out).await
+            })
+            .await
+            .unwrap_or_else(|e| panic!("could not save this module's store: {e}"));
+        Some(entry)
+    })
+    .await
+    .clone()
 }
 
 /// The ids *user* sees, in `expected.json`.
@@ -310,7 +328,7 @@ fn copy_dir(from: &Path, to: &Path, skip: &[&str]) {
 }
 
 /// What the store rebuilds on its own, or what only one run of it means.
-const NOT_COMMITTED: &[&str] = &[
+const NOT_SAVED: &[&str] = &[
     "cache",
     "logs",
     "module_logs",
@@ -320,18 +338,12 @@ const NOT_COMMITTED: &[&str] = &[
     "publish.lock",
 ];
 
-/// Make `tests/fixtures/previous-store/` from this binary's embedded module,
-/// with fresh keys and logins. Run through `scripts/rotate-previous-store.sh`,
-/// which first checks the embedded module is `main`'s. Rebuilt fresh rather
-/// than published over: every publish appends the module to the store's
-/// commit log, so a fixture moved forward that way grows ~1.6 MB a time.
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "writes the committed fixture; run by hand"]
-async fn generate_previous_store_fixture() {
-    assert!(
-        live_store_tests_should_run(),
-        "the generator needs spacetime"
-    );
+/// Write a store into `out` from this binary's embedded module, with fresh
+/// keys and logins: `data/`, `keys/`, `cli.toml` (*user*'s CLI login, the
+/// owner), `host.json` (*user*'s board) and `expected.json` (the ids *user*
+/// sees). It also holds an epic and a task of *other*'s that *user* must not
+/// see.
+async fn build_previous_store(out: &Path) {
     let dir = tempfile::tempdir().unwrap();
     let store_data = dir.path().join("data");
     let keys = dir.path().join("keys");
@@ -442,12 +454,7 @@ async fn generate_previous_store_fixture() {
     drop(ub);
     store.stop();
 
-    let out = previous_store_fixture();
-    // Everything but the hand-written README, which says how this was made.
-    for generated in ["data", "keys"] {
-        let _ = std::fs::remove_dir_all(out.join(generated));
-    }
-    copy_dir(&store_data, &out.join("data"), NOT_COMMITTED);
+    copy_dir(&store_data, &out.join("data"), NOT_SAVED);
     copy_dir(&keys, &out.join("keys"), &[]);
     std::fs::copy(&cli_config, out.join("cli.toml")).unwrap();
     std::fs::copy(
@@ -462,7 +469,8 @@ async fn generate_previous_store_fixture() {
     .unwrap();
 }
 
-/// The agreed bar: after an upgrade from the module `main` runs, the same
+/// The agreed bar: after an upgrade from the module `main` ran where this
+/// branch left it (or `main`'s current one, once merged), the same
 /// user sees exactly the same tasks and epics as before it.
 ///
 /// Startup always publishes here, as the store's owner. On a branch that
@@ -474,13 +482,28 @@ async fn an_upgrade_from_the_previous_store_keeps_every_task_and_epic() {
     if !live_store_tests_should_run() {
         return;
     }
-    let fixture = previous_store_fixture();
-    assert!(
-        fixture.join("keys/id_ecdsa").is_file(),
-        "the fixture has no signing key, so none of its logins can verify"
-    );
+    let Some(root) = super::store_cache::cache_root(repo()) else {
+        eprintln!("upgrade smoke: skipping: not a git checkout, so no store cache");
+        return;
+    };
+    let Some(base_hash) = super::store_cache::base_module_hash(repo()) else {
+        eprintln!("upgrade smoke: skipping: no local main to upgrade from");
+        return;
+    };
+    let previous = if base_hash == embedded_module_hash() {
+        own_module_store().await
+    } else {
+        super::store_cache::take(&root, &base_hash)
+    };
+    let Some(previous) = previous else {
+        eprintln!(
+            "upgrade smoke: skipping: no saved store for the module this branch left \
+             main at ({base_hash}); a test run on that module saves one"
+        );
+        return;
+    };
     let dir = tempfile::tempdir().unwrap();
-    copy_dir(&fixture, dir.path(), &[]);
+    copy_dir(&previous, dir.path(), &[]);
     let store_data = dir.path().join("data");
     let cli_config = dir.path().join("cli.toml");
     let keys = dir.path().join("keys");
@@ -535,9 +558,12 @@ async fn a_cli_login_that_does_not_own_the_database_aborts_before_publishing() {
     if !live_store_tests_should_run() {
         return;
     }
-    let fixture = previous_store_fixture();
+    let Some(own) = own_module_store().await else {
+        eprintln!("not a git checkout, so no store cache: skipping");
+        return;
+    };
     let dir = tempfile::tempdir().unwrap();
-    copy_dir(&fixture, dir.path(), &[]);
+    copy_dir(&own, dir.path(), &[]);
     let store_data = dir.path().join("data");
     let owner_config = dir.path().join("cli.toml");
     let keys = dir.path().join("keys");
