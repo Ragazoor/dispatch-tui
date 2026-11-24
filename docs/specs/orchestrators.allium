@@ -77,8 +77,10 @@
 -- orchestrator-trouble_record), the prompt's trouble part
 -- dispatch-prompt.allium's (OrchestratorSessionPrompt).
 -- Open, for the operator: already_retried is built narrower than its intent
--- (see its definition). Decided by the epic's acting orchestrator while the
--- operator was away.
+-- (see its definition); and with several machines a task no machine holds
+-- is woken for and reminded of by each machine's orchestrator, with only
+-- the open-item guard against a second item (LongWaitInReview). Decided by
+-- the epic's acting orchestrator while the operator was away.
 -- Left for the steps that own them, so none is missed:
 --   - step 9: EpicFinishedNotified from EndOrchestratorSession, the
 --     desktop notification of a raised item, and OrchestratorRestartAsked
@@ -221,7 +223,8 @@ config {
 --   operator's review.
 -- live_orchestrator_for(task): this machine's core/Orchestrator of
 -- covering(task) when its session is live and the task is this machine's
--- (task.host is this host, or the task has no host), else null (O11).
+-- (task.host is this host, or the task has no host), else null (O11). A
+-- task with no host is therefore each machine's (see the STATUS note).
 -- started_by_orchestrator(request): the log holds a started_task entry for
 -- request.task written at request.requested_at, in the request's own
 -- transaction (OrchestratorStartsATask).
@@ -1014,12 +1017,15 @@ rule LongWaitInReview {
     )
 
     @guidance
-        -- Once per stay in review. The task is not moved. A task no machine
-        -- holds (a review of another author's PR) is any live orchestrator's
-        -- of the epic; the open-item requires keeps a second machine from
-        -- raising a second item but for a race. Decided by the epic's acting
-        -- orchestrator while the operator was away; open to the operator's
-        -- review.
+        -- Once per stay in review. The task is not moved. The board does not
+        -- check waits_on_someone_else: the reminder's wake names the task's
+        -- review sub-status, and the orchestrator judges from it whether the
+        -- operator has given their review and the task waits on the other
+        -- author. With several machines, a task no machine holds (a review
+        -- of another author's PR) is handled by each machine's orchestrator,
+        -- and only the open-item requires stops a second item. Decided by the
+        -- epic's acting orchestrator while the operator was away; open to the
+        -- operator's review.
 }
 
 ------------------------------------------------------------

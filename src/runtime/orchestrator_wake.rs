@@ -275,10 +275,12 @@ pub(super) fn due(
             continue;
         }
         events.push(format!(
-            "task #{} has waited in review for {} hours: raise a waiting item for the operator, \
-             unless the operator has already given their review and it waits on the other author",
+            "task #{} has waited in review for {} hours (sub-status {}): raise a waiting item for \
+             the operator, unless that sub-status shows the operator has given their review and \
+             it waits on the other author",
             id.0,
-            review_reminder_after().num_hours()
+            review_reminder_after().num_hours(),
+            t.sub_status.as_str()
         ));
     }
     events
@@ -626,7 +628,10 @@ mod tests {
         assert!(due(HOST, &r, at(day - 1), &mut Woken::default()).is_empty());
         let events = due(HOST, &r, at(day), &mut Woken::default());
         assert_eq!(events.len(), 1, "{events:?}");
-        assert!(events[0].contains("has waited in review for 24 hours"));
+        assert!(
+            events[0].contains("has waited in review for 24 hours (sub-status awaiting_review)"),
+            "{events:?}"
+        );
 
         // An item raised during this stay, even one already resolved, is the
         // stay's reminder: a restarted board does not remind again.
