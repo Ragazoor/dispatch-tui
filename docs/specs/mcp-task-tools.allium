@@ -883,6 +883,11 @@ rule CreateTaskViaMcp {
     -- false leaves the task not ready, as every new task starts. The mark is
     -- a second store write after the creation: if it is refused, the call
     -- fails and says the task was created and not marked, naming the task.
+    -- The argument's description, on task_create and task_update alike,
+    -- says to mark a task ready only when the work is already wanted: the
+    -- operator asked for it, or it is a step of the epic's plan; a new idea
+    -- or a side finding is not marked ready (orchestrators.allium:
+    -- MarksReadyOnlyWhatIsWanted).
       if ready = true:
             orch/TaskMarkedReady(
                 task: task,

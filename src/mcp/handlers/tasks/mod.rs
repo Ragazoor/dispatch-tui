@@ -192,7 +192,7 @@ mcp_args! {
 /// The `ready` argument's one wording, on `task_create` and `task_update`.
 macro_rules! ready_description {
     () => {
-        "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it."
+        "Mark the task ready (true) or not ready (false): an orchestrator of its epic starts only ready tasks. Mark one ready only when the work is already wanted: the operator asked for it, or it is a step of the epic's plan. A new idea or a side finding is not marked ready. Only a backlog task can be ready, and the mark ends when the task leaves backlog. It locks nothing and nobody else reads it."
     };
 }
 

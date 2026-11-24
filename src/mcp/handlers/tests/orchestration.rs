@@ -90,6 +90,26 @@ fn create_and_update_advertise_a_boolean_ready() {
     }
 }
 
+/// orchestrators.allium: TaskAgentUnderAnOrchestrator, MarksReadyOnlyWhatIsWanted.
+#[test]
+fn the_ready_argument_says_to_mark_only_what_is_wanted() {
+    for name in ["task_create", "task_update"] {
+        let def = tool_def(name);
+        let text = def["inputSchema"]["properties"]["ready"]["description"]
+            .as_str()
+            .unwrap();
+        for needle in [
+            "the operator asked for it, or it is a step of the epic's plan",
+            "A new idea or a side finding is not marked ready",
+        ] {
+            assert!(
+                text.contains(needle),
+                "{name}: missing {needle:?} in {text}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn a_new_task_is_not_ready_unless_asked() {
     let state = test_state().await;
