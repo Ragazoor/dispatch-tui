@@ -168,6 +168,9 @@ async fn get_epic(state: &McpState, id: Option<Value>, epic_id: EpicId) -> JsonR
     ));
     text.push_str(&format!("\nSubtasks: {done_count}/{total} done"));
     text.push_str(&super::orchestration::epic_line(state, &epic).await);
+    if state.db.epic_orchestration(epic.id).await.is_some() {
+        text.push_str(&super::orchestrator_memory::epic_memory_lines(state, &epic).await);
+    }
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 

@@ -423,6 +423,7 @@ pub fn resolve_waiting_item(ctx: &ReducerContext, id: i64) -> Result<(), String>
 #[spacetimedb::reducer]
 pub fn write_epic_note(ctx: &ReducerContext, name: String, text: String) -> Result<(), String> {
     let note = check_write_epic_note(ctx, &name, &text)?;
+    require_acting_for_orchestrator(ctx, &name)?;
     ctx.db.epic_notes().insert(EpicNote {
         written_at: now(ctx),
         ..note
@@ -439,6 +440,7 @@ pub fn change_epic_note(
     done: Option<bool>,
 ) -> Result<(), String> {
     let note = check_change_epic_note(ctx, &name, id, text.as_deref(), done)?;
+    require_acting_for_orchestrator(ctx, &name)?;
     ctx.db.epic_notes().id().update(note);
     Ok(())
 }
@@ -446,8 +448,15 @@ pub fn change_epic_note(
 #[spacetimedb::reducer]
 pub fn remove_epic_note(ctx: &ReducerContext, name: String, id: i64) -> Result<(), String> {
     check_remove_epic_note(ctx, &name, id)?;
+    require_acting_for_orchestrator(ctx, &name)?;
     ctx.db.epic_notes().id().delete(id);
     Ok(())
+}
+
+/// The caller acts for the host the orchestrator named `name` runs on.
+fn require_acting_for_orchestrator(ctx: &ReducerContext, name: &str) -> Result<(), String> {
+    let o = orchestrator_writing(ctx, name)?;
+    require_acting_for(ctx, &o.host)
 }
 
 pub fn orchestrator_log_of_held(r: &impl StoreReads, who: &str) -> Vec<OrchestratorLogEntry> {

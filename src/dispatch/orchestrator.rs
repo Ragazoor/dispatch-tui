@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::models::{
-    Epic, EpicOrchestration, ReadyMarker, StartRule, SubStatus, TaskStatus, TmuxWindow,
+    Epic, EpicNote, EpicOrchestration, Learning, OrchestratorLogEntry, ReadyMarker, StartRule,
+    SubStatus, TaskStatus, TmuxWindow, WaitingItem,
 };
 use crate::process::ProcessRunner;
 use crate::tmux;
@@ -145,6 +146,20 @@ pub struct OrchestratorPromptTask {
     pub agent: Option<String>,
 }
 
+/// The orchestrator's memory of its epic, as its prompt shows it
+/// (`orchestrators.allium: EnoughForAFreshStart`, `GivenItsLearnings`).
+#[derive(Default)]
+pub struct OrchestratorMemory {
+    /// Every note of the epic.
+    pub notes: Vec<EpicNote>,
+    /// Every open item of the epic.
+    pub open_items: Vec<WaitingItem>,
+    /// The newest log entries, newest first.
+    pub newest_log: Vec<OrchestratorLogEntry>,
+    /// The learnings that fit the epic, best first.
+    pub learnings: Vec<Learning>,
+}
+
 /// `dispatch-prompt.allium: OrchestratorSessionPrompt`. `tasks` come in board
 /// order.
 pub fn build_orchestrator_prompt(
@@ -152,6 +167,7 @@ pub fn build_orchestrator_prompt(
     epic: &Epic,
     orchestration: &EpicOrchestration,
     tasks: &[OrchestratorPromptTask],
+    memory: &OrchestratorMemory,
 ) -> String {
     let mut p = format!(
         "You are {name}, the orchestrator of epic #{id} ({title}) on this machine.\n\n\
@@ -207,6 +223,7 @@ pub fn build_orchestrator_prompt(
             t.sub_status.as_str()
         ));
     }
+    push_memory(&mut p, epic, memory);
     p.push_str(
         "\nFirst, before anything else, look at what happened while no session of yours ran: \
          agents that need input, ready tasks that a free slot could start, and anything the \
@@ -214,6 +231,80 @@ pub fn build_orchestrator_prompt(
          board as your session started.\n",
     );
     p
+}
+
+/// The memory part of the prompt: notes, open items, the newest log entries,
+/// how to keep them, a note from a learning, and the learnings.
+fn push_memory(p: &mut String, epic: &Epic, memory: &OrchestratorMemory) {
+    p.push_str("\nYour notes for this epic (id, [done] when ticked):\n");
+    let mut notes: Vec<&EpicNote> = memory.notes.iter().collect();
+    notes.sort_by_key(|n| (n.done, n.id));
+    if notes.is_empty() {
+        p.push_str("- none\n");
+    }
+    for n in notes {
+        let done = if n.done { " [done]" } else { "" };
+        p.push_str(&format!("- #{}{done} {}\n", n.id, n.text));
+    }
+    p.push_str("\nItems that wait for the operator:\n");
+    if memory.open_items.is_empty() {
+        p.push_str("- none\n");
+    }
+    for i in &memory.open_items {
+        let about = match i.task_id {
+            Some(t) => format!("task #{}", t.0),
+            None => "the epic".to_string(),
+        };
+        p.push_str(&format!(
+            "- #{} {about}: {} — you recommended: {}\n",
+            i.id, i.about, i.recommendation
+        ));
+    }
+    p.push_str(&format!(
+        "\nThe newest entries of the epic's log, newest first (orchestrator-log_search with epic_id {} reads the rest):\n",
+        epic.id.0
+    ));
+    if memory.newest_log.is_empty() {
+        p.push_str("- none\n");
+    }
+    for e in &memory.newest_log {
+        let task = e
+            .task_id
+            .map(|t| format!(" task #{}", t.0))
+            .unwrap_or_default();
+        p.push_str(&format!(
+            "- {} {}{task}: {}\n",
+            e.at.format("%Y-%m-%dT%H:%M:%SZ"),
+            e.kind,
+            e.text
+        ));
+    }
+    p.push_str(
+        "\nThis memory outlives your session, so keep it as you go. Give a one-line reason with \
+         every task_dispatch. After you answer an agent, record it with orchestrator-answer_record. \
+         Raise what only a person can decide with waiting-item_create, and resolve an item with \
+         waiting-item_resolve once the operator has answered it. Keep notes with epic-note_create, \
+         epic-note_update and epic-note_delete. When the epic is done, record a closing summary \
+         with orchestrator-summary_record: what it delivered, what is left open, and the notes \
+         worth keeping as learnings.\n\
+         \nA note is a to-do or a fact about this epic's work now. What will still be true and \
+         useful after the epic is done is a learning, for the knowledge base.\n",
+    );
+    if !memory.learnings.is_empty() {
+        p.push_str(
+            "\n## Validated knowledge for this epic\n\nThe following knowledge has been validated by \
+             previous agents. Apply it where relevant.\n\n",
+        );
+        for l in &memory.learnings {
+            p.push_str(&format!(
+                "- [#{} {}, \u{2191}{}] {}\n",
+                l.id.0,
+                l.scope.as_str(),
+                l.upvote_count,
+                l.summary
+            ));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -270,6 +361,7 @@ mod tests {
             &epic,
             &switch(StartRule::MarkedOnly, Some(2)),
             &tasks,
+            &OrchestratorMemory::default(),
         );
 
         let order = [
@@ -293,11 +385,108 @@ mod tests {
         }
     }
 
+    /// dispatch-prompt.allium: ThePromptsParts, the memory part
+    /// (orchestrators.allium: EnoughForAFreshStart, GivenItsLearnings).
+    #[test]
+    fn the_prompt_carries_the_memory_and_the_learnings() {
+        use crate::models::{EpicId, LearningScope, LogEntryKind};
+        let epic = EpicBuilder::new(7).title("E").build();
+        let at = chrono::Utc::now();
+        let note = |id, text: &str, done| EpicNote {
+            id,
+            epic_id: EpicId(7),
+            text: text.into(),
+            done,
+            written_at: at,
+        };
+        let memory = OrchestratorMemory {
+            notes: vec![note(1, "ticked", true), note(2, "use v3", false)],
+            open_items: vec![WaitingItem {
+                id: 5,
+                epic_id: EpicId(7),
+                host: "h".into(),
+                task_id: Some(TaskId(9)),
+                about: "may I drop it?".into(),
+                tried: "read it".into(),
+                recommendation: "keep it".into(),
+                raised_at: at,
+                resolved_at: None,
+            }],
+            newest_log: vec![OrchestratorLogEntry {
+                id: 3,
+                epic_id: EpicId(7),
+                host: "h".into(),
+                at,
+                kind: LogEntryKind::StartedTask,
+                task_id: Some(TaskId(9)),
+                text: "first step".into(),
+                question: None,
+                trouble: None,
+            }],
+            learnings: vec![super::super::prompts::tests::seed(
+                42,
+                LearningScope::Epic,
+                3,
+            )],
+        };
+
+        let p = build_orchestrator_prompt(
+            "zlata",
+            &epic,
+            &switch(StartRule::MarkedOnly, None),
+            &[],
+            &memory,
+        );
+
+        let order = [
+            "Your notes for this epic",
+            "- #2 use v3",
+            "- #1 [done] ticked",
+            "Items that wait for the operator:",
+            "- #5 task #9: may I drop it? — you recommended: keep it",
+            "orchestrator-log_search with epic_id 7 reads the rest",
+            "started_task task #9: first step",
+            "with every task_dispatch",
+            "orchestrator-summary_record",
+            "A note is a to-do or a fact",
+            "## Validated knowledge for this epic",
+            "[#42 epic, \u{2191}3] learning 42",
+            "First, before anything else",
+        ];
+        let mut from = 0;
+        for part in order {
+            let at = p[from..]
+                .find(part)
+                .unwrap_or_else(|| panic!("{part:?} missing or out of order in:\n{p}"));
+            from += at + part.len();
+        }
+        assert!(!p.contains("learning_rate"), "{p}");
+    }
+
+    #[test]
+    fn an_empty_memory_says_none_and_has_no_knowledge_block() {
+        let epic = EpicBuilder::new(7).title("E").build();
+        let p = build_orchestrator_prompt(
+            "zlata",
+            &epic,
+            &switch(StartRule::MarkedOnly, None),
+            &[],
+            &OrchestratorMemory::default(),
+        );
+        assert_eq!(p.matches("- none").count(), 4, "{p}");
+        assert!(!p.contains("Validated knowledge"), "{p}");
+    }
+
     #[test]
     fn the_start_rule_everything_and_the_default_limit_are_said() {
         let epic = EpicBuilder::new(7).title("E").build();
-        let p =
-            build_orchestrator_prompt("zlata", &epic, &switch(StartRule::Everything, None), &[]);
+        let p = build_orchestrator_prompt(
+            "zlata",
+            &epic,
+            &switch(StartRule::Everything, None),
+            &[],
+            &OrchestratorMemory::default(),
+        );
         assert!(
             p.contains("You start every backlog task. At most 3 task agents"),
             "{p}"

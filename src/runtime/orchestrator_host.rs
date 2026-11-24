@@ -15,6 +15,9 @@ use std::time::Duration;
 use super::*;
 use crate::models::{Epic, EpicId, EpicOrchestration, Orchestrator, Task, TaskStatus, TmuxWindow};
 
+/// `orchestrators.allium: config.orchestrator_log_shown`.
+const ORCHESTRATOR_LOG_SHOWN: usize = 10;
+
 /// What one tick does for this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum OrchestratorAction {
@@ -122,6 +125,7 @@ pub(super) struct OrchestratorHost {
     runner: Arc<dyn ProcessRunner>,
     data_dir: PathBuf,
     claude_json: PathBuf,
+    emb_svc: Arc<crate::embeddings::EmbeddingService>,
     /// The epics of the rows on this host at the last tick
     /// (`plan_orchestrators`' `seen_here`).
     seen_here: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
@@ -133,12 +137,14 @@ impl OrchestratorHost {
         runner: Arc<dyn ProcessRunner>,
         data_dir: PathBuf,
         claude_json: PathBuf,
+        emb_svc: Arc<crate::embeddings::EmbeddingService>,
     ) -> Self {
         Self {
             database,
             runner,
             data_dir,
             claude_json,
+            emb_svc,
             seen_here: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
         }
     }
@@ -341,7 +347,33 @@ impl OrchestratorHost {
                 agent: t.agent_name.clone(),
             });
         }
-        crate::dispatch::build_orchestrator_prompt(&o.name, epic, on, &listed)
+        let memory = self.memory(epic).await;
+        crate::dispatch::build_orchestrator_prompt(&o.name, epic, on, &listed, &memory)
+    }
+
+    /// `orchestrators.allium: EnoughForAFreshStart`, `GivenItsLearnings`.
+    async fn memory(&self, epic: &Epic) -> crate::dispatch::OrchestratorMemory {
+        let db = &self.database;
+        let (notes, items, log, learnings) = tokio::join!(
+            db.list_epic_notes(),
+            db.list_waiting_items(),
+            db.list_orchestrator_log(),
+            crate::dispatch::list_learnings_for_epic(&**db, epic, &self.emb_svc)
+        );
+        let mut open_items: Vec<_> = items
+            .into_iter()
+            .filter(|i| i.epic_id == epic.id && i.is_open())
+            .collect();
+        open_items.sort_by_key(|i| i.id);
+        let mut newest_log: Vec<_> = log.into_iter().filter(|e| e.epic_id == epic.id).collect();
+        newest_log.sort_by_key(|e| std::cmp::Reverse(e.id));
+        newest_log.truncate(ORCHESTRATOR_LOG_SHOWN);
+        crate::dispatch::OrchestratorMemory {
+            notes: notes.into_iter().filter(|n| n.epic_id == epic.id).collect(),
+            open_items,
+            newest_log,
+            learnings,
+        }
     }
 }
 
@@ -630,6 +662,7 @@ mod tests {
             runner.clone(),
             tmp.path().join("data"),
             claude_json,
+            crate::embeddings::EmbeddingService::new_noop(),
         );
 
         host.tick().await;
@@ -663,5 +696,51 @@ mod tests {
             .flattened_calls()
             .iter()
             .any(|c| c.contains("kill-window")));
+    }
+
+    /// orchestrators.allium: OrchestratorThatKeepsDyingWaitsForTheOperator.
+    /// Every tick that finds the orchestrator down asks, and the store raises
+    /// one item for the bout.
+    #[tokio::test]
+    async fn a_down_orchestrator_raises_one_item_however_many_ticks_see_it() {
+        let db = crate::runtime::tests::test_db().await;
+        let epic = db.create_epic("E", "", None).await.unwrap();
+        db.switch_orchestrator_on(epic.id, None, None)
+            .await
+            .unwrap();
+        db.create_task(crate::models::CreateTaskRequest {
+            epic_id: Some(epic.id),
+            ..crate::models::CreateTaskRequest::fixture("t", "/repo")
+        })
+        .await
+        .unwrap();
+        let host_id = crate::store::HostStore::host_id(&*db).to_string();
+        db.ensure_orchestrator(epic.id, &host_id).await.unwrap();
+        let id = db.list_orchestrators().await[0].id;
+        for _ in 0..2 {
+            db.start_orchestrator_session(id, &host_id, false)
+                .await
+                .unwrap();
+            db.end_orchestrator_session(id, &host_id, true)
+                .await
+                .unwrap();
+        }
+        let runner = Arc::new(MockProcessRunner::new(vec![listing(""), listing("")]));
+        let tmp = tempfile::tempdir().unwrap();
+        let host = OrchestratorHost::new(
+            db.clone(),
+            runner,
+            tmp.path().join("data"),
+            tmp.path().join(".claude.json"),
+            crate::embeddings::EmbeddingService::new_noop(),
+        );
+
+        host.tick().await;
+        host.tick().await;
+
+        let items = db.list_waiting_items().await;
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert!(items[0].is_open() && items[0].task_id.is_none());
+        assert_eq!(items[0].about, dispatch_spacetime_module::DOWN_ABOUT);
     }
 }

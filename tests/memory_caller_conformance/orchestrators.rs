@@ -567,14 +567,13 @@ fn memory_caller_holds_starts_to_the_limit_like_the_real_module() {
 
 /// What both sides keep of an epic's memory: the log as (kind, task, question,
 /// text), the notes as (text, done) and the items as (task, about, open).
-fn memory_of(
-    rows: &SharedRows,
-    epic: EpicId,
-) -> (
+type Memory = (
     Vec<(String, i64, String, String)>,
     Vec<(String, bool)>,
     Vec<(i64, String, bool)>,
-) {
+);
+
+fn memory_of(rows: &SharedRows, epic: EpicId) -> Memory {
     let log = rows
         .orchestrator_log()
         .into_iter()

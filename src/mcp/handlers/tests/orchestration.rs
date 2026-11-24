@@ -753,7 +753,7 @@ async fn an_orchestrator_starts_tasks_up_to_its_limit() {
         tool_as(
             &state,
             "task_dispatch",
-            json!({ "task_id": task.0 }),
+            json!({ "task_id": task.0, "reason": "next in the plan" }),
             CallerIdentity::Orchestrator(name.clone()),
         )
     };
@@ -775,4 +775,245 @@ async fn an_orchestrator_starts_tasks_up_to_its_limit() {
         "{}",
         error_message(&refused)
     );
+}
+
+// -- the orchestrator's memory (OrchestratorMemoryViaMcp) ----------------------
+
+fn as_orchestrator(name: &str) -> CallerIdentity {
+    CallerIdentity::Orchestrator(name.to_string())
+}
+
+/// The id a write's reply names after "#".
+fn named_id(text: &str) -> i64 {
+    let at = text.find('#').expect("an id in the reply") + 1;
+    text[at..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap()
+}
+
+/// mcp-task-tools.allium: DispatchTaskViaMcp's reason. An orchestrator's
+/// start is logged with its reason; a start without one, or a reason from
+/// anyone else, is refused before anything is written.
+#[tokio::test]
+async fn an_orchestrators_start_is_logged_with_its_reason() {
+    let mut state = test_state().await;
+    Arc::get_mut(&mut state)
+        .expect("the fixture's state is not shared yet")
+        .dispatch_task_wait_cap = std::time::Duration::ZERO;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    let missing = tool_as(
+        &state,
+        "task_dispatch",
+        json!({ "task_id": task.0 }),
+        as_orchestrator(&name),
+    )
+    .await;
+    assert!(
+        error_message(&missing).contains("an orchestrator gives a reason"),
+        "{}",
+        error_message(&missing)
+    );
+    let foreign = tool(
+        &state,
+        "task_dispatch",
+        json!({ "task_id": task.0, "reason": "r" }),
+    )
+    .await;
+    assert!(
+        error_message(&foreign).contains("only an epic's orchestrator gives a reason"),
+        "{}",
+        error_message(&foreign)
+    );
+    assert!(state.db.dispatch_requests().await.is_empty());
+
+    ok_text(
+        &tool_as(
+            &state,
+            "task_dispatch",
+            json!({ "task_id": task.0, "reason": "first step of the plan" }),
+            as_orchestrator(&name),
+        )
+        .await,
+    );
+
+    let log = state.db.list_orchestrator_log().await;
+    assert_eq!(log.len(), 1, "{log:?}");
+    assert_eq!(log[0].kind, crate::models::LogEntryKind::StartedTask);
+    assert_eq!(log[0].task_id, Some(task));
+    assert_eq!(log[0].text, "first step of the plan");
+    let detail = detail(&state, task).await;
+    assert!(detail.contains("Orchestrator log:"), "{detail}");
+    assert!(detail.contains("started_task task #"), "{detail}");
+    assert!(
+        detail.contains(&format!(", orchestrator {name} on ")),
+        "{detail}"
+    );
+}
+
+/// orchestrators.allium: OnlyTheOrchestratorWritesItsLog. A plain session
+/// cannot write an orchestrator's memory.
+#[tokio::test]
+async fn the_memory_tools_are_an_orchestrators() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    orchestrator_of(&state, e).await;
+
+    for (tool_name, args) in [
+        ("epic-note_create", json!({ "text": "x" })),
+        (
+            "waiting-item_create",
+            json!({ "about": "a", "tried": "t", "recommendation": "r" }),
+        ),
+        ("orchestrator-summary_record", json!({ "text": "s" })),
+    ] {
+        let resp = tool(&state, tool_name, args).await;
+        assert!(
+            error_message(&resp).contains(&format!("{tool_name} is an orchestrator's tool")),
+            "{tool_name}: {}",
+            error_message(&resp)
+        );
+    }
+    assert!(state.db.list_epic_notes().await.is_empty());
+}
+
+/// mcp-task-tools.allium: OrchestratorMemoryViaMcp, ResolveWaitingItemViaMcp;
+/// epics.allium: GetEpicViaMcp's orchestrator lines.
+#[tokio::test]
+async fn notes_items_and_answers_show_on_the_epics_read() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+    let me = as_orchestrator(&name);
+
+    let note = named_id(&ok_text(
+        &tool_as(
+            &state,
+            "epic-note_create",
+            json!({ "text": "use v3" }),
+            me.clone(),
+        )
+        .await,
+    ));
+    let other = named_id(&ok_text(
+        &tool_as(
+            &state,
+            "epic-note_create",
+            json!({ "text": "a stale fact" }),
+            me.clone(),
+        )
+        .await,
+    ));
+    ok_text(
+        &tool_as(
+            &state,
+            "epic-note_update",
+            json!({ "note_id": note, "done": true }),
+            me.clone(),
+        )
+        .await,
+    );
+    ok_text(
+        &tool_as(
+            &state,
+            "epic-note_delete",
+            json!({ "note_id": other }),
+            me.clone(),
+        )
+        .await,
+    );
+    let item = named_id(&ok_text(
+        &tool_as(
+            &state,
+            "waiting-item_create",
+            json!({ "task_id": task.0, "about": "may I drop it?", "tried": "read it", "recommendation": "keep it" }),
+            me.clone(),
+        )
+        .await,
+    ));
+    ok_text(
+        &tool_as(
+            &state,
+            "orchestrator-answer_record",
+            json!({ "task_id": task.0, "question": "rebase?", "answer": "yes", "reason": "the epic says so" }),
+            me.clone(),
+        )
+        .await,
+    );
+
+    let read = epic_detail(&state, e).await;
+    assert!(read.contains(&format!("Orchestrator {name} on ")), "{read}");
+    assert!(read.contains("Waiting for the operator:"), "{read}");
+    assert!(
+        read.contains(&format!("#{item} task #{}: may I drop it?", task.0)),
+        "{read}"
+    );
+    assert!(read.contains(&format!("#{note} [done] use v3")), "{read}");
+    assert!(!read.contains("a stale fact"), "{read}");
+    assert!(read.contains("answered task #"), "{read}");
+    assert!(read.contains("yes — the epic says so"), "{read}");
+
+    // Anyone resolves an item, and a second resolve changes nothing.
+    ok_text(&tool(&state, "waiting-item_resolve", json!({ "item_id": item })).await);
+    let again = ok_text(&tool(&state, "waiting-item_resolve", json!({ "item_id": item })).await);
+    assert!(again.contains("already resolved"), "{again}");
+    assert!(!epic_detail(&state, e)
+        .await
+        .contains("Waiting for the operator:"));
+}
+
+/// mcp-task-tools.allium: ReadOrchestratorLogViaMcp. The log reads newest
+/// first, by page.
+#[tokio::test]
+async fn the_log_reads_newest_first_by_page() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+    for n in 0..3 {
+        ok_text(
+            &tool_as(
+                &state,
+                "orchestrator-answer_record",
+                json!({ "task_id": task.0, "question": format!("q{n}"), "answer": format!("a{n}"), "reason": "r" }),
+                as_orchestrator(&name),
+            )
+            .await,
+        );
+    }
+
+    let page = ok_text(
+        &tool(
+            &state,
+            "orchestrator-log_search",
+            json!({ "epic_id": e.0, "limit": 2 }),
+        )
+        .await,
+    );
+    let lines: Vec<&str> = page.lines().collect();
+    assert_eq!(lines.len(), 3, "{page}");
+    assert!(
+        lines[0].contains("a2 — r") && lines[1].contains("a1 — r"),
+        "{page}"
+    );
+    let before = lines[2]
+        .split("before=")
+        .nth(1)
+        .and_then(|s| s.split(' ').next())
+        .expect("the next page's cursor");
+    let next = ok_text(
+        &tool(
+            &state,
+            "orchestrator-log_search",
+            json!({ "epic_id": e.0, "before": before.parse::<i64>().unwrap() }),
+        )
+        .await,
+    );
+    assert!(next.contains("a0 — r") && !next.contains("a1"), "{next}");
 }

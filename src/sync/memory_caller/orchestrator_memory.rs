@@ -140,6 +140,9 @@ impl MemoryReducerCaller {
             Ok(note) => note,
             Err(why) => return Ok(ReducerOutcome::Refused(why)),
         };
+        if let Err(why) = self.acting_for_orchestrator(&tables, &name) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
         let id = Self::assign_id(0, &mut tables.next_epic_note_id);
         let note = module::EpicNote {
             id,
@@ -160,6 +163,9 @@ impl MemoryReducerCaller {
         let mut tables = self.lock();
         match module::check_change_epic_note(&*tables, &name, id, text.as_deref(), done) {
             Ok(note) => {
+                if let Err(why) = self.acting_for_orchestrator(&tables, &name) {
+                    return Ok(ReducerOutcome::Refused(why));
+                }
                 self.write_epic_note_row(&mut tables, note);
                 Ok(ReducerOutcome::Applied(vec![]))
             }
@@ -169,12 +175,20 @@ impl MemoryReducerCaller {
 
     pub(super) fn apply_remove_epic_note(&self, name: String, id: i64) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
-        if let Err(why) = module::check_remove_epic_note(&*tables, &name, id) {
+        if let Err(why) = module::check_remove_epic_note(&*tables, &name, id)
+            .and_then(|()| self.acting_for_orchestrator(&tables, &name))
+        {
             return Ok(ReducerOutcome::Refused(why));
         }
         tables.epic_notes.remove(&id);
         self.rows.remove_epic_note(id);
         Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Mirrors the module's `require_acting_for_orchestrator`.
+    fn acting_for_orchestrator(&self, tables: &Tables, name: &str) -> Result<(), String> {
+        let o = module::orchestrator_writing(tables, name)?;
+        self.acting_for(tables, &o.host)
     }
 
     /// Mirrors the module's `insert_log_entry`.

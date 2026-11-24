@@ -18,6 +18,7 @@ use super::epics;
 use super::keybindings;
 use super::learnings;
 use super::managed_feeds;
+use super::orchestrator_memory;
 use super::people;
 use super::review_command;
 use super::tasks;
@@ -606,9 +607,125 @@ backlog status or the dispatch fails.",
                 "task_id": {
                     "type": "integer",
                     "description": "The task ID to dispatch"
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "An epic's orchestrator only, and required from it: one line on why this task, now. It is written to the epic's log. Any other caller leaves it out."
                 }
             },
             "required": ["task_id"]
+        };
+
+    async write "orchestrator-answer_record" => orchestrator_memory::handle_answer_record,
+        "Record in your epic's log that you answered a task agent's question, with the question, \
+your answer and a one-line reason. Only an epic's orchestrator calls it; the epic and the machine \
+come from who you are. It records the answer and sends nothing: send the answer itself to the \
+agent as a message. The entry shows on the task's read and the epic's.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task whose agent asked; a task of your epic"},
+                "question": {"type": "string", "description": "What the agent asked, in one line"},
+                "answer": {"type": "string", "description": "Your decision, in one line"},
+                "reason": {"type": "string", "description": "Why, in one line"}
+            },
+            "required": ["task_id", "question", "answer", "reason"]
+        };
+
+    async write "orchestrator-summary_record" => orchestrator_memory::handle_summary_record,
+        "Record the closing summary of your epic once it is done: what it delivered, what is left \
+open, and the notes that look worth keeping as learnings. Only an epic's orchestrator calls it, \
+and only while its epic is done. The summary is the last entry of the epic's log.",
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The summary"}
+            },
+            "required": ["text"]
+        };
+
+    async read_only "orchestrator-log_search" => orchestrator_memory::handle_log_search,
+        "Read an orchestrated epic's log, newest first: what its orchestrator started, answered, \
+passed on and acted on, and its sessions. Pass task_id for the entries about one task, and \
+before for the page after the one you have. One line per entry with its id, time, machine, kind \
+and text. The epic's read shows only the newest entries.",
+        {
+            "type": "object",
+            "properties": {
+                "epic_id": {"type": "integer", "description": "The orchestrated epic whose log to read"},
+                "task_id": {"type": "integer", "description": "Only the entries about this task"},
+                "before": {"type": "integer", "description": "An entry id: list only older entries. The last line of a cut page gives it."},
+                "limit": {"type": "integer", "minimum": 1, "description": "At most this many entries. Defaults to 50."}
+            },
+            "required": ["epic_id"]
+        };
+
+    async write "waiting-item_create" => orchestrator_memory::handle_item_create,
+        "Pass a question or a problem to the operator as an item that waits for them, with what \
+you already tried and what you recommend. Only an epic's orchestrator calls it; the epic and the \
+machine come from who you are. The item stays open until it is resolved, and the reply gives its \
+id. Use it for what only a person can decide, not for what you may answer yourself.",
+        {
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "integer", "description": "The task it is about. Leave it out for the epic as a whole."},
+                "about": {"type": "string", "description": "The question or the problem, in one line"},
+                "tried": {"type": "string", "description": "What you already did about it"},
+                "recommendation": {"type": "string", "description": "What you would do"}
+            },
+            "required": ["about", "tried", "recommendation"]
+        };
+
+    async idempotent "waiting-item_resolve" => orchestrator_memory::handle_item_resolve,
+        "Resolve an item that waits for the operator, once the operator has answered it or it no \
+longer applies. Any caller may resolve one: the operator's own session, or the orchestrator \
+when the operator has answered. Resolving an item that is already resolved changes nothing. The \
+open items are on the epic's read.",
+        {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "integer", "description": "The item to resolve"}
+            },
+            "required": ["item_id"]
+        };
+
+    async write "epic-note_create" => orchestrator_memory::handle_note_create,
+        "Write a note for your epic: a to-do or a fact about the epic's work now, such as a \
+decision that binds later tasks or the next free version number. Only an epic's orchestrator \
+calls it, for its own epic. The reply gives the note's id. What stays true after the epic is \
+done is a learning for the knowledge base, not a note.",
+        {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "The note"}
+            },
+            "required": ["text"]
+        };
+
+    async write "epic-note_update" => orchestrator_memory::handle_note_update,
+        "Change one of your epic's notes: its text, its done tick, or both. Only an epic's \
+orchestrator calls it, for its own epic's notes. A ticked to-do stays readable until you delete \
+it. Pass at least one of text and done.",
+        {
+            "type": "object",
+            "properties": {
+                "note_id": {"type": "integer", "description": "The note to change"},
+                "text": {"type": "string", "description": "The new text"},
+                "done": {"type": "boolean", "description": "Tick a to-do done, or take the tick off"}
+            },
+            "required": ["note_id"]
+        };
+
+    async destructive "epic-note_delete" => orchestrator_memory::handle_note_delete,
+        "Delete one of your epic's notes, such as one that stopped being true. Only an epic's \
+orchestrator calls it, for its own epic's notes. Nothing brings a deleted note back. A correction \
+replaces a note rather than sitting beside it.",
+        {
+            "type": "object",
+            "properties": {
+                "note_id": {"type": "integer", "description": "The note to delete"}
+            },
+            "required": ["note_id"]
         };
 
     async write "task_resume" => tasks::handle_resume_task,

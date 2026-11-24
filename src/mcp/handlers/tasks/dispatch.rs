@@ -16,7 +16,7 @@ use super::{
 pub(crate) async fn handle_dispatch_task(
     state: &McpState,
     id: Option<Value>,
-    _identity: &CallerIdentity,
+    identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
     let parsed = match parse_args::<DispatchTaskArgs>(&id, args) {
@@ -24,6 +24,26 @@ pub(crate) async fn handle_dispatch_task(
         Err(resp) => return resp,
     };
     let task_id = parsed.task_id;
+    // orchestrators.allium: OrchestratorStartsATask. An orchestrator gives a
+    // reason with every start, and nobody else gives one.
+    let orchestrator = match (identity, parsed.reason) {
+        (CallerIdentity::Orchestrator(name), Some(reason)) => Some((name.clone(), reason)),
+        (CallerIdentity::Orchestrator(_), None) => {
+            return JsonRpcResponse::err(
+                id,
+                INVALID_PARAMS,
+                "an orchestrator gives a reason with every start: pass reason, one line on why this task, now".to_string(),
+            )
+        }
+        (_, Some(_)) => {
+            return JsonRpcResponse::err(
+                id,
+                INVALID_PARAMS,
+                "only an epic's orchestrator gives a reason; leave reason out".to_string(),
+            )
+        }
+        (_, None) => None,
+    };
     if let Some(refused) =
         super::archived::archived_refusal(state, &id, task_id, "dispatched").await
     {
@@ -43,11 +63,21 @@ pub(crate) async fn handle_dispatch_task(
     // The request is the claim (`DispatchClaimExclusive` in
     // `docs/specs/dispatch.allium`): the backlog guard is the module's, in the
     // same transaction that writes the row, not the status read above.
-    let request = match state
-        .task_svc
-        .request_dispatch(task_id, DispatchOrigin::Mcp, None)
-        .await
-    {
+    let answer = match orchestrator {
+        Some((name, reason)) => {
+            state
+                .task_svc
+                .request_orchestrated_dispatch(task_id, name, reason)
+                .await
+        }
+        None => {
+            state
+                .task_svc
+                .request_dispatch(task_id, DispatchOrigin::Mcp, None)
+                .await
+        }
+    };
+    let request = match answer {
         Ok(RequestDispatchAnswer::Requested(request)) => request,
         Ok(RequestDispatchAnswer::Refused(why)) => {
             return refused_response(state, id, task_id, why).await

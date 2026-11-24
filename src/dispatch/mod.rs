@@ -98,7 +98,7 @@ pub use build_output::{clear_build_output, BuildOutputCleared, CACHEDIR_TAG_SIGN
 pub use finish::{finish_task, finish_task_with_abort_runner, FinishContext, FinishError};
 pub use orchestrator::{
     build_orchestrator_prompt, end_orchestrator, holds_a_conversation, launch_orchestrator,
-    orchestrator_dir, OrchestratorLaunch, OrchestratorPromptTask,
+    orchestrator_dir, OrchestratorLaunch, OrchestratorMemory, OrchestratorPromptTask,
 };
 // Test-only re-export: `prompts` is private, and the routing tests in
 // `src/runtime/tests/` and `src/service/tasks/tests/` assert on this marker to
@@ -106,7 +106,8 @@ pub use orchestrator::{
 #[cfg(test)]
 pub(crate) use prompts::RESEARCH_AGENT_INTRO;
 pub use prompts::{
-    build_and_record_injections, effective_review_command, EpicContext, LearningInjections,
+    build_and_record_injections, effective_review_command, list_learnings_for_epic, EpicContext,
+    LearningInjections,
 };
 pub use request_host::{
     DeadlineRunner, DispatchRequestObserver, SessionRequestObserver, SessionWork, DEADLINE_PASSED,

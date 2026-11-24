@@ -84,11 +84,13 @@ pub(super) async fn write_ready(
 }
 
 /// `GetTaskViaMcp`'s `Ready` and `Orchestrated by` lines, each with its
-/// leading newline. Ready is said of a backlog task only.
+/// leading newline. Ready is said of a backlog task only. `orchestrators`
+/// are the covering epic's, every machine's.
 pub(super) fn task_lines(
     status: TaskStatus,
     mark: Option<&ReadyMark>,
     covered_by: Option<&(Epic, EpicOrchestration)>,
+    orchestrators: &[crate::models::Orchestrator],
 ) -> String {
     let mut text = String::new();
     if status == TaskStatus::Backlog {
@@ -110,6 +112,9 @@ pub(super) fn task_lines(
             "\nOrchestrated by: epic {} ({})",
             epic.id.0, epic.title
         ));
+        for o in orchestrators {
+            text.push_str(&format!(", orchestrator {} on {}", o.name, o.host));
+        }
     }
     text
 }

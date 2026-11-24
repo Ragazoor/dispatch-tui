@@ -1403,6 +1403,20 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ("work-package_search", json!({})),
         ("work-package_update", json!({"work_package_id": 1})),
         ("work-package_delete", json!({"work_package_id": 1})),
+        (
+            "orchestrator-answer_record",
+            json!({"task_id": 1, "question": "q", "answer": "a", "reason": "r"}),
+        ),
+        ("orchestrator-summary_record", json!({"text": "s"})),
+        ("orchestrator-log_search", json!({"epic_id": 1})),
+        (
+            "waiting-item_create",
+            json!({"about": "a", "tried": "t", "recommendation": "r"}),
+        ),
+        ("waiting-item_resolve", json!({"item_id": 1})),
+        ("epic-note_create", json!({"text": "t"})),
+        ("epic-note_update", json!({"note_id": 1})),
+        ("epic-note_delete", json!({"note_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();
@@ -1583,8 +1597,10 @@ fn tool_definitions_carry_annotations() {
         "work-package_search",
         "review-command_read",
         "feed-config_read",
+        "orchestrator-log_search",
     ];
     const DESTRUCTIVE: &[&str] = &[
+        "epic-note_delete",
         "learning_delete",
         "session_exit",
         "task_update",

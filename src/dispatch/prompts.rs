@@ -1261,6 +1261,48 @@ pub async fn list_learnings_for_dispatch_rag(
     all_ranked.into_iter().cloned().collect()
 }
 
+/// `orchestrators.allium: GivenItsLearnings`: the learnings that fit `epic`,
+/// ranked as for a task of it by the epic's title and description, with the
+/// epic as the scope and no repository. Nothing is recorded as retrieved: an
+/// orchestrator has no task to record it on.
+pub async fn list_learnings_for_epic(
+    db: &dyn crate::store::TaskReadStore,
+    epic: &crate::models::Epic,
+    emb_svc: &Arc<EmbeddingService>,
+) -> Vec<Learning> {
+    let query_text = embed_text_for_query(&epic.title, &epic.description);
+    let query_vec = match emb_svc.embed(query_text).await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(epic_id = epic.id.0, error = ?e, "orchestrator RAG: embedding failed");
+            return vec![];
+        }
+    };
+    let rows = match db.list_all_approved_learnings_with_embedding().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(epic_id = epic.id.0, error = ?e, "orchestrator RAG: no learnings");
+            return vec![];
+        }
+    };
+    let candidates = deserialize_candidate_rows(rows);
+    let epic_id = epic.id.0.to_string();
+    rag_rank_learnings(
+        &candidates,
+        &RagRankParams {
+            query_vec: &query_vec,
+            task_epic_id: Some(epic_id.as_str()),
+            task_repo: None,
+            threshold: DISPATCH_RAG_THRESHOLD,
+            tag_filter: &[],
+            limit: DISPATCH_INJECTION_CAP,
+        },
+    )
+    .into_iter()
+    .cloned()
+    .collect()
+}
+
 pub async fn build_and_record_injections(
     db: &dyn crate::store::TaskReadStore,
     task: &crate::models::Task,

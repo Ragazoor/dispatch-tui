@@ -1096,6 +1096,7 @@ impl TuiRuntime {
                 runner.clone(),
                 inputs.data_dir.to_path_buf(),
                 inputs.paths.claude_json_path.clone(),
+                emb_svc.clone(),
             )),
             feed_invalidate_tx,
             feed_sync_guard,

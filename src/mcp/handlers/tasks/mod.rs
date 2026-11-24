@@ -349,6 +349,8 @@ pub(super) struct SetVerifyCommandArgs {
 pub(super) struct DispatchTaskArgs {
     #[serde(deserialize_with = "deserialize_flexible_id")]
     pub(super) task_id: TaskId,
+    #[serde(default)]
+    pub(super) reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -390,7 +392,17 @@ pub(super) async fn build_epic_titles(state: &McpState) -> HashMap<EpicId, Strin
 /// The text `task_search` returns with `task_id` for `task`; `dispatch://task/self` serves the
 /// same rendering (`task_detail_text` in the spec).
 pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
-    let (epic_titles, verify_command, dispatch_request, agent, bookmarks, mark, covered_by) = tokio::join!(
+    let (
+        epic_titles,
+        verify_command,
+        dispatch_request,
+        agent,
+        bookmarks,
+        mark,
+        covered_by,
+        orchestrators,
+        log,
+    ) = tokio::join!(
         build_epic_titles(state),
         crate::dispatch::fetch_verify_command(&*state.db, &task.repo_path),
         state.db.latest_dispatch_request_for_task(task.id),
@@ -400,7 +412,28 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         },
         state.db.bookmarked_task_ids(),
         state.db.ready_mark(task.id),
-        super::orchestration::covering(state, task.epic_id)
+        super::orchestration::covering(state, task.epic_id),
+        state.db.list_orchestrators(),
+        state.db.list_orchestrator_log()
+    );
+    let covering_orchestrators: Vec<_> = covered_by
+        .as_ref()
+        .map(|(epic, _)| {
+            orchestrators
+                .into_iter()
+                .filter(|o| o.epic_id == epic.id)
+                .collect()
+        })
+        .unwrap_or_default();
+    let orchestration_lines = format!(
+        "{}{}",
+        super::orchestration::task_lines(
+            task.status,
+            mark.as_ref(),
+            covered_by.as_ref(),
+            &covering_orchestrators
+        ),
+        super::orchestrator_memory::task_log_lines(&log, task)
     );
     format_task_detail(
         task,
@@ -409,7 +442,7 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         verify_command.as_deref(),
         dispatch_request.as_ref(),
         bookmarks.contains(&task.id),
-        &super::orchestration::task_lines(task.status, mark.as_ref(), covered_by.as_ref()),
+        &orchestration_lines,
     )
 }
 

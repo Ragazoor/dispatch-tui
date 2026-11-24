@@ -11,6 +11,7 @@ mod keybindings;
 mod learnings;
 mod managed_feeds;
 mod orchestration;
+mod orchestrator_memory;
 mod people;
 mod review_command;
 mod task_refs;

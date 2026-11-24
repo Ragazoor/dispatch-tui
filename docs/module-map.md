@@ -155,6 +155,7 @@ lifecycle (`managed_store.rs`), generated `bindings/` and snapshot tooling.
 | `src/mcp/handlers/epics.rs` | Epic tool handlers (thin wrappers): parse JSON-RPC args → call `EpicService` → format response |
 | `src/mcp/handlers/learnings.rs` | Knowledge base tool handlers |
 | `src/mcp/handlers/managed_feeds.rs` | Managed feed config tool handlers (`feed-config_read`, `feed-config_set`) |
+| `src/mcp/handlers/orchestrator_memory.rs` | An orchestrator's memory tools (`orchestrator-answer_record`, `orchestrator-summary_record`, `orchestrator-log_search`, `waiting-item_create`, `waiting-item_resolve`, `epic-note_create`, `epic-note_update`, `epic-note_delete`) and the epic and task reads of its memory |
 | `src/mcp/handlers/review_command.rs` | Review command tool handlers (`review-command_read`, `review-command_set`) |
 | `src/mcp/handlers/types.rs` | JSON-RPC request/response types, flexible integer deserializer |
 | `src/mcp/handlers/tests/mod.rs` | MCP handler integration tests entry point |
