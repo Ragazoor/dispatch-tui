@@ -353,6 +353,7 @@ pub fn seed_learnings(ctx: &ReducerContext, rows: Vec<Learning>) -> Result<(), S
         // A snapshot older than the task-scope removal still holds task rows;
         // tasks and epics are seeded first, so the retire sees their chain.
         let row = retire_task_scoped_learning(ctx, &row).unwrap_or(row);
+        let row = archived_if_orphaned(ctx, &row).unwrap_or(row);
         if ctx.db.learnings().id().find(row.id).is_some() {
             ctx.db.learnings().id().update(row);
         } else {

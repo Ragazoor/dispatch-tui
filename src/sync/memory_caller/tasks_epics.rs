@@ -806,7 +806,7 @@ impl MemoryReducerCaller {
             )));
         }
         let parent = row.parent_epic_id;
-        self.rescope_repo_group_learnings(&mut tables, &row);
+        self.rescope_learnings_of_deleted_epics(&mut tables, &doomed, parent);
         self.delete_epic_subtree_with_feed_cleanup(&mut tables, id, &doomed);
         self.recalculate_epic_chain(&mut tables, parent);
         Ok(ReducerOutcome::Applied(vec![]))
@@ -899,8 +899,8 @@ impl MemoryReducerCaller {
         }
 
         let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        // The module's `batch_delete`: no re-scope onto a parent this batch
-        // deletes too.
+        // The module's `batch_delete`: learnings move past an epic above that
+        // this batch deletes too.
         let batch_doomed: std::collections::HashSet<i64> = epic_doomed
             .iter()
             .flat_map(|(_, doomed)| doomed.iter().copied())
@@ -912,9 +912,8 @@ impl MemoryReducerCaller {
                 continue;
             };
             recalc.insert(row.parent_epic_id);
-            if !batch_doomed.contains(&row.parent_epic_id) {
-                self.rescope_repo_group_learnings(&mut tables, &row);
-            }
+            let target = Self::surviving_ancestor(&tables, row.parent_epic_id, &batch_doomed);
+            self.rescope_learnings_of_deleted_epics(&mut tables, doomed, target);
             self.delete_epic_subtree_with_feed_cleanup(&mut tables, *id, doomed);
         }
         for &id in &task_ids {

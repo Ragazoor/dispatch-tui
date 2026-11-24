@@ -87,20 +87,10 @@ fn grouping_root_of(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
     None
 }
 
-/// Move a `repo-group` sub-epic's epic-scoped learnings to its parent, ahead
-/// of deleting it (`learnings.allium: ReScopeLearningsOnRepoGroupDelete`).
-/// Any other epic re-scopes nothing. Every delete of a single epic calls it:
-/// the empty-group cleanup, `delete_epic` and `batch_delete`.
-pub(crate) fn rescope_repo_group_learnings(ctx: &ReducerContext, epic: &Epic) {
-    if epic.origin == REPO_GROUP_ORIGIN && epic.parent_epic_id != 0 {
-        rescope_learnings(ctx, epic.id, epic.parent_epic_id);
-    }
-}
-
 /// Delete `epic_id` iff it is a `repo-group` sub-epic with no tasks and no
 /// children; otherwise recalculate it. Epic-scoped learnings are re-scoped to
 /// the parent first, so none is left with a dangling `scope_ref`
-/// (`learnings.allium: ReScopeLearningsOnRepoGroupDelete`).
+/// (`learnings.allium: ReScopeLearningsOnEpicDelete`).
 fn delete_if_empty_repo_group(ctx: &ReducerContext, epic_id: i64) {
     let Some(epic) = ctx.db.epics().id().find(epic_id) else {
         return;
@@ -120,12 +110,12 @@ fn delete_if_empty_repo_group(ctx: &ReducerContext, epic_id: i64) {
         recalculate_epic_chain(ctx, epic_id);
         return;
     }
-    rescope_repo_group_learnings(ctx, &epic);
     // The one the delete reducer runs, over a subtree of just this epic. The
     // guards above leave no tasks and no children, so the subtree is this one
     // epic and `validate_epic_deletable`'s depth and undone-task checks have
     // nothing to refuse.
     let doomed = collect_epic_subtree_ids(ctx, epic_id);
+    rescope_learnings_of_deleted_epics(ctx, &doomed, epic.parent_epic_id);
     delete_epic_subtree_with_feed_cleanup(ctx, epic_id, &doomed);
 }
 

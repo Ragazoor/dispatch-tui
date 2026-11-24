@@ -1,7 +1,7 @@
 //! What the store records for a learning, run against the in-memory store:
 //! the author stamp (`store-split.allium: IdentitiesAreTheCallers`), the scope
-//! refusals and the re-scope of a deleted repo group's learnings
-//! (`learnings.allium`). One person uses the store: every learning is served
+//! refusals and the re-scope of a deleted epic's learnings
+//! (`learnings.allium: ReScopeLearningsOnEpicDelete`). One person uses the store: every learning is served
 //! to everyone (`docs/plans/2026-11-23-remove-workspaces.md`, R2).
 
 mod common;
@@ -234,18 +234,23 @@ fn batch_deleting_a_repo_group_sub_epic_moves_its_learnings_to_the_parent() {
     assert_eq!(scope_ref_of(&store, l), Some(root.to_string()));
 }
 
+fn status_of(store: &Store, id: i64) -> String {
+    store.db().learnings().id().find(id).expect("row").status
+}
+
 #[test]
-fn a_batch_that_also_deletes_the_parent_re_scopes_nothing() {
+fn a_batch_that_also_deletes_the_root_parent_archives_the_learnings() {
     let store = world();
     let (root, sub, l) = grouped_with_learning(&store);
     store
         .call("alice", |ctx| batch_delete(ctx, vec![], vec![sub, root]))
         .expect("batch delete");
     assert_eq!(scope_ref_of(&store, l), Some(sub.to_string()));
+    assert_eq!(status_of(&store, l), "archived");
 }
 
 #[test]
-fn deleting_a_hand_made_sub_epic_re_scopes_nothing() {
+fn deleting_a_hand_made_sub_epic_moves_its_learnings_to_the_parent() {
     let store = world();
     let root = epic_in(&store, "alice");
     let sub = store.create_sub_epic("alice", root);
@@ -253,5 +258,73 @@ fn deleting_a_hand_made_sub_epic_re_scopes_nothing() {
     store
         .call("alice", |ctx| delete_epic(ctx, sub))
         .expect("delete");
-    assert_eq!(scope_ref_of(&store, l.id), Some(sub.to_string()));
+    assert_eq!(scope_ref_of(&store, l.id), Some(root.to_string()));
+    assert_eq!(status_of(&store, l.id), "approved");
+}
+
+#[test]
+fn deleting_an_epic_moves_the_learnings_of_its_whole_subtree_up() {
+    let store = world();
+    let top = epic_in(&store, "alice");
+    let middle = store.create_sub_epic("alice", top);
+    let leaf = store.create_sub_epic("alice", middle);
+    let l = record(&store, "alice", row("epic", Some(leaf.to_string()), None)).expect("record");
+    store
+        .call("alice", |ctx| delete_epic(ctx, middle))
+        .expect("delete");
+    assert_eq!(scope_ref_of(&store, l.id), Some(top.to_string()));
+}
+
+#[test]
+fn deleting_a_root_epic_archives_its_learnings_and_its_sub_epics() {
+    let store = world();
+    let root = epic_in(&store, "alice");
+    let sub = store.create_sub_epic("alice", root);
+    let on_root = record(&store, "alice", row("epic", Some(root.to_string()), None)).expect("record");
+    let on_sub = record(&store, "alice", row("epic", Some(sub.to_string()), None)).expect("record");
+    let elsewhere = record(&store, "alice", row("user", None, None)).expect("record");
+    store
+        .call("alice", |ctx| delete_epic(ctx, root))
+        .expect("delete");
+    assert_eq!(status_of(&store, on_root.id), "archived");
+    assert_eq!(status_of(&store, on_sub.id), "archived");
+    assert_eq!(status_of(&store, elsewhere.id), "approved");
+}
+
+#[test]
+fn a_batch_of_an_epic_and_its_parent_moves_the_learnings_past_both() {
+    let store = world();
+    let top = epic_in(&store, "alice");
+    let middle = store.create_sub_epic("alice", top);
+    let leaf = store.create_sub_epic("alice", middle);
+    let l = record(&store, "alice", row("epic", Some(leaf.to_string()), None)).expect("record");
+    store
+        .call("alice", |ctx| batch_delete(ctx, vec![], vec![leaf, middle]))
+        .expect("batch delete");
+    assert_eq!(scope_ref_of(&store, l.id), Some(top.to_string()));
+}
+
+#[test]
+fn an_older_store_archives_the_epic_learnings_earlier_deletes_left_behind() {
+    let store = world();
+    let kept_epic = epic_in(&store, "alice");
+    let kept = record(&store, "alice", row("epic", Some(kept_epic.to_string()), None)).expect("record");
+    let orphan = Learning {
+        id: 9_001,
+        ..row("epic", Some("404".into()), None)
+    };
+    store.db().learnings().insert(orphan);
+    store
+        .db()
+        .rules_version()
+        .id()
+        .update(RulesVersion { id: 1, version: ORPHANED_EPIC_LEARNINGS_RULES_VERSION - 1 });
+    store
+        .call("alice", |ctx| {
+            stamp_rules_version_on_connect(ctx);
+            Ok(())
+        })
+        .expect("connect");
+    assert_eq!(status_of(&store, 9_001), "archived");
+    assert_eq!(status_of(&store, kept.id), "approved");
 }

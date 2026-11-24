@@ -176,8 +176,8 @@ pub enum LearningVerdict {
     Helped,
     Wrong,
     /// Read, and did not fit this task. Counts 0 toward the score; enough of
-    /// them from one repo, with no `helped`, mute the entry from that repo's
-    /// dispatch injection (`core.allium: Learning.off_topic_in_repo`).
+    /// them, against few `helped`, mute the entry from dispatch injection
+    /// (`core.allium: Learning.muted_for_repo`).
     NotApplicable,
 }
 

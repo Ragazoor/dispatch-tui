@@ -1329,7 +1329,7 @@ rule UpdateEpicIsOneTransaction {
 -- patch carries a repo_path, re-routes a task already inside a grouped
 -- non-feed subtree to the sub-epic for its new repo and deletes the sub-epic
 -- it left if that is now empty (re-scoping its learnings first,
--- learnings.allium: ReScopeLearningsOnRepoGroupDelete). Each does this inside
+-- learnings.allium: ReScopeLearningsOnEpicDelete). Each does this inside
 -- the same transaction as the write, and recalculates the epics it touched
 -- there, so no client re-derives it and none can disagree. RegroupEpic and
 -- FlattenEpic are the reducers regroup_epic and flatten_epic; the TUI toggle

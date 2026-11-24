@@ -346,6 +346,11 @@ pub fn stamp_rules_version_on_connect(ctx: &ReducerContext) {
     if previous < TASK_SCOPE_REMOVED_RULES_VERSION {
         retire_task_scoped_learnings(ctx);
     }
+    // Once, for epic-scoped learnings that deletes before
+    // `ReScopeLearningsOnEpicDelete` left behind (`learnings.allium`).
+    if previous < ORPHANED_EPIC_LEARNINGS_RULES_VERSION {
+        archive_orphaned_epic_learnings(ctx);
+    }
     // Once, for tasks stored with a sub_status their status does not allow
     // (`tasks.allium: SubStatusAutoreset`).
     if previous < SUB_STATUS_FIT_RULES_VERSION {

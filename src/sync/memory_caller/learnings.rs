@@ -10,7 +10,7 @@ use crate::spacetime::bindings;
 
 use super::super::encode;
 use super::super::writes::{ReducerOutcome, StoreRefusal};
-use super::{MemoryReducerCaller, Tables};
+use super::{MemoryReducerCaller, Tables, MAX_EPIC_DEPTH};
 
 impl MemoryReducerCaller {
     /// `source_task_id` is not indexed here either — mirrors the module's own
@@ -172,8 +172,56 @@ impl MemoryReducerCaller {
         true
     }
 
-    /// Mirrors the module's `rescope_learnings`, callable from another
-    /// reducer's transaction.
+    /// Mirrors the module's `rescope_learnings_of_deleted_epics`
+    /// (`learnings.allium: ReScopeLearningsOnEpicDelete`).
+    pub(super) fn rescope_learnings_of_deleted_epics(
+        &self,
+        tables: &mut Tables,
+        doomed: &std::collections::HashSet<i64>,
+        target: i64,
+    ) {
+        let refs: std::collections::HashSet<String> =
+            doomed.iter().map(|id| id.to_string()).collect();
+        let now = self.now();
+        self.update_matching_learnings(
+            tables,
+            |l| l.scope == "epic" && l.scope_ref.as_ref().is_some_and(|r| refs.contains(r)),
+            |row| {
+                if target != 0 {
+                    module::Learning {
+                        scope_ref: Some(target.to_string()),
+                        ..row
+                    }
+                } else if row.status == "approved" {
+                    module::Learning {
+                        status: "archived".to_string(),
+                        updated_at: now.clone(),
+                        ..row
+                    }
+                } else {
+                    row
+                }
+            },
+        );
+    }
+
+    /// Mirrors the module's `surviving_ancestor`.
+    pub(super) fn surviving_ancestor(
+        tables: &Tables,
+        parent: i64,
+        doomed: &std::collections::HashSet<i64>,
+    ) -> i64 {
+        let mut next = parent;
+        for _ in 0..MAX_EPIC_DEPTH {
+            if next == 0 || !doomed.contains(&next) {
+                return next;
+            }
+            next = tables.epics.get(&next).map_or(0, |e| e.parent_epic_id);
+        }
+        0
+    }
+
+    /// Mirrors the module's `rescope_learnings`.
     pub(super) fn rescope_learnings(&self, tables: &mut Tables, from: i64, to: i64) {
         let from_ref = from.to_string();
         let to_ref = to.to_string();

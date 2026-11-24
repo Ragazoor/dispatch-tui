@@ -43,6 +43,19 @@ fn a_restored_task_scoped_learning_lands_retired() {
     assert_eq!(row.status, "archived");
 }
 
+/// An epic learning whose epic is gone lands archived, as the migration
+/// archives it (`learnings.allium: ReScopeLearningsOnEpicDelete`).
+#[test]
+fn a_restored_learning_of_a_missing_epic_lands_archived() {
+    let store = Store::bare();
+    store
+        .call_as_scheduler(|ctx| seed_learnings(ctx, vec![learning(1, "epic", Some("404"), "alice")]))
+        .expect("seed_learnings");
+    let row = store.db().learnings().id().find(1).expect("row");
+    assert_eq!(row.status, "archived");
+    assert_eq!(row.scope_ref.as_deref(), Some("404"));
+}
+
 /// A learning of a task in an epic takes the task's repo, as the migration
 /// does it, and keeps its author.
 #[test]

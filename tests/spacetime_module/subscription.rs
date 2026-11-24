@@ -429,7 +429,7 @@ fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
             &decoded,
             &RagRankParams {
                 query_vec: &query,
-                task_epic_id: None,
+                task_epic_ids: &[],
                 task_repo: Some("/repo/a"),
                 threshold: 0.0,
                 tag_filter: &[],

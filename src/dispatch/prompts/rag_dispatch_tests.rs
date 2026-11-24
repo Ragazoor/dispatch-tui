@@ -9,7 +9,7 @@ use crate::store::{
 
 use super::{
     build_and_record_injections, list_learnings_for_dispatch_rag, DISPATCH_INJECTION_CAP,
-    OFF_TOPIC_VERDICTS_TO_MUTE,
+    OFF_TOPIC_RATIO_TO_MUTE, OFF_TOPIC_VERDICTS_TO_MUTE,
 };
 
 // The test EmbeddingService returns vec![0.1f32; 384]. Use the same dimensionality
@@ -309,11 +309,93 @@ async fn one_verdict_short_of_the_threshold_still_injects() {
 }
 
 #[tokio::test]
-async fn the_mute_is_per_repo() {
+async fn misses_in_one_repo_mute_the_entry_in_another() {
     let db = seed_db().await;
-    let entry = user_learning(&db, "fits b, not a").await;
+    let entry = user_learning(&db, "fits nowhere").await;
     rated_in(&db, "/repo/a", entry, LearningVerdict::NotApplicable, MUTE).await;
-    assert!(injected_in(&db, "/repo/b").await.contains(&entry));
+    assert!(!injected_in(&db, "/repo/b").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn misses_spread_over_many_repos_add_up() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "missed once in each scala repo").await;
+    for repo in ["/scala/a", "/scala/b", "/scala/c"] {
+        rated_in(&db, repo, entry, LearningVerdict::NotApplicable, 1).await;
+    }
+    assert!(!injected_in(&db, "/scala/d").await.contains(&entry));
+}
+
+#[tokio::test]
+async fn one_helped_elsewhere_does_not_keep_an_entry_missed_far_more() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "helped once, missed often").await;
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        OFF_TOPIC_RATIO_TO_MUTE,
+    )
+    .await;
+    rated_in(&db, "/repo/b", entry, LearningVerdict::Helped, 1).await;
+    assert!(!injected_in(&db, "/repo/a").await.contains(&entry));
+    assert!(
+        injected_in(&db, "/repo/b").await.contains(&entry),
+        "the repo where it helped keeps it"
+    );
+}
+
+#[tokio::test]
+async fn enough_helped_verdicts_keep_the_entry_everywhere() {
+    let db = seed_db().await;
+    let entry = user_learning(&db, "helps often enough").await;
+    rated_in(
+        &db,
+        "/repo/a",
+        entry,
+        LearningVerdict::NotApplicable,
+        OFF_TOPIC_RATIO_TO_MUTE - 1,
+    )
+    .await;
+    rated_in(&db, "/repo/b", entry, LearningVerdict::Helped, 1).await;
+    assert!(injected_in(&db, "/repo/a").await.contains(&entry));
+}
+
+/// learnings.allium: Scope Model. A task in a sub-epic is shown the entries
+/// of the epic above it.
+#[tokio::test]
+async fn a_task_in_a_sub_epic_is_shown_its_parent_epics_entries() {
+    use crate::store::EpicCrud;
+    let db = seed_db().await;
+    let parent = db.create_epic("Parent", "", None).await.unwrap();
+    let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
+    let emb = fake_emb_bytes();
+    let parent_ref = parent.id.0.to_string();
+    let entry = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "learned in the parent",
+            detail: None,
+            scope: LearningScope::Epic,
+            scope_ref: Some(parent_ref.as_str()),
+            tags: &[],
+            source_task_id: None,
+            embedding: Some(&emb),
+        })
+        .await
+        .unwrap();
+    let task = db
+        .create_task(CreateTaskRequest {
+            epic_id: Some(child.id),
+            ..CreateTaskRequest::fixture("follow-up", "/repo/a")
+        })
+        .await
+        .unwrap();
+    let task = db.get_task(task).await.unwrap();
+    let shown =
+        list_learnings_for_dispatch_rag(&*db, &task, &EmbeddingService::new_test(), 0.0).await;
+    assert!(shown.iter().any(|l| l.id == entry), "{shown:?}");
 }
 
 #[tokio::test]

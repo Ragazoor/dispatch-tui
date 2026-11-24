@@ -369,12 +369,12 @@ impl LearningService {
         let candidates_raw = self.db.list_all_approved_learnings_with_embedding().await?;
         let candidates = deserialize_candidate_rows(candidates_raw);
 
-        let epic_id_str = task.epic_id.map(|e| e.0.to_string());
+        let epic_ids = self.db.list_epic_scope_refs(task.epic_id).await;
         let ranked = rag_rank_learnings(
             &candidates,
             &RagRankParams {
                 query_vec: &query_vec,
-                task_epic_id: epic_id_str.as_deref(),
+                task_epic_ids: &epic_ids,
                 task_repo: Some(task.repo_path.as_str()),
                 threshold: RAG_SIMILARITY_THRESHOLD,
                 tag_filter: &params.tag_filter,

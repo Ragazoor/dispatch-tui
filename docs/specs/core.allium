@@ -1179,7 +1179,10 @@ entity Learning {
                                  -- behaviour produces: the stale-cleanup job
                                  -- archives an approved entry with
                                  -- upvote_count <= 0 untouched for the configured
-                                 -- threshold (ArchiveStaleLearning)
+                                 -- threshold (ArchiveStaleLearning), and an
+                                 -- epic delete archives the epic-scoped entries
+                                 -- that have no surviving ancestor epic to move
+                                 -- to (ReScopeLearningsOnEpicDelete)
         terminal: rejected, archived
     }
     -- rejected is terminal and has no inbound edge: no behaviour produces it.
@@ -1195,25 +1198,29 @@ entity Learning {
         and (
             scope = user
             or (scope = repo and repo_ref_covers(scope_ref, task.repo_path))
-            or (scope = epic and task.epic != null and scope_ref = str(task.epic.id))
+            or (scope = epic and task.epic != null and scope_ref in epic_and_ancestor_refs(task.epic))
         )
 
-    -- True when tasks in the given repo have found this learning off-topic:
-    -- their standing verdicts on it hold at least
-    -- config.off_topic_verdicts_to_mute not_applicable and no helped. wrong
-    -- verdicts count neither way, and only verdicts on tasks a board holds
-    -- reach it, so an archived task's kept verdicts do not count
-    -- (LearningVerdict, ArchivedTask). Derived from the verdict rows when asked, never
-    -- stored. Dispatch injection leaves such a learning out for that repo
-    -- only; learning_search ignores it (learnings.allium:
+    -- True when tasks have found this learning off-topic often enough to keep
+    -- it out of a dispatch in the given repo. Counted over the standing
+    -- verdicts of every task, whatever its repo: at least
+    -- config.off_topic_verdicts_to_mute not_applicable, and at least
+    -- config.off_topic_ratio_to_mute times as many not_applicable as helped.
+    -- A helped verdict from a task in the given repo keeps the learning in
+    -- that repo. wrong verdicts count neither way, and only verdicts on tasks
+    -- a board holds reach it, so an archived task's kept verdicts do not
+    -- count (LearningVerdict, ArchivedTask). Derived from the verdict rows
+    -- when asked, never stored. Dispatch injection leaves such a learning
+    -- out; learning_search ignores it (learnings.allium:
     -- AugmentDispatchPromptWithLearnings).
     -- The verdicts counted are those the dispatching board holds: the ones
     -- on tasks its user holds (sync.allium: SubscribeOnceIdentityIsSettled,
     -- "rows about a held task"), so two identities' boards can mute
     -- different sets. Accepted: verdicts arrive through the same per-user
     -- view as retrievals.
-    off_topic_in_repo(repo_path):
-        (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = not_applicable).count >= config.off_topic_verdicts_to_mute
+    muted_for_repo(repo_path):
+        (LearningVerdicts where learning = this and verdict = not_applicable).count >= config.off_topic_verdicts_to_mute
+        and (LearningVerdicts where learning = this and verdict = not_applicable).count >= config.off_topic_ratio_to_mute * (LearningVerdicts where learning = this and verdict = helped).count
         and (LearningVerdicts where learning = this and task.repo_path = repo_path and verdict = helped).count = 0
 
     invariant ScopeRefConsistency {
@@ -1394,7 +1401,7 @@ entity ArchivedTask {
         -- the archived id, and its Retrieval and LearningVerdict rows are kept
         -- (tasks.allium: DeleteTask). A board receives those rows only for
         -- tasks its user holds, so the kept rows change nothing a board
-        -- computes (off_topic_in_repo included); they keep the history whole.
+        -- computes (muted_for_repo included); they keep the history whole.
         --
         -- Read on demand, never subscribed: the record grows without bound,
         -- and no board needs it to draw anything.
@@ -1514,11 +1521,12 @@ config {
     stale_learning_cleanup_enabled: Boolean = true
     stale_learning_threshold: Duration = 90.days
 
-    -- How many standing not_applicable verdicts from one repo's tasks, with no
-    -- helped verdict from that repo, mute a learning from dispatch injection
-    -- in that repo (Learning.off_topic_in_repo; learnings.allium:
-    -- AugmentDispatchPromptWithLearnings).
+    -- The fewest standing not_applicable verdicts, from tasks in any repo,
+    -- that mute a learning from dispatch injection, and how many times its
+    -- helped verdicts they must outnumber (Learning.muted_for_repo;
+    -- learnings.allium: AugmentDispatchPromptWithLearnings).
     off_topic_verdicts_to_mute: Integer = 3
+    off_topic_ratio_to_mute: Integer = 4
 
     -- How many levels below an epic the store's recursive delete reaches. An
     -- epic delete (single or batch) refuses a subtree nested deeper rather

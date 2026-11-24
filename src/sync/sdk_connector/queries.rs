@@ -112,8 +112,8 @@ pub(in crate::sync) fn subscription_queries(
         format!("SELECT * FROM own_settings WHERE host = '{host}'"),
         // The knowledge base (`docs/specs/learnings.allium`): the learnings
         // the caller may see, and the retrievals and verdicts of the tasks
-        // they hold. Verdicts feed the per-repo dispatch mute
-        // (`core.allium: Learning.off_topic_in_repo`).
+        // they hold. Verdicts feed the dispatch mute
+        // (`core.allium: Learning.muted_for_repo`).
         "SELECT * FROM visible_learnings".to_string(),
         "SELECT * FROM visible_learning_retrievals".to_string(),
         "SELECT * FROM visible_learning_verdicts".to_string(),

@@ -136,7 +136,7 @@ struct Rows {
     raw_learning_retrievals: BTreeMap<i64, bindings::LearningRetrieval>,
     /// Standing verdicts on the tasks this person holds, from the
     /// `visible_learning_verdicts` view. Read only to derive the per-repo
-    /// dispatch mute (`core.allium: Learning.off_topic_in_repo`), so they are
+    /// dispatch mute (`core.allium: Learning.muted_for_repo`), so they are
     /// held as the store sends them and the verdict string is read there.
     learning_verdicts: BTreeMap<i64, bindings::LearningVerdict>,
     /// The tables the store's task, subscription and settings reads need
@@ -1659,36 +1659,45 @@ impl SharedRows {
         })
     }
 
-    /// The learnings off-topic in `repo_path`: at least `threshold`
-    /// `not_applicable` verdicts from tasks in that repo and no `helped` one
-    /// (`core.allium: Learning.off_topic_in_repo`). A verdict whose task the
+    /// The learnings muted from dispatch injection in `repo_path`
+    /// (`core.allium: Learning.muted_for_repo`). A verdict whose task the
     /// board no longer holds does not count; `wrong` counts neither way.
-    pub fn learnings_off_topic_in_repo(
+    pub fn learnings_muted_for_repo(
         &self,
         repo_path: &str,
-        threshold: usize,
+        min_off_topic: usize,
+        ratio: usize,
     ) -> std::collections::BTreeSet<LearningId> {
+        #[derive(Default)]
+        struct Counts {
+            off_topic: usize,
+            helped: usize,
+            helped_here: bool,
+        }
         self.read(|rows| {
-            let mut counts: BTreeMap<i64, (usize, usize)> = BTreeMap::new();
+            let mut counts: BTreeMap<i64, Counts> = BTreeMap::new();
             for v in rows.learning_verdicts.values() {
-                let in_repo = rows
-                    .tasks
-                    .get(&v.task_id)
-                    .is_some_and(|t| t.repo_path == repo_path);
-                if !in_repo {
+                let Some(task) = rows.tasks.get(&v.task_id) else {
                     continue;
-                }
+                };
                 let entry = counts.entry(v.learning_id).or_default();
                 use crate::models::LearningVerdict as V;
                 match V::parse(&v.verdict) {
-                    Ok(V::NotApplicable) => entry.0 += 1,
-                    Ok(V::Helped) => entry.1 += 1,
+                    Ok(V::NotApplicable) => entry.off_topic += 1,
+                    Ok(V::Helped) => {
+                        entry.helped += 1;
+                        entry.helped_here |= task.repo_path == repo_path;
+                    }
                     Ok(V::Wrong) | Err(_) => {}
                 }
             }
             counts
                 .into_iter()
-                .filter(|(_, (off_topic, helped))| *off_topic >= threshold && *helped == 0)
+                .filter(|(_, c)| {
+                    c.off_topic >= min_off_topic
+                        && c.off_topic >= ratio * c.helped
+                        && !c.helped_here
+                })
                 .map(|(id, _)| LearningId(id))
                 .collect()
         })

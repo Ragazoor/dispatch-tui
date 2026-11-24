@@ -985,7 +985,7 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     };
     let parent = row.parent_epic_id;
     let doomed = validate_epic_deletable(ctx, id)?;
-    rescope_repo_group_learnings(ctx, &row);
+    rescope_learnings_of_deleted_epics(ctx, &doomed, parent);
     delete_epic_subtree_with_feed_cleanup(ctx, id, &doomed);
     recalculate_epic_chain(ctx, parent);
     Ok(())
@@ -1065,8 +1065,8 @@ pub fn batch_delete(
     // transaction. From here on this calls the same helpers delete_epic/
     // delete_task's own bodies do, just over the whole batch at once.
     let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
-    // A repo-group sub-epic whose parent this batch deletes too re-scopes
-    // nothing: the parent goes in this same transaction.
+    // Learnings move past an epic above that this batch deletes too, to the
+    // nearest one left standing.
     let batch_doomed: std::collections::HashSet<i64> = epic_doomed
         .iter()
         .flat_map(|(_, doomed)| doomed.iter().copied())
@@ -1078,9 +1078,8 @@ pub fn batch_delete(
             continue;
         };
         recalc.insert(row.parent_epic_id);
-        if !batch_doomed.contains(&row.parent_epic_id) {
-            rescope_repo_group_learnings(ctx, &row);
-        }
+        let target = surviving_ancestor(ctx, row.parent_epic_id, &batch_doomed);
+        rescope_learnings_of_deleted_epics(ctx, doomed, target);
         delete_epic_subtree_with_feed_cleanup(ctx, *id, doomed);
     }
     for &id in &task_ids {

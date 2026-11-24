@@ -528,7 +528,7 @@ async fn grouped_with_learning(
     (root, sub, learning)
 }
 
-/// `learnings.allium: ReScopeLearningsOnRepoGroupDelete`, by hand.
+/// `learnings.allium: ReScopeLearningsOnEpicDelete`, by hand.
 #[tokio::test]
 async fn deleting_a_repo_group_sub_epic_by_hand_re_scopes_its_learnings() {
     let (caller, rows) = caller();
@@ -542,7 +542,7 @@ async fn deleting_a_repo_group_sub_epic_by_hand_re_scopes_its_learnings() {
 }
 
 #[tokio::test]
-async fn batch_deleting_a_repo_group_sub_epic_re_scopes_unless_the_parent_goes_too() {
+async fn batch_deleting_a_repo_group_sub_epic_re_scopes_or_archives_with_its_root() {
     let (caller, rows) = caller();
     let (root, sub, learning) = grouped_with_learning(&caller, &rows).await;
     assert!(caller.batch_delete(vec![], vec![sub]).await.unwrap().won());
@@ -557,9 +557,46 @@ async fn batch_deleting_a_repo_group_sub_epic_re_scopes_unless_the_parent_goes_t
         .await
         .unwrap()
         .won());
+    let kept = rows.learning(learning).unwrap();
+    assert_eq!(kept.scope_ref, Some(sub.0.to_string()));
+    assert_eq!(kept.status, crate::models::LearningStatus::Archived);
+}
+
+/// `learnings.allium: ReScopeLearningsOnEpicDelete` on a hand-made epic: the
+/// learnings move to the parent, and a root's are archived.
+#[tokio::test]
+async fn deleting_a_hand_made_epic_moves_its_learnings_up_or_archives_them_at_a_root() {
+    let (caller, rows) = caller();
+    let top = caller
+        .create_epic(bindings::Epic {
+            title: "top".into(),
+            ..blank_epic()
+        })
+        .await
+        .unwrap();
+    let sub = caller
+        .create_epic(bindings::Epic {
+            title: "sub".into(),
+            parent_epic_id: top.0,
+            ..blank_epic()
+        })
+        .await
+        .unwrap();
+    let scoped = |epic: EpicId| bindings::Learning {
+        scope: "epic".into(),
+        scope_ref: Some(epic.0.to_string()),
+        ..super::learnings::blank_learning()
+    };
+    let on_sub = caller.create_learning(scoped(sub)).await.unwrap();
+    assert!(caller.delete_epic(sub).await.unwrap().won());
     assert_eq!(
-        rows.learning(learning).unwrap().scope_ref,
-        Some(sub.0.to_string())
+        rows.learning(on_sub).unwrap().scope_ref,
+        Some(top.0.to_string())
+    );
+    assert!(caller.delete_epic(top).await.unwrap().won());
+    assert_eq!(
+        rows.learning(on_sub).unwrap().status,
+        crate::models::LearningStatus::Archived
     );
 }
 

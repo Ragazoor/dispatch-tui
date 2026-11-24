@@ -1,9 +1,9 @@
 //! Task #99287: the learning `scope_ref` refusals, the embedding repair
-//! write, the re-scope on a manual repo-group delete and the refusal order of a
+//! write, the re-scope of a deleted epic's learnings and the refusal order of a
 //! package link, on the real module and on the twin.
-//! (`learnings.allium: RecordLearningViaMcp`, `ReScopeLearningsOnRepoGroupDelete`.)
+//! (`learnings.allium: RecordLearningViaMcp`, `ReScopeLearningsOnEpicDelete`.)
 
-use super::move_paths::{refusal_of as refusal, Pair, World};
+use super::move_paths::{make_epic, refusal_of as refusal, Pair, World};
 use super::*;
 
 /// One learning, with the same id on both sides.
@@ -142,6 +142,71 @@ fn learning_scope_refs_and_package_links_match_the_module() {
             p.rows_real.learning(scoped).map(|l| learning_shape(&l)),
             p.rows_mem.learning(scoped).map(|l| learning_shape(&l)),
             "the re-scoped learning"
+        );
+
+        // -- a hand-made epic's learnings move up; a root's are archived --------
+        let top = p.epic(false).await;
+        let sub = make_epic(
+            &p,
+            bindings::Epic {
+                parent_epic_id: top,
+                ..blank_epic()
+            },
+        )
+        .await;
+        let on_sub = learning_both(
+            &p,
+            bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: Some(sub.to_string()),
+                ..blank_learning()
+            },
+        )
+        .await;
+        p.real
+            .delete_epic(EpicId(sub))
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        let top_ref = top.to_string();
+        p.wait(|r| {
+            r.learning(on_sub)
+                .is_some_and(|l| l.scope_ref.as_deref() == Some(top_ref.as_str()))
+        })
+        .await;
+        p.mem
+            .delete_epic(EpicId(sub))
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        assert_eq!(
+            p.rows_real.learning(on_sub).map(|l| learning_shape(&l)),
+            p.rows_mem.learning(on_sub).map(|l| learning_shape(&l)),
+            "the learning moved to the parent"
+        );
+        p.real
+            .delete_epic(EpicId(top))
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        p.wait(|r| {
+            r.learning(on_sub)
+                .is_some_and(|l| l.status == dispatch_tui::models::LearningStatus::Archived)
+        })
+        .await;
+        p.mem
+            .delete_epic(EpicId(top))
+            .await
+            .unwrap()
+            .applied()
+            .unwrap();
+        assert_eq!(
+            p.rows_real.learning(on_sub).map(|l| learning_shape(&l)),
+            p.rows_mem.learning(on_sub).map(|l| learning_shape(&l)),
+            "the learning archived with its root"
         );
 
         // -- a link into a missing package names the package, whatever the item --

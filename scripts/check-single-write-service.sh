@@ -296,6 +296,7 @@ if [ -n "$bad" ]; then
     echo "check-single-write-service: service functions with more than one store write:" >&2
     printf '%b' "$bad" >&2
     echo "Make it one module reducer call, or list it in $ALLOW as path::fn  N  reason." >&2
+    echo "A call that only reads counts as a write unless its name starts with get_, list_, find_, is_, has_, count_, my_, query_ or read_." >&2
     exit 1
 fi
 if [ -n "$stale" ]; then

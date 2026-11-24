@@ -1140,10 +1140,11 @@ wrapping up are the user's call once they have read what you found.";
 /// Maximum total learnings injected into a dispatch prompt via RAG.
 pub const DISPATCH_INJECTION_CAP: usize = 5;
 
-/// `not_applicable` verdicts from tasks in one repo, with no `helped` there,
-/// that leave a learning out of that repo's dispatch injection
-/// (`learnings.allium: AugmentDispatchPromptWithLearnings`).
+/// The fewest `not_applicable` verdicts, from tasks in any repo, that leave a
+/// learning out of dispatch injection, and how many times its `helped`
+/// verdicts they must outnumber (`core.allium: Learning.muted_for_repo`).
 pub const OFF_TOPIC_VERDICTS_TO_MUTE: usize = 3;
+pub const OFF_TOPIC_RATIO_TO_MUTE: usize = 4;
 
 /// Push-injection groups for a dispatch prompt.
 #[derive(Default, Clone)]
@@ -1270,22 +1271,26 @@ pub async fn list_learnings_for_dispatch_rag(
         }
     };
 
-    // An entry off-topic in this repo is left out before ranking, so its slot
-    // goes to the next candidate (`core.allium: Learning.off_topic_in_repo`).
-    // A failed read mutes nothing: injection degrades to the unfiltered set.
+    // A muted entry is left out before ranking, so its slot goes to the next
+    // candidate (`core.allium: Learning.muted_for_repo`). A failed read mutes
+    // nothing: injection degrades to the unfiltered set.
     let muted = db
-        .learnings_off_topic_in_repo(&task.repo_path, OFF_TOPIC_VERDICTS_TO_MUTE)
+        .learnings_muted_for_repo(
+            &task.repo_path,
+            OFF_TOPIC_VERDICTS_TO_MUTE,
+            OFF_TOPIC_RATIO_TO_MUTE,
+        )
         .await
         .unwrap_or_default();
     rows.retain(|(l, _)| !muted.contains(&l.id));
     let candidates = deserialize_candidate_rows(rows);
 
-    let epic_id_str = task.epic_id.map(|e| e.0.to_string());
+    let epic_ids = db.list_epic_scope_refs(task.epic_id).await;
     let all_ranked = rag_rank_learnings(
         &candidates,
         &RagRankParams {
             query_vec: &query_vec,
-            task_epic_id: epic_id_str.as_deref(),
+            task_epic_ids: &epic_ids,
             task_repo: Some(task.repo_path.as_str()),
             threshold,
             tag_filter: &[],
@@ -1321,12 +1326,12 @@ pub async fn list_learnings_for_epic(
         }
     };
     let candidates = deserialize_candidate_rows(rows);
-    let epic_id = epic.id.0.to_string();
+    let epic_ids = db.list_epic_scope_refs(Some(epic.id)).await;
     rag_rank_learnings(
         &candidates,
         &RagRankParams {
             query_vec: &query_vec,
-            task_epic_id: Some(epic_id.as_str()),
+            task_epic_ids: &epic_ids,
             task_repo: None,
             threshold: DISPATCH_RAG_THRESHOLD,
             tag_filter: &[],

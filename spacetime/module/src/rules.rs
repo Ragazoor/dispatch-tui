@@ -129,8 +129,7 @@ use super::*;
 /// 57: learning scope and work-package sight — `create_learning` refuses a
 ///    blank repo `scope_ref` and an epic one that names no epic
 ///    (`epic_scope_ref_names_an_epic`); `delete_epic` and `batch_delete` move
-///    a repo-group sub-epic's learnings to its parent
-///    (`rescope_repo_group_learnings`); `patch_learning` leaves `updated_at`
+///    a repo-group sub-epic's learnings to its parent; `patch_learning` leaves `updated_at`
 ///    on an embedding-only patch; `link_work_package_item` checks the
 ///    package's sight before the item (`learnings.allium`, `workspaces.allium:
 ///    UnseenIsAsMissing`).
@@ -382,8 +381,22 @@ use super::*;
 /// the chain's start. A board on an older build would mirror a chain the
 /// store no longer runs.
 ///
+/// Bumped: every epic delete moves the epic-scoped learnings of the deleted
+/// subtree to the nearest epic left standing, or archives them at a root
+/// (`learnings.allium: ReScopeLearningsOnEpicDelete`), and a store stamped
+/// older archives the ones earlier deletes left behind
+/// (`ORPHANED_EPIC_LEARNINGS_RULES_VERSION`). A board on an older build
+/// re-scopes only repo-group sub-epics in its mirror.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 71;
+pub const RULES_VERSION: i64 = 72;
+
+/// The rules version that made every epic delete re-scope its learnings: a
+/// store stamped with anything older has the approved epic-scoped learnings
+/// whose epic no longer exists archived once, on its first connection
+/// (`learning.rs: archive_orphaned_epic_learnings`). Never moves, like the
+/// others here.
+pub const ORPHANED_EPIC_LEARNINGS_RULES_VERSION: i64 = 72;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

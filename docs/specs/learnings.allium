@@ -46,7 +46,12 @@ use "./store-split.allium" as split
 --   user      null                           always
 --   repo      task.repo_path, or a parent    always (every task has a
 --             directory of it                repo_path)
---   epic      str(task.epic_id)              the task belongs to an epic
+--   epic      str(task.epic_id), or the id   the task belongs to an epic
+--             of an epic above it
+--
+-- An epic scope_ref covers the task's own epic and every epic above it
+-- (core.allium: epic_and_ancestor_refs), so what was learned in an epic
+-- reaches the tasks of its sub-epics, where follow-up work goes.
 --
 -- A repo scope_ref covers a repo_path that equals it or lies under it at a
 -- path separator (a trailing "/" is ignored): "/work/terraform/gcp" covers
@@ -105,8 +110,9 @@ use "./store-split.allium" as split
 ------------------------------------------------------------
 
 -- An entry lands approved and is retrievable at once. The one status change
--- any rule makes is approved → archived (ArchiveStaleLearning), and archived
--- is terminal. rejected has no inbound edge; stored rows may still hold it,
+-- any rule makes is approved → archived (ArchiveStaleLearning, and
+-- ReScopeLearningsOnEpicDelete for an entry with nowhere to move), and
+-- archived is terminal. rejected has no inbound edge; stored rows may still hold it,
 -- and like archived ones they are excluded from retrieval. The transition
 -- graph is core/Learning's.
 --
@@ -132,7 +138,7 @@ rule AugmentDispatchPromptWithLearnings {
     -- prompt, so it injects nothing.
     requires: mode in {standard, quick, research}
 
-    let candidates = core/Learnings where applies_to_dispatch(task) and not off_topic_in_repo(task.repo_path)
+    let candidates = core/Learnings where applies_to_dispatch(task) and not muted_for_repo(task.repo_path)
     -- The at most 5 best-ranked candidates (see Ranking), ranked against the
     -- task's title and description.
     let relevant = top_ranked_for_dispatch(candidates, task)
@@ -151,27 +157,37 @@ rule AugmentDispatchPromptWithLearnings {
         -- is what lets the agent rate it.
         --
         -- Off-topic mute. candidates leaves out a learning that is
-        -- off_topic_in_repo(task.repo_path): among the standing
-        -- core/LearningVerdict rows on it from tasks with this task's
-        -- repo_path, at least core/config.off_topic_verdicts_to_mute are
-        -- not_applicable and none is helped. wrong verdicts count neither
-        -- way; an archived task's verdicts are kept but never reach a board,
-        -- since boards receive verdicts only for tasks they hold.
+        -- muted_for_repo(task.repo_path): among the standing
+        -- core/LearningVerdict rows on it, from tasks in any repo, at least
+        -- core/config.off_topic_verdicts_to_mute are not_applicable and they
+        -- number at least core/config.off_topic_ratio_to_mute times its
+        -- helped ones, and no task in this task's repo_path rated it helped.
+        -- wrong verdicts count neither way; an archived task's verdicts are
+        -- kept but never reach a board, since boards receive verdicts only
+        -- for tasks they hold.
         --   - Dispatch injection only. QueryLearningsViaMcp does not apply the
         --     mute, so an agent that asks can still find a muted entry.
-        --   - Per repo. An entry muted in repo A still injects in repo B.
+        --   - Counted across repos. Misses spread over a family of small
+        --     repos, one verdict in each, add up.
+        --   - A repo where it helped keeps it. One helped verdict from a task
+        --     in a repo keeps the entry in that repo's dispatches.
+        --   - One helped elsewhere does not save it. An entry missed far more
+        --     often than it helped is muted in every repo where it never
+        --     helped.
         --   - Before ranking and the cap. A muted entry's slot goes to the
         --     next-ranked candidate.
-        --   - Reversible. One later helped verdict from a task in that repo
-        --     un-mutes it, since the mute needs zero helped.
+        --   - Reversible. Later helped verdicts can bring the ratio back
+        --     under the line.
         --   - Not a score change. upvote_count, status and updated_at are
         --     untouched and the entry is not archived.
         --   - Derived from the verdict rows at each dispatch; nothing new is
         --     stored.
         -- Why: similarity alone injects many entries that do not fit, and
         -- not_applicable is spread thinly over many entries, so pruning
-        -- cannot fix it. Muting per repo removes the repeat misses while an
-        -- entry stays available everywhere it has fitted.
+        -- cannot fix it. The mute removes the repeat misses while an entry
+        -- stays available wherever it has fitted. Counted per repo alone it
+        -- missed both an entry spread over many repos and one that a single
+        -- helped verdict kept in for good (task #99395).
         --
         -- The block's own header carries the rating instruction: it names
         -- the full call ("learning_rate(task_id, ratings=[{learning_id, verdict}, ...]) —
@@ -412,29 +428,46 @@ rule DeleteLearningViaMcp {
         -- not invalid params (-32602).
 }
 
-rule ReScopeLearningsOnRepoGroupDelete {
-    when: epics/DeleteEpic(sub)
+rule ReScopeLearningsOnEpicDelete {
+    when: epics/DeleteEpic(epic)
 
-    requires: sub.origin = repo_group
-    requires: sub.parent != null
+    -- The nearest epic above the deleted one that the same delete leaves
+    -- standing; null at a root, or when the delete takes every epic above.
+    let target = surviving_ancestor(epic)
 
     ensures:
-        for l in core/Learnings where l.scope = epic and l.scope_ref = str(sub.id):
-            l.scope_ref = str(sub.parent.id)
+        for l in core/Learnings where l.scope = epic and l.scope_ref in subtree_refs(epic):
+            if target != null:
+                l.scope_ref = str(target.id)
+            else:
+                l.status = archived
+                l.updated_at = now
 
     @guidance
-        -- A repo-group sub-epic is deleted when grouping is turned off
-        -- (FlattenEpic, or a feed epic's FlatFeedReconcile), when a task's
-        -- repo_path change leaves it empty, or by hand: DeleteEpic on the
-        -- sub-epic itself, alone or as one epic of a BatchDelete
-        -- (tasks.allium). A batch that also deletes the parent re-scopes
-        -- nothing, since the parent goes in the same transaction. Its epic-scoped learnings move to
-        -- the parent so they are not orphaned, in the same store transaction
-        -- as the delete, so the two land together or not at all. scope_ref
-        -- is not an embedding input, so nothing is re-embedded.
+        -- subtree_refs(epic) is the deleted epic's id and the id of every
+        -- epic below it, as strings: a delete takes the whole subtree, so
+        -- the learnings of its sub-epics would be stranded as well. An
+        -- epic-scoped learning whose epic no longer exists reaches no task,
+        -- so it moves up to where its knowledge still applies, or, with
+        -- nowhere to go, it is archived like a stale one.
         --
-        -- A hard delete of a grouped root epic deletes its sub-epics with it
-        -- and re-scopes nothing, like any other epic delete.
+        -- Every path that deletes an epic does this: DeleteEpic on any epic,
+        -- alone or as one epic of a BatchDelete (tasks.allium), and the
+        -- repo-group sub-epics the store deletes itself, when grouping is
+        -- turned off (FlattenEpic, or a feed epic's FlatFeedReconcile) or a
+        -- task's repo_path change leaves one empty. In a batch, an epic above
+        -- that the same batch deletes is skipped, so the learnings move past
+        -- it to the nearest epic left standing. The move is in the same
+        -- store transaction as the delete, so the two land together or not
+        -- at all. scope_ref is not an embedding input, so nothing is
+        -- re-embedded; a moved learning's updated_at is left alone.
+        --
+        -- A store stamped below rules version 72 archives once, on connect,
+        -- every approved epic-scoped learning whose epic no longer exists,
+        -- since deletes before this rule left them behind
+        -- (spacetime/module/src/learning.rs::archive_orphaned_epic_learnings).
+        -- A restored learning lands the same way (spacetime-seed.allium:
+        -- SeedsNormaliseLikeMigrations).
 }
 
 rule ArchiveStaleLearning {

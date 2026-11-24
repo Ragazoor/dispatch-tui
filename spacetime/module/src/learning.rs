@@ -275,11 +275,99 @@ pub(crate) fn delete_learning_rows(ctx: &ReducerContext, id: i64) {
     delete_learning_verdicts(ctx, verdicts);
 }
 
+/// `learnings.allium: ReScopeLearningsOnEpicDelete`: the epic-scoped learnings
+/// of every epic in `doomed` move to `target`, the nearest epic above that
+/// the delete leaves standing; with none (`0`), the approved ones are
+/// archived. Call it before the rows go, in the delete's transaction.
+pub(crate) fn rescope_learnings_of_deleted_epics(
+    ctx: &ReducerContext,
+    doomed: &std::collections::HashSet<i64>,
+    target: i64,
+) {
+    let refs: std::collections::HashSet<String> = doomed.iter().map(|id| id.to_string()).collect();
+    let now = now(ctx);
+    update_matching_learnings(
+        ctx,
+        |l| l.scope == "epic" && l.scope_ref.as_ref().is_some_and(|r| refs.contains(r)),
+        |row| {
+            if target != 0 {
+                Learning {
+                    scope_ref: Some(target.to_string()),
+                    ..row
+                }
+            } else if row.status == "approved" {
+                Learning {
+                    status: "archived".to_string(),
+                    updated_at: now.clone(),
+                    ..row
+                }
+            } else {
+                row
+            }
+        },
+    );
+}
+
+/// The nearest epic at or above `parent` that `doomed` leaves standing, or
+/// `0` when there is none (`learnings.allium: ReScopeLearningsOnEpicDelete`).
+pub(crate) fn surviving_ancestor(
+    ctx: &ReducerContext,
+    parent: i64,
+    doomed: &std::collections::HashSet<i64>,
+) -> i64 {
+    let mut next = parent;
+    for _ in 0..MAX_EPIC_DEPTH {
+        if next == 0 || !doomed.contains(&next) {
+            return next;
+        }
+        next = ctx.db.epics().id().find(next).map_or(0, |e| e.parent_epic_id);
+    }
+    0
+}
+
+/// `learnings.allium: ReScopeLearningsOnEpicDelete`: archive every approved
+/// epic-scoped learning whose epic no longer exists. Run once by
+/// `stamp_rules_version_on_connect` (`ORPHANED_EPIC_LEARNINGS_RULES_VERSION`).
+pub fn archive_orphaned_epic_learnings(ctx: &ReducerContext) {
+    let archived: Vec<Learning> = ctx
+        .db
+        .learnings()
+        .iter()
+        .filter_map(|row| archived_if_orphaned(ctx, &row))
+        .collect();
+    for row in archived {
+        ctx.db.learnings().id().update(row);
+    }
+}
+
+/// The archive step for one row, read against the epics stored now: the
+/// migration above and `seed_learnings` both call it
+/// (`spacetime-seed.allium: SeedsNormaliseLikeMigrations`). `None` when the
+/// row is not an approved epic-scoped learning, or its epic exists.
+pub fn archived_if_orphaned(ctx: &ReducerContext, row: &Learning) -> Option<Learning> {
+    if row.scope != "epic" || row.status != "approved" {
+        return None;
+    }
+    let exists = row
+        .scope_ref
+        .as_deref()
+        .and_then(|r| r.parse::<i64>().ok())
+        .is_some_and(|id| ctx.db.epics().id().find(id).is_some());
+    if exists {
+        return None;
+    }
+    Some(Learning {
+        status: "archived".to_string(),
+        updated_at: now(ctx),
+        ..row.clone()
+    })
+}
+
 /// Re-scope every epic-scoped learning pointing at `from` to `to` instead.
 ///
 /// Epic-shaped arguments, a `learnings` write — see `docs/conventions.md`'s
 /// store seam section for why this sits here rather than being folded into
-/// an epic reducer, and `ReScopeLearningsOnRepoGroupDelete` in
+/// an epic reducer, and `ReScopeLearningsOnEpicDelete` in
 /// `docs/specs/learnings.allium` for the rule this implements. `scope_ref` is
 /// not an embedding input, so no row's `embedding` is touched.
 #[spacetimedb::reducer]
@@ -288,8 +376,7 @@ pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Resul
     Ok(())
 }
 
-/// [`rescope_epic_learnings`]'s body, callable from another reducer's
-/// transaction (a repo-group sub-epic's deletion re-scopes its learnings).
+/// [`rescope_epic_learnings`]'s body.
 pub(crate) fn rescope_learnings(ctx: &ReducerContext, from: i64, to: i64) {
     let from_ref = from.to_string();
     let to_ref = to.to_string();

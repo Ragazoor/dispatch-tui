@@ -781,6 +781,17 @@ pub trait OrchestratorStore: Send + Sync {
 #[async_trait::async_trait]
 pub trait EpicRead: Send + Sync {
     async fn get_epic(&self, id: EpicId) -> Option<Epic>;
+    /// `epic` and every epic above it, as the strings an epic `scope_ref`
+    /// holds (`core.allium: Learning.applies_to_dispatch`). Empty for no epic.
+    async fn list_epic_scope_refs(&self, epic: Option<EpicId>) -> Vec<String> {
+        let Some(id) = epic else {
+            return Vec::new();
+        };
+        crate::models::epics::epic_path(id, &self.list_epics().await)
+            .into_iter()
+            .map(|e| e.0.to_string())
+            .collect()
+    }
     async fn list_epics(&self) -> Vec<Epic>;
     /// List direct children of the given epic.
     async fn list_sub_epics(&self, parent_id: EpicId) -> Vec<Epic>;
@@ -1144,14 +1155,15 @@ pub trait LearningRetrievalStore: Send + Sync {
     /// Return all retrievals recorded for `task_id`, ordered by id ascending.
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 
-    /// The learnings off-topic in `repo_path`: `threshold` or more
-    /// `not_applicable` verdicts from tasks in that repo and no `helped` one.
-    /// Dispatch injection leaves them out for tasks in that repo
-    /// (`core.allium: Learning.off_topic_in_repo`).
-    async fn learnings_off_topic_in_repo(
+    /// The learnings dispatch injection leaves out for a task in `repo_path`:
+    /// at least `min_off_topic` `not_applicable` verdicts from tasks in any
+    /// repo, at least `ratio` times its `helped` ones, and no `helped` from a
+    /// task in `repo_path` (`core.allium: Learning.muted_for_repo`).
+    async fn learnings_muted_for_repo(
         &self,
         repo_path: &str,
-        threshold: usize,
+        min_off_topic: usize,
+        ratio: usize,
     ) -> Result<std::collections::BTreeSet<LearningId>>;
 
     /// Apply a batch of `task_id`'s verdicts atomically. One verdict stands per

@@ -184,17 +184,18 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 /// Returns the scope multiplier for a learning given the current task context,
 /// or `None` when the learning is outside the task's scope union (user, the
 /// task's repo, the task's epic) and must not be retrieved at all.
-/// task_epic_id / task_repo are the current task's values.
+/// task_epic_ids are the task's epic and every epic above it, as strings;
+/// task_repo is the task's repo.
 pub fn scope_multiplier_for(
     scope: LearningScope,
     scope_ref: Option<&str>,
-    task_epic_id: Option<&str>,
+    task_epic_ids: &[String],
     task_repo: Option<&str>,
 ) -> Option<f32> {
     match scope {
-        LearningScope::Epic => {
-            matches!((scope_ref, task_epic_id), (Some(a), Some(b)) if a == b).then_some(0.30)
-        }
+        LearningScope::Epic => scope_ref
+            .is_some_and(|r| task_epic_ids.iter().any(|e| e == r))
+            .then_some(0.30),
         LearningScope::Repo => {
             matches!((scope_ref, task_repo), (Some(a), Some(b)) if repo_ref_covers(a, b))
                 .then_some(0.20)
@@ -236,7 +237,7 @@ struct ScoredLearning<'a> {
 
 pub struct RagRankParams<'a> {
     pub query_vec: &'a [f32],
-    pub task_epic_id: Option<&'a str>,
+    pub task_epic_ids: &'a [String],
     pub task_repo: Option<&'a str>,
     pub threshold: f32,
     pub tag_filter: &'a [String],
@@ -263,7 +264,7 @@ pub fn rag_rank_learnings<'a>(
             let scope_mul = scope_multiplier_for(
                 learning.scope,
                 learning.scope_ref.as_deref(),
-                params.task_epic_id,
+                params.task_epic_ids,
                 params.task_repo,
             )?;
             let tag_boost = if tag_set.is_empty() {
@@ -441,7 +442,7 @@ mod tests {
     #[test]
     fn repo_scope_ref_matches_the_repo_or_a_parent_directory() {
         let m = |scope_ref: &str, repo: &str| {
-            scope_multiplier_for(LearningScope::Repo, Some(scope_ref), None, Some(repo)).is_some()
+            scope_multiplier_for(LearningScope::Repo, Some(scope_ref), &[], Some(repo)).is_some()
         };
         assert!(m("/w/tf/gcp/a", "/w/tf/gcp/a"));
         assert!(m("/w/tf/gcp", "/w/tf/gcp/a"));
@@ -480,12 +481,13 @@ mod tests {
                 vec![1.0, 0.0],
             ),
         ];
-        let rank = |epic: Option<&str>| {
+        let rank = |epics: &[&str]| {
+            let epics: Vec<String> = epics.iter().map(|e| e.to_string()).collect();
             rag_rank_learnings(
                 &candidates,
                 &RagRankParams {
                     query_vec: &[1.0, 0.0],
-                    task_epic_id: epic,
+                    task_epic_ids: &epics,
                     task_repo: Some("my-repo"),
                     threshold: 0.0,
                     tag_filter: &[],
@@ -496,8 +498,48 @@ mod tests {
             .map(|l| l.id.0)
             .collect::<std::collections::BTreeSet<_>>()
         };
-        assert_eq!(rank(Some("7")), [1, 2, 4].into());
-        assert_eq!(rank(None), [1, 2].into(), "no epic means no epic entries");
+        assert_eq!(rank(&["7"]), [1, 2, 4].into());
+        assert_eq!(rank(&[]), [1, 2].into(), "no epic means no epic entries");
+    }
+
+    /// learnings.allium: Scope Model. An epic entry reaches the tasks of the
+    /// epics below its epic, and an entry of a sub-epic does not reach the
+    /// tasks of the epic above.
+    #[test]
+    fn an_epic_entry_reaches_the_tasks_of_its_sub_epics() {
+        let candidates: Vec<(Learning, Vec<f32>)> = vec![
+            (
+                make_test_learning(1, LearningScope::Epic, Some("7")),
+                vec![1.0, 0.0],
+            ),
+            (
+                make_test_learning(2, LearningScope::Epic, Some("9")),
+                vec![1.0, 0.0],
+            ),
+        ];
+        let rank = |chain: &[&str]| {
+            let chain: Vec<String> = chain.iter().map(|e| e.to_string()).collect();
+            rag_rank_learnings(
+                &candidates,
+                &RagRankParams {
+                    query_vec: &[1.0, 0.0],
+                    task_epic_ids: &chain,
+                    task_repo: None,
+                    threshold: 0.0,
+                    tag_filter: &[],
+                    limit: 10,
+                },
+            )
+            .iter()
+            .map(|l| l.id.0)
+            .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(
+            rank(&["9", "7"]),
+            [1, 2].into(),
+            "a task in sub-epic 9 of 7"
+        );
+        assert_eq!(rank(&["7"]), [1].into(), "a task in 7 does not see 9's");
     }
 
     #[test]
@@ -523,7 +565,7 @@ mod tests {
             &candidates,
             &RagRankParams {
                 query_vec: &query,
-                task_epic_id: None,
+                task_epic_ids: &[],
                 task_repo: Some("my-repo"),
                 threshold: 0.0,
                 tag_filter: &[],
