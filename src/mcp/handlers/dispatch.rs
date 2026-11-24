@@ -470,15 +470,15 @@ clear. Setting status by hand is rarely right — an epic's status is recalculat
 subtasks whenever they change. Re-parenting is cycle-checked and rejected if it would create a \
 loop. The orchestrator arguments (orchestrator, start_rule, max_parallel) go in a call of their own: \
 orchestrator true switches the epic's orchestrator on, false switches it off, and start_rule or \
-max_parallel alone change the settings of one that is on. The limit cannot yet be set back to the \
-default.",
+max_parallel alone change the settings of one that is on. max_parallel 0 sets the limit back to \
+the default.",
         {
             "type": "object",
             "properties": {
                 "epic_id": { "type": "integer", "description": "The epic ID" },
                 "orchestrator": { "type": "boolean", "description": "Switch the epic's orchestrator on (true) or off (false). An orchestrator starts the epic's tasks, watches their agents and answers their questions; it covers the epic's whole subtree, so switching on is refused while an epic above or below has one. Switching off takes no start_rule or max_parallel." },
                 "start_rule": { "type": "string", "description": "Which backlog tasks the orchestrator may start: marked_only (only tasks marked ready, the default when switching on) or everything (every backlog task counts as ready).", "enum": crate::models::StartRule::ALL.iter().map(|r| r.as_str()).collect::<Vec<_>>() },
-                "max_parallel": { "type": "integer", "minimum": 1, "description": "How many of the epic's task agents may run at once on a machine. Without it a newly switched-on epic follows the default of 3." },
+                "max_parallel": { "type": "integer", "minimum": 0, "description": "How many of the epic's task agents may run at once on a machine. Without it a newly switched-on epic follows the default of 3. In a settings change, 0 sets it back to that default." },
                 "title": { "type": "string", "description": "New title" },
                 "description": { "type": "string", "description": "New description" },
                 "status": { "type": "string", "description": "New status: backlog, running, review, or done", "enum": crate::models::TaskStatus::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>() },

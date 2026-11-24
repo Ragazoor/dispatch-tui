@@ -155,13 +155,20 @@ fn changing_settings_changes_only_what_is_named() {
         ("everything", 4)
     );
 
+    store
+        .call("alice", |ctx| change_orchestrator_settings(ctx, epic, None, Some(0)))
+        .expect("back to the default");
+    let row = orchestration(&store, epic).unwrap();
+    assert_eq!(row.max_parallel, 0);
+    assert_eq!(orchestration_limit(&row), DEFAULT_ORCHESTRATOR_LIMIT);
+
     assert_eq!(
         store
             .call("alice", |ctx| change_orchestrator_settings(
                 ctx,
                 epic,
                 None,
-                Some(0)
+                Some(-1)
             ))
             .unwrap_err(),
         "the limit must be at least 1"

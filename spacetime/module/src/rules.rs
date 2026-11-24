@@ -370,8 +370,10 @@ use super::*;
 ///
 /// Bumped: `restart_orchestrator` gives a down orchestrator a fresh restart
 /// when the operator asks (`orchestrators.allium:
-/// OperatorRestartsADownOrchestrator`). A board on an older build lacks the
-/// reducer.
+/// OperatorRestartsADownOrchestrator`), and a settings change with a limit
+/// of 0 sets the limit back to the default (`ChangeOrchestratorSettings`).
+/// A board on an older build lacks the reducer and refuses the 0 in its
+/// mirror.
 ///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
 pub const RULES_VERSION: i64 = 70;

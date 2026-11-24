@@ -171,7 +171,9 @@ pub fn check_change_orchestrator_settings(
         row.start_rule = rule.to_string();
     }
     if let Some(n) = max_parallel {
-        check_max_parallel(n)?;
+        if n != 0 {
+            check_max_parallel(n)?;
+        }
         row.max_parallel = n;
     }
     Ok(row)

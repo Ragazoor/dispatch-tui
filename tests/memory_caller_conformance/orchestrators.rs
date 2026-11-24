@@ -139,6 +139,18 @@ fn memory_caller_keeps_orchestrators_and_ready_marks_like_the_real_module() {
         assert!(both!(change_orchestrator_settings(other, none_rule, Some(2_i64))).is_some());
         assert_eq!(switch_of(&rows_mem, sub), Some(("everything".into(), 4)));
         wait_for!(switch_of(&rows_real, sub) == Some(("everything".into(), 4)));
+        // A limit of 0 sets it back to the default.
+        assert_eq!(
+            both!(change_orchestrator_settings(sub, none_rule, Some(0_i64))),
+            None
+        );
+        assert_eq!(switch_of(&rows_mem, sub), Some(("everything".into(), 0)));
+        wait_for!(switch_of(&rows_real, sub) == Some(("everything".into(), 0)));
+        assert_eq!(
+            both!(change_orchestrator_settings(sub, none_rule, Some(4_i64))),
+            None
+        );
+        wait_for!(switch_of(&rows_real, sub) == Some(("everything".into(), 4)));
 
         // The ready mark.
         let task_row = bindings::Task {
