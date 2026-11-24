@@ -321,13 +321,10 @@ pub struct EpicPlacement {
     /// Indexed by [`TaskStatus::column_index`]: does this column hold at least
     /// one visible subtree task?
     columns: [bool; TaskStatus::COLUMN_COUNT],
-    /// Visible running subtree tasks in a blocked sub-status. Decides whether
-    /// the Running copy sits in `NeedsInput` rather than `Active`.
-    blocked_running: usize,
     /// The newest completion in the subtree's *done* slice: the maximum
     /// `completed_at` over the visible done tasks credited here. `None` when
-    /// the slice holds none. The derived half of the Done copy's ordering key
-    /// — see [`Self::sort_key`].
+    /// the slice holds none. The derived half of the Done card's ordering key
+    /// — see [`Self::done_completion`].
     newest_completion: Option<DateTime<Utc>>,
 }
 
@@ -341,9 +338,6 @@ impl EpicPlacement {
             return;
         };
         *slot = true;
-        if task.status == TaskStatus::Running && task.sub_status.is_blocked() {
-            self.blocked_running += 1;
-        }
         self.newest_completion =
             crate::models::fold_newest_completion(self.newest_completion, task);
     }
@@ -386,38 +380,17 @@ impl EpicPlacement {
     /// in and the label it renders. Derived from that column's own tasks. The
     /// table is shared with `epic_substatus`; only the inputs narrow.
     pub fn substatus_in(&self, epic: &Epic, status: TaskStatus) -> EpicSubstatus {
-        crate::models::epic_substatus_for(status, epic.plan_path.is_some(), self.blocked_running)
-    }
-
-    /// The key this epic's card sorts by in the `status` column.
-    ///
-    /// Everywhere but Done that is the epic's own `sort_key()`. In Done it is
-    /// `done_sort_key`: the epic's OWN `completed_at` when it has one, else the
-    /// newest completion in its done slice — see "Done Column Ordering" in
-    /// `board-layout.allium`, which is where the reasoning lives.
-    ///
-    /// The own-first precedence is what makes a manual reorder of an epic card
-    /// in Done mean something: the reorder writes `epic.completed_at`, and this
-    /// prefers it over the derived subtask key. The derived branch is the one
-    /// a finished epic with no stamp of its own takes, and it keeps the card
-    /// next to the work that finished it.
-    ///
-    /// A flattened column keys its task groups on a task's direct epic
-    /// instead.
-    pub fn sort_key(&self, epic: &Epic, status: TaskStatus) -> CardOrderKey {
-        if status != TaskStatus::Done {
-            return CardOrderKey::Generic(epic.sort_key());
-        }
-        CardOrderKey::completion(self.done_completion(epic))
+        // A card sits in Backlog or Done only (`Self::settle`), where no
+        // running task can block it.
+        crate::models::epic_substatus_for(status, epic.plan_path.is_some(), 0)
     }
 
     /// `done_sort_key` unwrapped: the completion time this epic's card is
     /// dated by in the Done column, or `None` when it has none.
     ///
-    /// Split out of [`Self::sort_key`] for the manual reorder, which needs the
-    /// bare timestamp to swap rather than the render key — and must ask the
-    /// same question the render asked, or it would move the card somewhere the
-    /// next frame disagrees with.
+    /// The epic's OWN `completed_at` wins over the newest completion in its
+    /// done slice — see "Done Column Ordering" in `board-layout.allium`. The
+    /// render and the manual reorder both read it, so the two cannot disagree.
     pub(in crate::tui) fn done_completion(&self, epic: &Epic) -> Option<DateTime<Utc>> {
         epic.completed_at.or(self.newest_completion)
     }

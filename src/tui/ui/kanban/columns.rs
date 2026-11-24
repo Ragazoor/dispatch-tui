@@ -186,7 +186,9 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                     &ctx,
                 )
             }
-            ColumnItem::Orchestrator(epic) => render_orchestrator_item(epic, is_cursor, app, &ctx),
+            ColumnItem::Orchestrator(epic) => {
+                render_orchestrator_item(epic, is_cursor, app, epic_stats, &ctx)
+            }
             ColumnItem::SubstatusLabel(at) => render_substatus_header(at, first),
             ColumnItem::FoldedSection(header) => {
                 render_folded_section_header(header, first, is_cursor)

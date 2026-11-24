@@ -262,6 +262,7 @@ pub(in crate::tui) struct EpicSearchPass<'a> {
     packages: OnceCell<PackagePlacementMap>,
     hidden_epics: OnceCell<HashSet<EpicId>>,
     epic_tree: OnceCell<crate::tui::types::EpicTree>,
+    orchestrator_cards: OnceCell<Vec<(&'a crate::models::Epic, crate::models::TaskStatus)>>,
 }
 
 impl<'a> EpicSearchPass<'a> {
@@ -295,6 +296,17 @@ impl<'a> EpicSearchPass<'a> {
             };
             crate::tui::types::EpicTree::build(&view.board.epics, viewed)
         })
+    }
+
+    /// The orchestrator view's cards for this pass, built on the first call
+    /// (`BoardView::compute_orchestrator_cards`) and shared by every column
+    /// and count.
+    pub(in crate::tui) fn orchestrator_cards(
+        &self,
+        view: BoardView<'a>,
+    ) -> &[(&'a crate::models::Epic, crate::models::TaskStatus)] {
+        self.orchestrator_cards
+            .get_or_init(|| view.compute_orchestrator_cards(self))
     }
 
     pub(in crate::tui) fn package_placements(&self, view: BoardView<'a>) -> &PackagePlacementMap {

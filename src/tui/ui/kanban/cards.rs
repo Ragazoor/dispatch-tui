@@ -956,6 +956,7 @@ pub(super) fn render_orchestrator_item(
     epic: &Epic,
     is_cursor: bool,
     app: &App,
+    epic_stats: &EpicStatsMap,
     ctx: &ColRenderCtx,
 ) -> ListItem<'static> {
     use super::orchestrator_header::{orchestrator_summary, state_style};
@@ -996,12 +997,14 @@ pub(super) fn render_orchestrator_item(
         ));
     }
 
+    let stats = epic_stats.get(&epic.id);
     let count = |status: TaskStatus| {
-        summary
-            .subtree
-            .iter()
-            .filter(|t| t.status == status)
-            .count()
+        stats.map_or(0, |s| match status {
+            TaskStatus::Backlog => s.backlog,
+            TaskStatus::Running => s.running,
+            TaskStatus::Review => s.review,
+            TaskStatus::Done => s.done,
+        })
     };
     let ready = summary
         .subtree

@@ -56,15 +56,9 @@ impl App {
         let count = self.view().column_item_count(status);
         // The orchestrator view has no select-all row (`board-layout.allium`,
         // "Orchestrator View").
-        if self.view().orchestrator_view() {
+        let has_toggle = !self.view().orchestrator_view();
+        if !has_toggle {
             self.selection_mut().on_select_all = false;
-            if count > 0 {
-                let current = self.selection().row(col) as isize;
-                let new_row = (current + delta).clamp(0, count as isize - 1) as usize;
-                self.selection_mut().set_row(col, new_row);
-            }
-            self.update_anchor_from_current();
-            return vec![];
         }
 
         if self.selection().on_select_all {
@@ -77,7 +71,7 @@ impl App {
             // delta <= 0 or empty column: stay on toggle (already at top)
         } else if count > 0 {
             let current = self.selection().row(col);
-            if current == 0 && delta < 0 {
+            if current == 0 && delta < 0 && has_toggle {
                 // Move up from first task to toggle row
                 self.selection_mut().on_select_all = true;
             } else {
@@ -86,7 +80,7 @@ impl App {
             }
         } else {
             // Empty column: move to toggle
-            if delta < 0 {
+            if delta < 0 && has_toggle {
                 self.selection_mut().on_select_all = true;
             }
         }

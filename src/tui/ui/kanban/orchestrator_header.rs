@@ -4,7 +4,7 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::models::{descendant_epic_ids, EpicId, Orchestrator, Task};
+use crate::models::{EpicId, Orchestrator, Task};
 use crate::palette::{CYAN, MUTED, PURPLE, RED, YELLOW};
 use crate::text::truncate;
 use crate::tui::App;
@@ -27,13 +27,7 @@ pub(super) struct OrchestratorSummary<'a> {
 
 pub(super) fn orchestrator_summary(app: &App, epic: EpicId) -> OrchestratorSummary<'_> {
     let host = app.local_host_id.as_deref().unwrap_or_default();
-    let ids = descendant_epic_ids(epic, &app.board.epics);
-    let subtree: Vec<&Task> = app
-        .board
-        .tasks
-        .iter()
-        .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
-        .collect();
+    let subtree = crate::models::subtree_tasks(epic, &app.board.epics, &app.board.tasks);
     let orchestrator = app.board.orchestration.orchestrator_on(epic, host);
     let state = orchestrator.map_or("resting", |o| {
         crate::models::orchestrator_state(o, &subtree)

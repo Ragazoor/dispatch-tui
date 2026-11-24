@@ -398,11 +398,18 @@ pub fn deepest_epic_with(
 /// Returns every task directly under `root` or under any of its descendant
 /// sub-epics, recursively. Cycle-safe: malformed epic parent cycles terminate.
 pub fn descendant_task_ids(root: EpicId, epics: &[Epic], tasks: &[Task]) -> HashSet<TaskId> {
+    subtree_tasks(root, epics, tasks)
+        .into_iter()
+        .map(|t| t.id)
+        .collect()
+}
+
+/// The tasks of `root`'s whole subtree: its own and every descendant epic's.
+pub fn subtree_tasks<'t>(root: EpicId, epics: &[Epic], tasks: &'t [Task]) -> Vec<&'t Task> {
     let epic_ids = descendant_epic_ids(root, epics);
     tasks
         .iter()
         .filter(|t| matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)))
-        .map(|t| t.id)
         .collect()
 }
 
