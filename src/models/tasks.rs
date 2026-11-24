@@ -433,6 +433,11 @@ pub fn task_lead(agent_name: Option<&str>) -> Option<&str> {
     agent_name.filter(|name| !name.is_empty())
 }
 
+/// How a short line names a task: its current agent's name, else `#<id>`.
+pub fn task_name_or_id(id: TaskId, agent_name: Option<&str>) -> String {
+    task_lead(agent_name).map_or_else(|| format!("#{}", id.0), str::to_string)
+}
+
 /// How a status line names a task: its display name, else its title
 /// (`agents.allium: BoardMessagesNameTasksAndEpics`).
 pub fn task_label(agent_name: Option<&str>, title: &str) -> String {

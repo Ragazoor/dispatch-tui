@@ -16,9 +16,16 @@ pub(in crate::tui) fn orchestrator_header_lines(
     width: u16,
     max_rows: usize,
 ) -> Vec<Line<'static>> {
-    let Some(view) = app.current_epic_id() else {
+    // The epic view under an open task detail keeps its band, so the
+    // columns do not jump behind the panel.
+    let mut mode = app.view_mode();
+    while let crate::tui::ViewMode::TaskDetail { previous, .. } = mode {
+        mode = previous;
+    }
+    let crate::tui::ViewMode::Epic { epic_id: view, .. } = mode else {
         return vec![];
     };
+    let view = *view;
     let Some(epic) = app.covering_epic(Some(view)) else {
         return vec![];
     };
@@ -87,10 +94,18 @@ pub(in crate::tui) fn orchestrator_header_lines(
         ));
     }
 
+    let name = |task: crate::models::TaskId| {
+        crate::models::task_name_or_id(
+            task,
+            app.board
+                .find_task(task)
+                .and_then(|t| t.agent_name.as_deref()),
+        )
+    };
     let item_rows: Vec<String> = items
         .iter()
         .map(|i| match i.task_id {
-            Some(task) => format!("  #{} task #{}: {}", i.id, task.0, i.about),
+            Some(task) => format!("  #{} {}: {}", i.id, name(task), i.about),
             None => format!("  #{} the epic: {}", i.id, i.about),
         })
         .collect();

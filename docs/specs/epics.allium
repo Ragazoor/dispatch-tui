@@ -2424,8 +2424,9 @@ surface OrchestratorHeader {
 
     @guarantee ThenItemsThenLog
         -- One row per open item of the covering epic, oldest first ("#<id>
-        -- task #<n>: <about>" or "#<id> the epic: <about>"), the row the
-        -- resolve key acts on first. Then the newest log entries, newest
+        -- <task>: <about>" or "#<id> the epic: <about>"), the row the
+        -- resolve key acts on first. A task, here and in the log rows, is
+        -- named by its current agent's name, or #<id> with no agent. Then the newest log entries, newest
         -- first, up to orchestrators.allium's config.orchestrator_log_shown,
         -- each cut to the width.
 

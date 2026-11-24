@@ -155,6 +155,10 @@ pub(super) struct OrchestratorOpener {
     now: Arc<tokio::sync::Notify>,
     /// The epics whose window is switched to once their session starts.
     open: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
+    /// The opens the running tick took at its start. An open asked while a
+    /// tick runs waits in `open` for the next tick, which plans from rows
+    /// that already hold the restart.
+    taken: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
 }
 
 impl OrchestratorOpener {
@@ -167,6 +171,26 @@ impl OrchestratorOpener {
 
     fn pending(&self) -> std::sync::MutexGuard<'_, BTreeSet<EpicId>> {
         self.open.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn this_tick(&self) -> std::sync::MutexGuard<'_, BTreeSet<EpicId>> {
+        self.taken.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A tick begins: it serves the opens asked before it.
+    fn take_for_tick(&self) {
+        let asked = std::mem::take(&mut *self.pending());
+        *self.this_tick() = asked;
+    }
+
+    /// Whether the session that just started is one an open asked for.
+    fn started(&self, epic: EpicId) -> bool {
+        self.this_tick().remove(&epic)
+    }
+
+    /// The opens this tick took and did not start.
+    fn unopened(&self) -> BTreeSet<EpicId> {
+        std::mem::take(&mut *self.this_tick())
     }
 }
 
@@ -228,6 +252,7 @@ impl OrchestratorHost {
 
     /// One `BoardRunsItsOrchestrators` check.
     pub(super) async fn tick(&self) {
+        self.opener.take_for_tick();
         let db = &self.database;
         let host = db.host_id().to_string();
         let orchestrations = db.list_epic_orchestrations().await;
@@ -298,7 +323,7 @@ impl OrchestratorHost {
         if !live.is_empty() {
             self.wake_live(&host, &live, &epics, &tasks, now).await;
         }
-        let unopened = std::mem::take(&mut *self.opener.pending());
+        let unopened = self.opener.unopened();
         for epic in unopened {
             let title = epics
                 .iter()
@@ -455,7 +480,7 @@ impl OrchestratorHost {
             OrchestratorAction::Start(o) => {
                 self.start_session(host, &o, epics, orchestrations, tasks)
                     .await;
-                if self.opener.pending().remove(&o.epic_id) {
+                if self.opener.started(o.epic_id) {
                     let runner = self.runner.clone();
                     let window = TmuxWindow::for_orchestrator(o.epic_id);
                     let shown =
@@ -1097,6 +1122,23 @@ mod tests {
             "{calls:?}"
         );
         assert!(host.opener().pending().is_empty());
+        assert!(host.opener().unopened().is_empty());
+    }
+
+    /// An open asked while a tick runs is served by the next tick, whose
+    /// rows already hold the restart; the running tick neither starts it nor
+    /// reports it.
+    #[test]
+    fn an_open_asked_during_a_tick_waits_for_the_next() {
+        let opener = OrchestratorOpener::default();
+        opener.open_after_start(EpicId(1));
+        opener.take_for_tick();
+        opener.open_after_start(EpicId(2));
+
+        assert!(!opener.started(EpicId(2)));
+        assert_eq!(opener.unopened(), BTreeSet::from([EpicId(1)]));
+        opener.take_for_tick();
+        assert!(opener.started(EpicId(2)));
     }
 
     /// An open that finds nothing to start says so to the board.

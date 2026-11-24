@@ -442,8 +442,24 @@ fn the_header_shows_the_orchestrator_its_items_and_its_log() {
     assert!(buffer_contains(&buf, "everything"));
     assert!(buffer_contains(&buf, "/3 running"));
     assert!(buffer_contains(&buf, "1 waiting"));
-    assert!(buffer_contains(&buf, "#5 task #1: question 5"));
+    assert!(
+        buffer_contains(&buf, "#5 #1: question 5"),
+        "a task with no agent shows by id"
+    );
     assert!(buffer_contains(&buf, "started the payments task"));
+}
+
+#[test]
+fn the_header_names_a_task_by_its_agent() {
+    let mut board = on_ten(true);
+    board.open_items = vec![item(5, 10, HERE, Some(1))];
+    let mut app = covered_app(board);
+    app.board.tasks[0].agent_name = Some("ada".to_string());
+    enter(&mut app, 10);
+
+    let buf = render_to_buffer(&mut app, 160, 40);
+
+    assert!(buffer_contains(&buf, "#5 ada: question 5"));
 }
 
 #[test]
@@ -463,6 +479,51 @@ fn the_header_is_cut_to_a_third_of_the_board_with_a_more_row() {
     assert!(buffer_contains(&buf, "entry 9"));
     assert!(!buffer_contains(&buf, "entry 8"));
     assert!(buffer_contains(&buf, "+8 more"));
+}
+
+#[test]
+fn the_header_stays_under_an_open_task_detail() {
+    let mut app = covered_app(on_ten(true));
+    select_task(&mut app, 1);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),
+    ));
+    assert!(matches!(app.board.view_mode, ViewMode::TaskDetail { .. }));
+
+    let buf = render_to_buffer(&mut app, 160, 40);
+
+    assert!(buffer_contains(&buf, "orchestrator orch10"));
+}
+
+#[test]
+fn a_short_terminal_keeps_the_columns_their_six_rows() {
+    let mut board = on_ten(true);
+    board.log = (1..=10)
+        .map(|i| entry(i, 10, &format!("entry {i}")))
+        .collect();
+    let mut app = covered_app(board);
+    enter(&mut app, 10);
+
+    // 10 rows leave the board 7: the header gets one, the columns six.
+    let buf = render_to_buffer(&mut app, 120, 10);
+
+    assert!(buffer_contains(&buf, "orchestrator orch10"));
+    assert!(!buffer_contains(&buf, "entry 10"));
+}
+
+#[test]
+fn a_reload_with_new_log_entries_and_no_new_item_notifies_nothing() {
+    let mut app = covered_app(on_ten(true));
+    app.set_notifications_enabled(true);
+    let mut board = on_ten(true);
+    board.log = vec![entry(1, 10, "answered a question")];
+
+    let cmds = press(
+        &mut app,
+        EpicMessage::OrchestrationRefreshed(Box::new(board)),
+    );
+
+    assert!(notifications(&cmds).is_empty(), "{cmds:?}");
 }
 
 #[test]

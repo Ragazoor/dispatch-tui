@@ -308,3 +308,89 @@ async fn an_accepted_epic_edit_keeps_newer_board_data_it_did_not_send() {
         "the newer status stays"
     );
 }
+
+fn saved_with_switch(title: &str, on: &str, rule: &str, limit: &str) -> EditorOutcome {
+    EditorOutcome::Saved(format!(
+        "--- TITLE ---\n{title}\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\n\n--- FEED_INTERVAL_SECS ---\n\n--- ORCHESTRATOR ---\n{on}\n--- START_RULE ---\n{rule}\n--- MAX_PARALLEL ---\n{limit}\n"
+    ))
+}
+
+/// epics.allium: EditEpic, "The orchestrator section": on from off.
+#[tokio::test]
+async fn the_edit_form_switches_an_orchestrator_on_with_its_settings() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+
+    rt.finalize_epic_edit(
+        &mut app,
+        epic.clone(),
+        None,
+        saved_with_switch("E", "on", "everything", "2"),
+    )
+    .await;
+
+    let on = db.epic_orchestration(epic.id).await.expect("switched on");
+    assert_eq!(on.start_rule, crate::models::StartRule::Everything);
+    assert_eq!(on.max_parallel, Some(2));
+}
+
+/// Off from on, and an emptied limit on an epic that stays on.
+#[tokio::test]
+async fn the_edit_form_resets_the_limit_and_switches_off() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    db.switch_orchestrator_on(epic.id, None, Some(2))
+        .await
+        .unwrap();
+    let opened = db.epic_orchestration(epic.id).await;
+
+    rt.finalize_epic_edit(
+        &mut app,
+        epic.clone(),
+        opened.clone(),
+        saved_with_switch("E", "on", "marked_only", ""),
+    )
+    .await;
+    assert_eq!(
+        db.epic_orchestration(epic.id).await.unwrap().max_parallel,
+        None
+    );
+
+    let opened = db.epic_orchestration(epic.id).await;
+    rt.finalize_epic_edit(
+        &mut app,
+        epic.clone(),
+        opened,
+        saved_with_switch("E", "off", "marked_only", ""),
+    )
+    .await;
+    assert!(db.epic_orchestration(epic.id).await.is_none());
+}
+
+/// A refused switch is reported and leaves the other fields saved.
+#[tokio::test]
+async fn a_refused_switch_keeps_the_rest_of_the_edit() {
+    let (db, rt, mut app) = runtime_and_app().await;
+    let above = db.create_epic("Above", "", None).await.unwrap();
+    db.switch_orchestrator_on(above.id, None, None)
+        .await
+        .unwrap();
+    let epic = db.create_epic("E", "", Some(above.id)).await.unwrap();
+
+    rt.finalize_epic_edit(
+        &mut app,
+        epic.clone(),
+        None,
+        saved_with_switch("Renamed", "on", "marked_only", ""),
+    )
+    .await;
+
+    assert_eq!(db.get_epic(epic.id).await.unwrap().title, "Renamed");
+    assert!(db.epic_orchestration(epic.id).await.is_none());
+    assert!(
+        app.error_popup()
+            .is_some_and(|m| m.contains("The orchestrator was not changed")),
+        "{:?}",
+        app.error_popup()
+    );
+}

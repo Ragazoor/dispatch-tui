@@ -1379,7 +1379,8 @@ surface OrchestratorInEpicView {
 
     @guarantee OrchestratorLeadsItsGroupInTheAgentList
         -- In the agent list an orchestrator is the first row of its epic's
-        -- group, marked as the orchestrator.
+        -- group, marked as the orchestrator (agent-tree.allium:
+        -- OrchestratorLeadsItsEpicGroup).
 }
 
 -- O16.

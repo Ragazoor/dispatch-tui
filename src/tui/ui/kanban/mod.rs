@@ -263,11 +263,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let panel_h = input_panel_height(app, area.height);
     // epics.allium: OrchestratorHeader, at most a third of the board's rows.
     let board_rows = area.height.saturating_sub(3 + panel_h);
-    let header = orchestrator_header::orchestrator_header_lines(
-        app,
-        area.width,
-        usize::from(board_rows / 3),
-    );
+    // The columns keep their minimum of 6 rows.
+    let header_rows = (board_rows / 3).min(board_rows.saturating_sub(6));
+    let header =
+        orchestrator_header::orchestrator_header_lines(app, area.width, usize::from(header_rows));
     let header_h = u16::try_from(header.len()).unwrap_or(0);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
