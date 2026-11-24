@@ -2573,6 +2573,11 @@ surface McpTaskTools {
         -- The /voice skill drafts a message in the operator's voice and learns from
         -- their edits. Its behaviour is specified in its own file
         -- (voice-skill.allium: VoiceSession).
+        --
+        -- The /pull-request skill guides an agent through what goes into one
+        -- PR, its title and body, opening it and keeping it current. The PR
+        -- gate and the /wrap-up pr path point at it (pull-request-skill.allium:
+        -- PullRequestSession).
 
     @guarantee ToolDefinitionsFollowTheAuthoringStandard
         -- Anthropic's guidance on tool definitions (platform.claude.com "Define

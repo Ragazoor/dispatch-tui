@@ -448,8 +448,10 @@ rule DraftPullRequest {
 
     @guidance
         -- The pr path's steps live in references/pr.md, which the skill
-        -- reads when this path is chosen: inspect the diff, draft the title
-        -- and body, push the branch and create the draft PR. If code changed
+        -- reads when this path is chosen. It sends the agent to the
+        -- /pull-request skill to check the diff, write the title and body,
+        -- push the branch and create the PR as a draft
+        -- (PrFollowsThePullRequestSkill). If code changed
         -- since the verify step the agent runs the verify command again
         -- before the push. A PR that already exists for the branch is
         -- reused: its URL is the one recorded
@@ -925,16 +927,13 @@ surface WrapUpSession {
         -- the PR URL travels with session_exit, never with task_update
         -- (pr-workflow.allium: WrapUpPr; CloseSession).
 
-    @guarantee PrBodyIsWrittenForAReviewer
-        -- The body states principles, not a template: no category labels and no
-        -- Summary heading. It opens with the situation and the consequence
-        -- because the review feed shows only the first 500 characters, is short
-        -- prose and not bullet lists, and passes the test of a reviewer parsing
-        -- it in under a minute. Notes meant for a reviewing agent go in an
-        -- HTML comment at the end of the body, out of GitHub's rendered
-        -- preview. It never references the dispatch task, whose
-        -- number GitHub would link to an unrelated issue, and carries a Test
-        -- plan only for a dangerous or breaking change (PrPathIsAuthoredByTheAgent).
+    @guarantee PrFollowsThePullRequestSkill
+        -- The pr path writes the PR by the /pull-request skill
+        -- (pull-request-skill.allium: PullRequestSession), which pr.md
+        -- names; pr.md carries no copy of its rules, so the two cannot drift.
+        -- pr.md keeps only what is wrap-up's own: re-running the verify
+        -- command when code changed, creating the PR as a draft and keeping
+        -- its URL for session_exit (PrPathIsAuthoredByTheAgent).
 
     @guarantee BranchDetailLivesInReferences
         -- The pr path's steps and the session_exit error handling live in

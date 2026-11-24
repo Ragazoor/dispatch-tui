@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pr-learnings-hook — Remind the agent to consult the knowledge base before the
-# first `gh pr create` for a task.
+# pr-gate-hook — Before a task's first `gh pr create`, remind the agent to load
+# the /pull-request skill.
 #
 # Registered as a Claude Code PreToolUse hook. Acts only on Bash `gh pr create`
 # commands: resolves the task ID from the git branch (same as task-status-hook)

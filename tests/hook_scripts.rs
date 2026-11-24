@@ -238,14 +238,7 @@ fn pr_gate_spends_the_launch_tasks_reminder() {
     let cmd = ["gh pr", "create"].join(" ");
     let extra = format!(r#","tool_name":"Bash","tool_input":{{"command":"{cmd}"}}"#);
     let input = payload(&repo, "PreToolUse", &extra);
-    let (_, calls) = run_script(
-        "pr-learnings-hook",
-        &input,
-        Some("42"),
-        0,
-        &repo,
-        dir.path(),
-    );
+    let (_, calls) = run_script("pr-gate-hook", &input, Some("42"), 0, &repo, dir.path());
     assert_eq!(calls.trim(), "pr-gate 42");
 }
 
@@ -265,7 +258,7 @@ fn a_failing_board_call_does_not_skip_the_ask_user_question_notification() {
 #[test]
 fn scripts_do_not_need_gnu_grep() {
     let src = std::fs::read_to_string(script("task-status-hook")).unwrap()
-        + &std::fs::read_to_string(script("pr-learnings-hook")).unwrap();
+        + &std::fs::read_to_string(script("pr-gate-hook")).unwrap();
     assert!(!src.contains("grep -oP"), "grep -P is GNU-only");
 }
 
@@ -360,7 +353,7 @@ fn the_pr_gate_ignores_an_orchestrator() {
         "PreToolUse",
         r#","tool_name":"Bash","tool_input":{"command":"gh pr create"}"#,
     );
-    let (code, calls) = run_as_orchestrator("pr-learnings-hook", &input, &repo, dir.path());
+    let (code, calls) = run_as_orchestrator("pr-gate-hook", &input, &repo, dir.path());
     assert_eq!(code, Some(0));
     assert_eq!(calls.trim(), "");
 }

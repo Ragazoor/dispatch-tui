@@ -1,0 +1,251 @@
+-- allium: 3
+-- pull-request-skill.allium
+--
+-- Scope: The /pull-request skill (plugin/skills/pull-request/SKILL.md): what
+--        an agent running it guarantees about a GitHub pull request it opens
+--        or updates. It covers what belongs in one PR, the title and body,
+--        pushing and creating the PR, and keeping the title and body true
+--        after later pushes.
+-- Includes: PullRequestWork (one PR, from its scope check to the open PR it
+--           keeps current) and the shape of a PR title and body.
+-- Excludes: when the skill is invoked beyond its triggers; the PR gate that
+--           points agents at it (pr-workflow.allium: PrLearningsGate); the
+--           /wrap-up pr path's own steps, its verify re-run and the pr_url
+--           it passes to session_exit (wrap-up-skill.allium: WrapUpSession;
+--           pr-workflow.allium: WrapUpPr); PR polling and merge detection
+--           (pr-workflow.allium).
+--
+-- Design decisions:
+--   - A guide, not a script. The skill states the goal (a PR a human can
+--     take in, and decide on, in about a minute), the reasons behind it and
+--     the few gotchas that are costly to get wrong, and leaves the rest to
+--     the agent's judgement of the change in front of it. It describes the
+--     kinds of shape a body can take instead of giving templates to copy.
+--   - One source. The rules for a PR live in this skill only. The /wrap-up
+--     pr path and the PR gate point here instead of carrying a copy, so the
+--     rules cannot drift apart.
+--   - The reader is a human with a minute. The body is easy to parse:
+--     a short opening, a table or before/after where the change has a
+--     shape, no summary section and nothing the diff or CI already shows.
+--     The review feed shows only a body's first 500 characters, so the
+--     opening carries the PR.
+--   - No template. The body takes the shape of the change; a repo's own PR
+--     template or PR rules come first, and this skill fills the gaps.
+--   - A body describes the PR as it is now. Later pushes edit it; they do
+--     not append a log of review rounds.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One pull request an agent prepares, opens and keeps current.
+entity PullRequestWork {
+    -- The branch the PR is opened from.
+    branch: String
+    -- The branch it merges into.
+    base_branch: String
+    -- Absent until written.
+    title: String?
+    body: String?
+    -- The PR's URL; absent until it exists.
+    url: String?
+
+    stage: scoping | writing | creating | open
+
+    transitions stage {
+        scoping -> writing
+        writing -> creating
+        writing -> open
+        creating -> open
+        open -> writing
+    }
+
+    is_open: url != null
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule StartPullRequest {
+    when: PullRequestRequested(branch, base_branch)
+
+    ensures: PullRequestWork.created(
+        branch: branch,
+        base_branch: base_branch,
+        title: null,
+        body: null,
+        url: null,
+        stage: scoping
+    )
+    -- observable output; no rule listens
+    ensures: PullRequestAnnounced(branch: branch)
+
+    @guidance
+        -- The skill opens with the sentence "I'm using the pull-request
+        -- skill for this PR." A repo's own PR template or the PR rules a
+        -- task gives come first; the skill fills the gaps they leave
+        -- (RepoRulesComeFirst).
+}
+
+rule CheckScope {
+    when: work: PullRequestWork.created
+
+    requires: work.stage = scoping
+
+    ensures: work.stage = writing
+
+    @guidance
+        -- The agent reads the commit list and the whole diff against
+        -- base_branch before it writes a word. A commit that is not part of
+        -- the change comes out, or goes into its own PR. Generated files,
+        -- snapshots and lock files may stay, and are named in one line when
+        -- they are a large part of the diff (OneChangePerPr).
+}
+
+rule WriteTitleAndBody {
+    when: work: PullRequestWork.stage transitions_to writing
+
+    ensures: work.title = title_for(work)
+    ensures: work.body = body_for(work)
+    ensures:
+        if work.is_open:
+            work.stage = open
+        else:
+            work.stage = creating
+
+    @guidance
+        -- The title follows TitleIsOneAction. The body serves
+        -- ForAHumanWithAMinute through OpeningCarriesThePr,
+        -- ShowsTheChangeWhereItHasAShape and LeavesOutWhatTheReviewerHas.
+        -- On an open PR this is the re-check after a later push
+        -- (KeepsItCurrent).
+}
+
+rule CreatePullRequest {
+    when: work: PullRequestWork.stage transitions_to creating
+
+    ensures: work.url = created_or_existing_url(work)
+    ensures: work.stage = open
+
+    @guidance
+        -- The agent pushes the branch and creates the PR, as a draft unless
+        -- told otherwise, with the body in a heredoc. A rejected push stops
+        -- the work (NeverForcePushes). A PR that already exists for the
+        -- branch is reused (ReusesAnExistingPr).
+}
+
+rule BranchMovedAfterOpen {
+    when: BranchPushed(work)
+
+    requires: work.stage = open
+
+    ensures: work.stage = writing
+
+    @guidance
+        -- New commits on an open PR send the agent back to the title and
+        -- body (KeepsItCurrent).
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface PullRequestInvocation {
+    facing _: core/Agent
+
+    provides:
+        PullRequestRequested(branch, base_branch)
+
+    @guidance
+        -- The skill is /dispatch:pull-request. An agent loads it before it
+        -- opens a PR, when the PR gate blocks its first PR-creation command
+        -- (pr-workflow.allium: PrLearningsGate), when the /wrap-up pr path
+        -- reaches its draft step, and when it pushes to a PR already open.
+        -- Over MCP its copy is skill://pull-request/SKILL.md.
+}
+
+surface PullRequestSession {
+    facing _: core/Agent
+
+    context work: PullRequestWork
+
+    exposes:
+        work.title
+        work.body
+        work.url
+
+    provides:
+        BranchPushed(work) when work.stage = open
+
+    @guarantee ForAHumanWithAMinute
+        -- The skill states the goal every part serves: a PR a person can
+        -- understand and decide on in about a minute, and the test of each
+        -- line, whether the reviewer would miss it if it were gone. Where a
+        -- point does not fit the change, the agent's judgement decides
+        -- (WriteTitleAndBody).
+
+    @guarantee RepoRulesComeFirst
+        -- A repo's own PR template, or PR rules the task or the knowledge
+        -- base gives for the repo, come before this skill; it covers what
+        -- they leave open (StartPullRequest).
+
+    @guarantee OneChangePerPr
+        -- The agent reads the commit list and the whole diff before it
+        -- writes. Unrelated work leaves the PR; bulky generated files are
+        -- named in one line (CheckScope).
+
+    @guarantee TitleIsOneAction
+        -- The title names one change in the imperative, at most 72
+        -- characters, and reads well in git log --oneline. It names the
+        -- change, not the task (WriteTitleAndBody).
+
+    @guarantee OpeningCarriesThePr
+        -- There is no template. The body opens with the situation and why it
+        -- matters in a sentence or two, because the review feed shows only
+        -- the first 500 characters (WriteTitleAndBody).
+
+    @guarantee ShowsTheChangeWhereItHasAShape
+        -- Where the change has a shape, the body shows it: a table, a
+        -- before/after, a few lines of example or a small diagram. A bug fix
+        -- may need only two sentences. What a reviewer must not miss (a
+        -- breaking change, a deploy order, a change another team must make)
+        -- is said once, plainly (WriteTitleAndBody).
+
+    @guarantee LeavesOutWhatTheReviewerHas
+        -- No summary section and no recap: the diff shows the files, CI the
+        -- tests, and the files what they contain. The body is not a table of
+        -- contents for what it ships. A PR whose point is an argument (an
+        -- ADR, an RFC) may need its reasoning in the body; the agent asks
+        -- before cutting it (WriteTitleAndBody).
+
+    @guarantee OperatorPreferences
+        -- The operator prefers short prose and tables to bullet lists in a
+        -- PR body, and a Test plan section only for a dangerous or breaking
+        -- change (WriteTitleAndBody).
+
+    @guarantee NeverReferencesTheDispatchTask
+        -- No task id and no "Implements #N": GitHub links #N to an unrelated
+        -- issue or PR (WriteTitleAndBody).
+
+    @guarantee AgentNotesInAComment
+        -- Notes for a reviewing agent go in an HTML comment at the end of the
+        -- body, out of GitHub's rendered preview. The attribution footer the
+        -- harness requires stays last (WriteTitleAndBody).
+
+    @guarantee NeverForcePushes
+        -- A rejected push stops the work and goes to the user; the agent
+        -- never force-pushes without the user's say (CreatePullRequest).
+
+    @guarantee ReusesAnExistingPr
+        -- When a PR already exists for the branch, its URL is the PR's URL
+        -- and no second PR is opened (CreatePullRequest).
+
+    @guarantee KeepsItCurrent
+        -- After later pushes the agent rereads the title and body against
+        -- the new diff and edits them where a line is no longer true. The
+        -- body describes the PR as it is now, not a log of review rounds
+        -- (BranchMovedAfterOpen).
+}

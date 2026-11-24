@@ -438,7 +438,7 @@ async fn pr_gate_blocks_first_then_allows_through_the_board() {
     let board = spawn_board().await;
     let (id, stderr) = pr_gate_first_reminder(&board).await;
     assert!(
-        stderr.contains("learning_search"),
+        stderr.contains("pull-request"),
         "expected the reminder, got: {stderr}"
     );
 
@@ -471,54 +471,51 @@ async fn pr_gate_with_no_board_fails_open() {
     );
 }
 
-/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium` for why the scope
-/// is the whole submission. Asserting both halves is what makes this a
-/// regression guard: banning the old "PR conventions" phrasing would pass on
-/// "conventions for this pull request", which is the same defect reworded.
+/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium`: the reminder
+/// sends the agent to the /pull-request skill, by the plugin name and by the
+/// MCP resource the board itself serves, and that skill must exist.
 #[tokio::test]
-async fn pr_gate_reminder_covers_the_diff_not_just_the_pr_body() {
+async fn pr_gate_reminder_names_the_pull_request_skill_by_both_routes() {
     let board = spawn_board().await;
     let (_, stderr) = pr_gate_first_reminder(&board).await;
     assert!(
-        stderr.contains("diff"),
-        "reminder must name the diff, got: {stderr}"
+        stderr.contains("dispatch:pull-request"),
+        "reminder must name the plugin skill, got: {stderr}"
     );
+    assert!(
+        stderr.contains("skill://pull-request/skill.md"),
+        "reminder must name the MCP resource, got: {stderr}"
+    );
+    let skill = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("plugin/skills/pull-request/SKILL.md");
+    assert!(skill.is_file(), "the skill the reminder names must exist");
+}
+
+/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium` for why the gate
+/// no longer sends the agent to the knowledge base.
+#[tokio::test]
+async fn pr_gate_reminder_does_not_send_the_agent_to_the_knowledge_base() {
+    let board = spawn_board().await;
+    let (_, stderr) = pr_gate_first_reminder(&board).await;
+    assert!(
+        !stderr.contains("learning_search"),
+        "reminder must not ask for a knowledge-base search, got: {stderr}"
+    );
+}
+
+/// An agent that already wrote the PR with the skill (the /wrap-up pr path
+/// loads it first) is told it can just run the command again.
+#[tokio::test]
+async fn pr_gate_reminder_lets_an_agent_that_applied_the_skill_rerun() {
+    let board = spawn_board().await;
+    let (_, stderr) = pr_gate_first_reminder(&board).await;
     assert!(
         stderr.contains("title and body"),
-        "reminder must still name the PR body, got: {stderr}"
+        "reminder must name the PR title and body, got: {stderr}"
     );
-}
-
-/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium` for why no tag is
-/// suggested.
-#[tokio::test]
-async fn pr_gate_reminder_suggests_no_tag_filter() {
-    let board = spawn_board().await;
-    let (_, stderr) = pr_gate_first_reminder(&board).await;
     assert!(
-        !stderr.contains("tag_filter"),
-        "reminder must not suggest a tag_filter, got: {stderr}"
-    );
-    // `query_learnings` contains "query", so drop the tool name before looking
-    // for the argument the reminder is supposed to steer the agent towards.
-    assert!(
-        stderr.replace("learning_search", "").contains("query"),
-        "reminder must point the agent at the `query` argument, got: {stderr}"
-    );
-}
-
-/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium`: a reminder that
-/// named only `query` was read as the whole call, and the agent's first
-/// `query_learnings` was refused for a missing `task_id`.
-#[tokio::test]
-async fn pr_gate_reminder_names_task_id_with_this_tasks_id() {
-    let board = spawn_board().await;
-    let (id, stderr) = pr_gate_first_reminder(&board).await;
-    // Tied to the argument name: a fresh board's id is a small number that
-    // any stray digit in the text would match on its own.
-    assert!(
-        stderr.contains(&format!("`task_id` {id}")),
-        "reminder must give `task_id` this task's id ({id}), got: {stderr}"
+        stderr.contains("already"),
+        "reminder must say what an agent that already applied the skill does, got: {stderr}"
     );
 }
 

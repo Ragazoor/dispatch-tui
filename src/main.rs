@@ -206,7 +206,7 @@ enum Commands {
         chain: Option<String>,
     },
     /// Gate `gh pr create`: block the first attempt for a task with a reminder
-    /// to consult the knowledge base, then allow subsequent attempts. Exits 2
+    /// to load the pull-request skill, then allow subsequent attempts. Exits 2
     /// to block (Claude Code PreToolUse block signal), 0 to allow.
     PrGate {
         /// Task ID

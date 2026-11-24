@@ -562,12 +562,12 @@ fn subagent_events_do_not_stamp_activity() {
     );
 }
 
-fn pr_learnings_hook_script() -> &'static str {
+fn pr_gate_hook_script() -> &'static str {
     PLUGIN_DIR
-        .get_file("hooks/scripts/pr-learnings-hook")
-        .expect("pr-learnings-hook must be embedded")
+        .get_file("hooks/scripts/pr-gate-hook")
+        .expect("pr-gate-hook must be embedded")
         .contents_utf8()
-        .expect("pr-learnings-hook must be UTF-8")
+        .expect("pr-gate-hook must be UTF-8")
 }
 
 fn hooks_json_value() -> Value {
@@ -589,13 +589,13 @@ fn hook_commands_for_event<'a>(value: &'a Value, event: &str) -> Vec<&'a str> {
 }
 
 #[test]
-fn pr_learnings_hook_is_valid_bash() {
-    assert!(pr_learnings_hook_script().starts_with("#!/usr/bin/env bash"));
+fn pr_gate_hook_is_valid_bash() {
+    assert!(pr_gate_hook_script().starts_with("#!/usr/bin/env bash"));
 }
 
 #[test]
-fn pr_learnings_hook_matches_gh_pr_create_and_calls_gate() {
-    let s = pr_learnings_hook_script();
+fn pr_gate_hook_matches_gh_pr_create_and_calls_gate() {
+    let s = pr_gate_hook_script();
     assert!(
         s.contains("gh pr create"),
         "must match gh pr create commands"
@@ -608,7 +608,7 @@ fn pr_learnings_hook_matches_gh_pr_create_and_calls_gate() {
 }
 
 #[test]
-fn hooks_json_registers_pr_learnings_hook() {
+fn hooks_json_registers_pr_gate_hook() {
     let value = hooks_json_value();
     let commands = hook_commands_for_event(&value, "PreToolUse");
     assert!(
@@ -616,14 +616,14 @@ fn hooks_json_registers_pr_learnings_hook() {
         "existing task-status-hook must remain registered"
     );
     assert!(
-        commands.iter().any(|c| c.contains("pr-learnings-hook")),
-        "pr-learnings-hook must be registered under PreToolUse"
+        commands.iter().any(|c| c.contains("pr-gate-hook")),
+        "pr-gate-hook must be registered under PreToolUse"
     );
 }
 
 #[cfg(unix)]
 #[test]
-fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
+fn pr_gate_hook_invokes_gate_only_for_gh_pr_create() {
     use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Stdio;
@@ -637,8 +637,8 @@ fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
     crate::test_git::git(&repo, &["commit", "-q", "-m", "init"]);
 
     // Drop the embedded script to a real executable file.
-    let script_path = tmp.path().join("pr-learnings-hook");
-    std::fs::write(&script_path, pr_learnings_hook_script()).unwrap();
+    let script_path = tmp.path().join("pr-gate-hook");
+    std::fs::write(&script_path, pr_gate_hook_script()).unwrap();
     let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
     perm.set_mode(0o755);
     std::fs::set_permissions(&script_path, perm).unwrap();

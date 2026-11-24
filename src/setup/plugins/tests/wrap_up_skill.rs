@@ -19,8 +19,9 @@ fn plugin_embeds_required_files() {
         ".claude-plugin/plugin.json",
         "hooks/hooks.json",
         "hooks/scripts/task-status-hook",
-        "hooks/scripts/pr-learnings-hook",
+        "hooks/scripts/pr-gate-hook",
         "skills/wrap-up/SKILL.md",
+        "skills/pull-request/SKILL.md",
         "skills/retro/SKILL.md",
         "skills/decompose-review/SKILL.md",
         "skills/decompose-review/references/plan-template.md",
@@ -172,102 +173,26 @@ fn wrap_up_skill_does_not_record_the_pr_url_via_update_task() {
     }
 }
 
-/// The "Draft the title and body" step of the PR path, isolated from its
-/// neighbouring steps. Not built on `section_after`: that helper ends a
-/// section at the next line starting with `#`, but this step's own
-/// Markdown examples may contain `#`-prefixed lines as literal example text,
-/// which would truncate the section before the part these tests need to
-/// inspect.
-fn pr_body_draft_section() -> String {
-    let content = references_text("wrap-up");
-    let (_, after) = content
-        .split_once("### Draft the title and body")
-        .expect("wrap-up skill must have a 'Draft the title and body' step");
-    let (section, _) = after.split_once("### Push and create the draft PR").expect(
-        "wrap-up skill must have a 'Push and create the draft PR' step \
-             after drafting",
-    );
-    section.to_string()
-}
-
-/// The PR body guidance states principles, not a template: it must not
-/// bring back the fixed `## Summary` + bold category labels shape, and it
-/// must keep the reviewer-minute test that makes the principles checkable.
-/// The phrases "no template" and "under a minute" are anchors: if you
-/// reword them, re-anchor here, and keep the 500-character feed note.
+/// pr.md carries no copy of the PR rules; it sends the agent to the
+/// /pull-request skill, by both routes, so the rules have one source.
 ///
-/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
+/// Pins PrFollowsThePullRequestSkill of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
 #[test]
-fn wrap_up_skill_pr_body_states_principles_not_a_template() {
-    let section = pr_body_draft_section();
-    for label in ["**Breaking Changes**", "**New Features**", "**Bug Fixes**"] {
+fn wrap_up_pr_path_points_to_the_pull_request_skill() {
+    let refs = references_text("wrap-up");
+    assert!(
+        refs.contains("dispatch:pull-request") && refs.contains("skill://pull-request/SKILL.md"),
+        "references/pr.md must name the pull-request skill by both routes"
+    );
+    for copied in ["500 characters", "under a minute", "Implements #"] {
         assert!(
-            !section.contains(label),
-            "PR body guidance must not prescribe category labels, found: {label}"
+            !refs.contains(copied),
+            "references/pr.md must not carry a copy of the skill's PR rules, found: {copied}"
         );
     }
     assert!(
-        !section.contains("## Summary"),
-        "PR body guidance must not prescribe a Summary heading"
-    );
-    assert!(
-        section.to_lowercase().contains("no template"),
-        "PR body guidance must say plainly that there is no template"
-    );
-    assert!(
-        section.contains("under a minute"),
-        "PR body guidance must keep the reviewer-minute test"
-    );
-    assert!(
-        section.contains("500 characters"),
-        "PR body guidance must say the review feed shows only the first 500 \
-         characters, which is why the opening carries the PR"
-    );
-}
-
-/// Distilled from the shared PR-description knowledge base (learnings
-/// #146 and #154): dispatch task IDs must never appear in a PR body —
-/// GitHub auto-links `#N` to an unrelated issue/PR in the target repo.
-/// The old template's `Implements #{task_id}.` line was a live
-/// contradiction of both learnings until this test locked it out.
-///
-/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
-#[test]
-fn wrap_up_skill_pr_body_omits_task_references() {
-    let section = pr_body_draft_section();
-    assert!(
-        !section.contains("Implements #{task_id}"),
-        "PR body template must not instruct the agent to write \
-         \"Implements #{{task_id}}\" into the body — GitHub auto-links #N \
-         to an unrelated issue/PR in this repo"
-    );
-    assert!(
-        section
-            .to_lowercase()
-            .contains("do not reference the dispatch task"),
-        "PR body template must explicitly warn against referencing the \
-         dispatch task (task IDs, \"Implements #N\")"
-    );
-}
-
-/// Distilled from the shared PR-description knowledge base (learning
-/// #188): the Test plan section is opt-in for dangerous/breaking PRs,
-/// not a default part of every PR body.
-///
-/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
-#[test]
-fn wrap_up_skill_pr_body_test_plan_is_opt_in_not_default() {
-    let section = pr_body_draft_section();
-    assert!(
-        !section.contains("- [ ] {how to verify"),
-        "PR body template must not show an unconditional Test plan checklist \
-         in its default example"
-    );
-    let lower = section.to_lowercase();
-    assert!(
-        lower.contains("test plan") && (lower.contains("dangerous") || lower.contains("breaking")),
-        "PR body template must say the Test plan section is only for \
-         dangerous or breaking PRs, omitted by default"
+        refs.contains("pr_url"),
+        "references/pr.md must still say the PR URL goes to session_exit as pr_url"
     );
 }
 
@@ -484,15 +409,4 @@ fn wrap_up_references_cite_only_steps_the_skill_has() {
             );
         }
     }
-}
-
-/// The PR body is for a reviewer with a minute: short prose, never bullets.
-///
-/// Pins PrBodyIsWrittenForAReviewer of `WrapUpSession` in `docs/specs/wrap-up-skill.allium`.
-#[test]
-fn wrap_up_skill_pr_body_is_prose_not_bullets() {
-    assert!(
-        pr_body_draft_section().contains("Write short prose paragraphs, never bullet lists"),
-        "PR body guidance must say to write prose and never bullet lists"
-    );
 }

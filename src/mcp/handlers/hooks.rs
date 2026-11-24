@@ -30,17 +30,13 @@ use crate::service::ServiceError;
 /// what decides: the hook binary is whichever `dispatch` is on `PATH`, which
 /// need not be the build the board is running. Composed here, revised wording
 /// takes effect with the board that serves it. See `PrLearningsGate` in
-/// `docs/specs/pr-workflow.allium` for why the scope is the whole submission
-/// and why it suggests no tag, and why it names `task_id` with the id.
-fn pr_gate_reminder(task_id: TaskId) -> String {
-    format!(
-        "Before creating this PR, consult the knowledge base for the conventions that apply \
-         to what you are submitting — the code in the diff as well as the PR title and body. \
-         Call the dispatch `learning_search` MCP tool with `task_id` {id} and a `query` \
-         describing this change, then apply what it returns and re-run the command.",
-        id = task_id.0
-    )
-}
+/// `docs/specs/pr-workflow.allium` for why it names a skill, not the
+/// knowledge base, and why it names it by both routes.
+const PR_GATE_REMINDER: &str =
+    "Before creating this PR, load the dispatch `pull-request` skill (the Skill tool's \
+     `dispatch:pull-request`, or `context_read` with `skill://pull-request/SKILL.md`) \
+     and check the PR against it: what the branch holds, and the title and body. If you \
+     already wrote it with that skill, run the command again.";
 
 /// The route handler: decodes the body itself so one the board cannot read
 /// (a newer hook binary's event, say) still gets a JSON `Failed` outcome. The
@@ -350,7 +346,7 @@ async fn answer(state: &McpState, question: Question) -> Answer {
         Question::PrGate { .. } => match state.task_svc.mark_pr_learnings_gate_shown(task_id).await
         {
             Ok(first_time) => Answer::PrGate {
-                reminder: first_time.then(|| pr_gate_reminder(task_id)),
+                reminder: first_time.then(|| PR_GATE_REMINDER.to_string()),
             },
             Err(e) => {
                 tracing::warn!(task_id = task_id.0, "pr gate failed: {e}");

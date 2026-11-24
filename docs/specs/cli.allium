@@ -778,7 +778,7 @@ surface DispatchCommandLine {
         -- `dispatch store import --from <old store>`; target is the store
         -- named, else null (startup.allium: ImportBringsUpTheManagedStore).
         StoreImportRequested(operator, target)
-        -- `dispatch pr-gate <id>`, run by the pr-learnings PreToolUse hook
+        -- `dispatch pr-gate <id>`, run by the pr-gate-hook PreToolUse hook
         -- (pr-workflow.allium: PrLearningsGate).
         PrLearningsGateCheck(task)
         -- `dispatch verify-feed <command>` (feeds.allium: VerifyFeed).

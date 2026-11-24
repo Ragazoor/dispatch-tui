@@ -117,6 +117,7 @@ mod feed_scripts;
 mod grill_skill;
 mod learnings_skill;
 mod plugin_install;
+mod pull_request_skill;
 mod reference_files;
 mod retro_skill;
 mod skill_workflow;
