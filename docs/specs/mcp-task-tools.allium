@@ -1055,7 +1055,8 @@ rule GetTaskViaMcp {
         --   [Tmux window], [Dispatch request], [Sort order], [Verify command],
         --   [Wrap-up mode], Model, [Wrap-up: refused — <reason>], [Phoenix],
         --   [Schedule], [Schedule error],
-        --   [Bookmarked], [Ready], [Orchestrated by], Created, Updated.
+        --   [Bookmarked], [Ready], [Orchestrated by], [Orchestrator log],
+        --   Created, Updated.
         -- [Bookmarked] renders "Bookmarked: yes" only when the board's person
         -- (see UpdateTaskViaMcp's `bookmarked`) has a core/Bookmark on the
         -- task. It is that one person's bookmark, never anyone else's.
@@ -1484,7 +1485,9 @@ rule DispatchTaskViaMcp {
         -- a refused start leaves no entry. From any other caller it is
         -- refused with an error saying only an orchestrator gives a reason,
         -- and a missing reason from an orchestrator is refused the same way,
-        -- before anything is written.
+        -- before anything is written. Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
         --
         -- The call then waits on the request row, for at most
         -- config.dispatch_task_wait_cap, and answers by the row's state:

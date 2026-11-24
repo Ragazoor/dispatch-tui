@@ -544,3 +544,42 @@ pub(super) async fn handle_log_search(
     }
     text(id, out.join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{EpicId, TaskBuilder};
+
+    fn row(live: bool) -> Orchestrator {
+        Orchestrator {
+            id: 1,
+            epic_id: EpicId(1),
+            host: "host-a".into(),
+            name: "o".into(),
+            tmux_window: live.then(|| crate::models::TmuxWindow::for_orchestrator(EpicId(1))),
+            started_at: None,
+            restarted_once: false,
+            session_died: false,
+            last_turn_at: None,
+        }
+    }
+
+    fn task(status: TaskStatus, host: Option<&str>) -> Task {
+        let mut t = TaskBuilder::new(1).epic(Some(1)).status(status).build();
+        t.host = host.map(str::to_string);
+        t
+    }
+
+    /// orchestrators.allium: orchestrator_state.
+    #[test]
+    fn the_state_follows_the_session_and_the_work() {
+        let running_here = task(TaskStatus::Running, Some("host-a"));
+        let running_there = task(TaskStatus::Running, Some("host-b"));
+        let done = task(TaskStatus::Done, None);
+
+        assert_eq!(orchestrator_state(&row(true), &[&running_here]), "working");
+        assert_eq!(orchestrator_state(&row(true), &[&running_there]), "idle");
+        assert_eq!(orchestrator_state(&row(false), &[&done]), "resting");
+        assert_eq!(orchestrator_state(&row(false), &[&running_there]), "down");
+    }
+}

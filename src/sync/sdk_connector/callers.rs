@@ -406,7 +406,7 @@ impl ReducerCaller for SdkReducerCaller {
         recommendation: String,
     ) -> anyhow::Result<ReducerOutcome> {
         let connection = self.connection()?;
-        let wanted = about.clone();
+        let wanted = about.trim().to_string();
         awaiting_answer("the waiting item", move |tx| {
             connection.reducers.raise_waiting_item_then(
                 name,

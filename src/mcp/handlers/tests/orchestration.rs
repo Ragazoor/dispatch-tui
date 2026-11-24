@@ -1031,3 +1031,89 @@ async fn the_log_reads_newest_first_by_page() {
     );
     assert!(next.contains("a0 — r") && !next.contains("a1"), "{next}");
 }
+
+/// orchestrators.allium: OrchestratorRecordsItsSummary, over MCP. Refused
+/// while the epic has open work; recorded once it is done.
+#[tokio::test]
+async fn the_summary_is_recorded_once_the_epic_is_done() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+
+    let early = tool_as(
+        &state,
+        "orchestrator-summary_record",
+        json!({ "text": "all in" }),
+        as_orchestrator(&name),
+    )
+    .await;
+    assert!(
+        error_message(&early).contains("is not done"),
+        "{}",
+        error_message(&early)
+    );
+
+    ok_text(
+        &tool(
+            &state,
+            "task_update",
+            json!({ "task_ids": [task.0], "status": "done" }),
+        )
+        .await,
+    );
+    ok_text(
+        &tool_as(
+            &state,
+            "orchestrator-summary_record",
+            json!({ "text": "all in" }),
+            as_orchestrator(&name),
+        )
+        .await,
+    );
+
+    let read = epic_detail(&state, e).await;
+    assert!(read.contains("summary — all in"), "{read}");
+}
+
+/// GetTaskViaMcp's [Orchestrator log] and GetEpicViaMcp's Log: the newest
+/// entries, and a last line naming the tool when there are more.
+#[tokio::test]
+async fn a_long_log_is_cut_and_says_how_to_read_the_rest() {
+    let state = test_state().await;
+    let e = epic(&state, "Orchestrated", None).await;
+    let name = orchestrator_of(&state, e).await;
+    let task = task_in(&state, e, json!({})).await;
+    for n in 0..12 {
+        ok_text(
+            &tool_as(
+                &state,
+                "orchestrator-answer_record",
+                json!({ "task_id": task.0, "question": "q", "answer": format!("a{n}"), "reason": "r" }),
+                as_orchestrator(&name),
+            )
+            .await,
+        );
+    }
+
+    let task_read = detail(&state, task).await;
+    assert!(
+        task_read.contains("a11 — r") && !task_read.contains("a1 — r"),
+        "{task_read}"
+    );
+    assert!(
+        task_read.contains(&format!(
+            "(10 of 12 shown; orchestrator-log_search(epic_id={}, task_id={}) reads the rest)",
+            e.0, task.0
+        )),
+        "{task_read}"
+    );
+    let epic_read = epic_detail(&state, e).await;
+    assert!(
+        epic_read.contains(&format!(
+            "(10 of 12 shown; orchestrator-log_search(epic_id={}) reads the rest)",
+            e.0
+        )),
+        "{epic_read}"
+    );
+}

@@ -1646,9 +1646,12 @@ surface OrchestratorSessionPrompt {
         --     done is a learning, for the knowledge base;
         --   the learnings that fit the epic (GivenItsLearnings), ranked as for
         --     a task by the epic's title and description, the epic as its
-        --     scope and no repository, under the heading a task's prompt
-        --     uses; left out when none fits. No retrieval is recorded: there
-        --     is no task to record it on;
+        --     scope and no repository, under "Validated knowledge for this
+        --     epic", with no instruction to rate them; left out when none
+        --     fits. No retrieval is recorded: there is no task to record it
+        --     on. (The ranking and the missing rating were decided by the
+        --     epic's acting orchestrator while the operator was away; open to
+        --     the operator's review.);
         --   the first-turn check (FirstTurnChecksTheBoard): look for what
         --     happened while no session ran before anything else.
         -- Under start rule everything, every backlog task reads ready.

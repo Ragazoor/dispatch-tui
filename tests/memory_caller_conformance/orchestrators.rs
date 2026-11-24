@@ -718,9 +718,17 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
             }};
         }
 
-        // The session's start and end write their entries.
+        // The session's start and end write their entries; a second death in
+        // a row raises one epic-wide item, however often it is asked.
         both!(start_orchestrator_session(id, host, true)).expect("start");
         both!(end_orchestrator_session(id, host, false)).expect("end");
+        both!(raise_orchestrator_down_item(id, host)).expect("not down: nothing");
+        for _ in 0..2 {
+            both!(start_orchestrator_session(id, host, false)).expect("start");
+            both!(end_orchestrator_session(id, host, true)).expect("died");
+        }
+        both!(raise_orchestrator_down_item(id, host)).expect("down");
+        both!(raise_orchestrator_down_item(id, host)).expect("down, asked again");
 
         // A start writes its reason in the request's transaction; a blank
         // reason is refused before anything is written.
@@ -756,7 +764,7 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
         );
         each!(record_orchestrator_answer(first, question, answer, why)).expect("answer");
         let (about, tried, rec) = (
-            "may I drop the column?".to_string(),
+            "  may I drop the column?  ".to_string(),
             "read the migration".to_string(),
             "keep it".to_string(),
         );
@@ -772,6 +780,10 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
         let (no_text, no_done): (Option<String>, Option<bool>) = (None, None);
         let refused = each!(change_epic_note(r_note[0], no_text, no_done)).expect_err("nothing");
         assert!(refused.contains("needs its text"), "{refused}");
+        let stale = "a stale fact".to_string();
+        let (r_stale, m_stale) = each!(write_epic_note(stale)).expect("a second note");
+        assert_eq!(r_stale, m_stale);
+        each!(remove_epic_note(r_stale[0])).expect("remove");
         let summary = "done".to_string();
         let refused = each!(record_orchestrator_summary(summary)).expect_err("not done");
         assert!(refused.contains("is not done"), "{refused}");
@@ -787,7 +799,9 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
         both!(patch_task(second, done_patch)).expect("second done");
 
         let expected = memory_of(&rows_mem, epic);
-        assert_eq!(expected.0.len(), 6, "{:?}", expected.0);
+        assert_eq!(expected.0.len(), 11, "{:?}", expected.0);
+        assert_eq!(expected.1.len(), 1, "{:?}", expected.1);
+        assert_eq!(expected.2.len(), 3, "{:?}", expected.2);
         wait_for!(memory_of(&rows_real, epic) == expected);
 
         both!(switch_orchestrator_off(epic)).expect("off");

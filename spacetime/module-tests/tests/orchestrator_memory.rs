@@ -416,6 +416,20 @@ fn an_orchestrator_that_keeps_dying_raises_one_item() {
 }
 
 #[test]
+fn a_note_is_written_only_by_a_caller_acting_for_its_orchestrators_host() {
+    let store = Store::new();
+    let (epic, _, o) = setup(&store);
+    store.enrol("zed");
+
+    let why = store
+        .call("zed", |ctx| write_epic_note(ctx, o.name.clone(), "x".into()))
+        .unwrap_err();
+
+    assert!(!why.is_empty());
+    assert!(notes(&store, epic).is_empty());
+}
+
+#[test]
 fn only_an_orchestrator_writes_its_memory() {
     let store = Store::new();
     let (_, task, _) = setup(&store);

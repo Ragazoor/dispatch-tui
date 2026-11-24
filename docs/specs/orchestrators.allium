@@ -412,7 +412,11 @@ rule StartOrchestratorSession {
         -- have been the conversation's. Either way it gets the prompt (OrchestratorPrompt), so
         -- a fresh start loses nothing that matters (O13).
         -- resumes_conversation(o) is that choice: the board makes it before it
-        -- writes the start, and the start's log entry says which it was.
+        -- writes the start, and the start's log entry says which it was:
+        -- "session started" or "session resumed", and at its end "session
+        -- ended" or "session died". The entry texts were decided by the
+        -- epic's acting orchestrator while the operator was away; open to the
+        -- operator's review.
 }
 
 rule OrchestratorThatKeepsDyingWaitsForTheOperator {
@@ -1208,9 +1212,8 @@ surface OrchestratorNotifications {
 
 -- Each of these is true once its build step lands, and moves to its owner
 -- then:
---   - core.allium: the entities above (EpicOrchestration, ReadyMark and
---     Orchestrator are there already). The Agent entity stays as it is, for
---     task agents only (OrchestratorIdentity).
+--   - core.allium: the Agent entity stays as it is, for task agents only
+--     (OrchestratorIdentity). (Every entity of this spec is there already.)
 --   - epics.allium: auto dispatch goes (O8): the flag on the epic, its
 --     toggle key and header indicator, the chain that started the next
 --     subtask when a session closed, its failure report and the stalled-chain
@@ -1219,10 +1222,6 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes (RequestDispatch
 --     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - tasks.allium and mcp-task-tools.allium: what the task and epic reads
---     add once the items, the notes and the log exist (the ready argument,
---     the reads of the switch and the mark, and the orchestrator's caller
---     identity are there already).
 --   - dispatch-prompt.allium: the line a covered task's prompt gains (the
 --     orchestrator's own prompt is there already).
 --   - agent-health.allium: the orchestrator's wake events (its hooks are

@@ -360,3 +360,35 @@ async fn a_deleted_tasks_verdicts_stop_counting() {
     db.delete_task(tasks[0]).await.unwrap();
     assert!(injected_in(&db, "/repo/a").await.contains(&entry));
 }
+
+/// orchestrators.allium: GivenItsLearnings. An epic's learnings are ranked
+/// with the epic as the scope and no repository: an entry scoped to another
+/// repository is not boosted over one scoped to the epic.
+#[tokio::test]
+async fn an_epics_learnings_are_ranked_with_the_epic_as_scope() {
+    use crate::store::EpicCrud;
+    let db = seed_db().await;
+    let epic = db
+        .create_epic("Orchestrated", "build it", None)
+        .await
+        .unwrap();
+    let emb = fake_emb_bytes();
+    let epic_ref = epic.id.0.to_string();
+    let scoped = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "the epic's own",
+            detail: None,
+            scope: LearningScope::Epic,
+            scope_ref: Some(epic_ref.as_str()),
+            tags: &[],
+            source_task_id: None,
+            embedding: Some(&emb),
+        })
+        .await
+        .unwrap();
+
+    let results = super::list_learnings_for_epic(&*db, &epic, &EmbeddingService::new_test()).await;
+
+    assert_eq!(results.first().map(|l| l.id), Some(scoped), "{results:?}");
+}
