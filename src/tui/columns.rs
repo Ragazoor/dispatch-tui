@@ -452,7 +452,7 @@ impl<'a> BoardView<'a> {
     /// `TaskStatus` and nothing else (see `board-layout.allium`, "Board
     /// Columns"); an *epic* card's column comes from its subtree's visible
     /// work, which is what the placement map answers ("Epic Card Placement").
-    /// The orchestrator view's cards come from [`Self::orchestrator_cards`]. Sub-status groups cards into sections *within* the column,
+    /// The orchestrator view's cards come from [`Self::compute_orchestrator_cards`]. Sub-status groups cards into sections *within* the column,
     /// which [`Self::column_items_for_status_with_view_tasks`] emits as headers.
     pub fn column_items_for_status_with_placements(
         self,
