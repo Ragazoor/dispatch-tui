@@ -7,9 +7,9 @@ binary's startup over it: the same user must see exactly the same tasks and
 epics afterwards (`docs/specs/startup.allium`:
 `StartupIsSmokeTestedAgainstARealStore`).
 
-- main commit: 190cd307
+- main commit: d219007b
 - spacetime version: 2.12.0
-- module hash: sha256:4cc64ca3f8d6c256373f15c0d1ae9e1b0f4f77945dfcf85688b1fa60394f4be4
+- module hash: sha256:bf080d3f3c649ade9a3fddfa4e1b42cc788cc2d52c3d0360da47b2375e9ef764
 
 The module hash is also `data/managed-module.sha256`, the record the managed
 store keeps; `scripts/check-previous-store.sh` checks it against `main`'s
