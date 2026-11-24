@@ -838,20 +838,14 @@ rule WrapUpPr {
         -- not in its SKILL.md: the skill names that file when the pr action is
         -- chosen, so an agent on the rebase or done path never loads it (see
         -- "Skill copy" at the head of mcp-task-tools.allium). That file
-        -- sends the agent to the /pull-request skill
-        -- (pull-request-skill.allium) to check its own diff, write a title
-        -- and body that reflect the actual work, and run
-        --   git push -u origin <branch>
-        --   gh pr create --draft --base <task.base_branch>
-        --     --head <owner>:<branch> --repo <owner>/<repo>
-        --     --title <agent-authored> --body <agent-authored>
-        -- then call session_wrap-up(action="pr") (no pr_url),
-        -- and finally call session_exit(token, action="pr", pr_url=<url>) using
+        -- sends the agent to the /pull-request skill, which checks the diff,
+        -- writes the title and body, pushes the branch and creates the PR as
+        -- a draft against task.base_branch (pull-request-skill.allium:
+        -- CreatePullRequest, OpensAgainstTheBaseBranch). The agent
+        -- then calls session_wrap-up(action="pr") (no pr_url),
+        -- and finally calls session_exit(token, action="pr", pr_url=<url>) using
         -- the URL that `gh pr create` printed. It is session_exit that records
-        -- task.url (with url_type = pr) and moves the task to review. The
-        -- --head uses the owner:branch format so `gh` resolves the branch in
-        -- the same repo as --repo (rather than the authenticated user's
-        -- namespace). The PR base is task.base_branch (not hardcoded "main").
+        -- task.url (with url_type = pr) and moves the task to review.
         -- PR status polling (PollPrStatus) only takes over once ExitSession
         -- has recorded the pr-typed url.
         --

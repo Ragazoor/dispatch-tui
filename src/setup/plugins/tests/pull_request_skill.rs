@@ -41,6 +41,7 @@ fn pull_request_skill_text_holds_each_session_guarantee() {
             "Do not mention the dispatch task",
         ),
         ("AgentNotesInAComment", "HTML comment"),
+        ("OpensAgainstTheBaseBranch", "`--base`"),
         ("NeverForcePushes", "never force-push"),
         ("ReusesAnExistingPr", "already exists"),
         ("KeepsItCurrent", "gh pr edit"),

@@ -44,7 +44,7 @@ As an illustration, not a template: a PR adding a token-check endpoint that the 
 
 Push the branch with `git push -u origin <branch>`. If the push is rejected, stop and show the user the error; never force-push without their say.
 
-Create the PR with `gh pr create`, as a draft unless you were told otherwise. Pass `--repo <owner>/<repo>` and `--head <owner>:<branch>` (the owner and repo come from `git remote get-url origin`), so `gh` looks for the branch in that repo and not in your own namespace, and pass the body through a quoted heredoc so its Markdown survives the shell. The command prints the PR's URL. If `gh` says a PR already exists for the branch, that PR is the one: use its URL and edit it rather than open another.
+Create the PR with `gh pr create`, as a draft unless you were told otherwise. Pass `--base` with the branch the work merges into (the task's base branch, which is not always the repo default), and `--repo <owner>/<repo>` and `--head <owner>:<branch>` (the owner and repo come from `git remote get-url origin`) so `gh` looks for the branch in that repo and not in your own namespace, and pass the body through a quoted heredoc so its Markdown survives the shell. The command prints the PR's URL. If `gh` says a PR already exists for the branch, that PR is the one: use its URL and edit it rather than open another.
 
 Dispatch's PR gate stops a task's first `gh pr create` once and points here. If you already wrote the PR with this guide, run the command again.
 

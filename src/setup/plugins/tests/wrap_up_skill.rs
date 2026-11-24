@@ -191,6 +191,10 @@ fn wrap_up_pr_path_points_to_the_pull_request_skill() {
         );
     }
     assert!(
+        refs.contains("`--base`"),
+        "references/pr.md must still open the PR against the task's base branch"
+    );
+    assert!(
         refs.contains("pr_url"),
         "references/pr.md must still say the PR URL goes to session_exit as pr_url"
     );

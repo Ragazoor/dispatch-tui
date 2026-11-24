@@ -80,12 +80,9 @@ rule StartPullRequest {
         url: null,
         stage: scoping
     )
-    -- observable output; no rule listens
-    ensures: PullRequestAnnounced(branch: branch)
 
     @guidance
-        -- The skill opens with the sentence "I'm using the pull-request
-        -- skill for this PR." A repo's own PR template or the PR rules a
+        -- A repo's own PR template or the PR rules a
         -- task gives come first; the skill fills the gaps they leave
         -- (RepoRulesComeFirst).
 }
@@ -131,8 +128,9 @@ rule CreatePullRequest {
     ensures: work.stage = open
 
     @guidance
-        -- The agent pushes the branch and creates the PR, as a draft unless
-        -- told otherwise, with the body in a heredoc. A rejected push stops
+        -- The agent pushes the branch and creates the PR against
+        -- base_branch, as a draft unless told otherwise, with the body in a
+        -- heredoc (OpensAgainstTheBaseBranch). A rejected push stops
         -- the work (NeverForcePushes). A PR that already exists for the
         -- branch is reused (ReusesAnExistingPr).
 }
@@ -199,7 +197,8 @@ surface PullRequestSession {
 
     @guarantee TitleIsOneAction
         -- The title names one change in the imperative, at most 72
-        -- characters, and reads well in git log --oneline. It names the
+        -- characters, in the repo's commit style, and reads well in
+        -- git log --oneline. It names the
         -- change, not the task (WriteTitleAndBody).
 
     @guarantee OpeningCarriesThePr
@@ -235,6 +234,11 @@ surface PullRequestSession {
         -- body, out of GitHub's rendered preview. The attribution footer the
         -- harness requires stays last (WriteTitleAndBody).
 
+    @guarantee OpensAgainstTheBaseBranch
+        -- The PR is opened against the branch the work merges into, which
+        -- is not always the repo default, and from the branch in the origin
+        -- repo, not the agent's own namespace (CreatePullRequest).
+
     @guarantee NeverForcePushes
         -- A rejected push stops the work and goes to the user; the agent
         -- never force-pushes without the user's say (CreatePullRequest).
@@ -245,7 +249,8 @@ surface PullRequestSession {
 
     @guarantee KeepsItCurrent
         -- After later pushes the agent rereads the title and body against
-        -- the new diff and edits them where a line is no longer true. The
+        -- the new diff, edits them where a line is no longer true and adds
+        -- what a reviewer must now not miss. The
         -- body describes the PR as it is now, not a log of review rounds
         -- (BranchMovedAfterOpen).
 }

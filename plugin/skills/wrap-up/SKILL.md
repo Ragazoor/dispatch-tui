@@ -10,7 +10,7 @@ choose the action → `/retro` → verify (rebase and pr only) → commit → `s
 `session_wrap-up` refuses an uncommitted worktree but does not run the verify command: you do, in Step 6. `session_exit` is mandatory on every path: without it the task does not move and the session does not close.
 
 - **rebase** — dispatch rebases and fast-forwards `{base_branch}`; `session_exit` marks the task Done and kills your tmux window.
-- **pr** — you do it; read `references/pr.md` when this path is chosen. Write a real title and body from the diff and run `gh pr create --draft`.
+- **pr** — you do it; read `references/pr.md` when this path is chosen. Write a real title and body from the diff, with the `pull-request` skill that file names, and open a draft PR.
 - **done** — no git operations. For research, planning, or work already on `{base_branch}`.
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
