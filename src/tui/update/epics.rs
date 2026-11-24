@@ -208,10 +208,17 @@ impl App {
 
     pub(in crate::tui) fn handle_edit_epic(&mut self, id: EpicId) -> Vec<Command> {
         if let Some(epic) = self.board.epics.iter().find(|e| e.id == id) {
+            let switch = self
+                .board
+                .orchestration
+                .orchestration_of(id)
+                .cloned()
+                .map(Box::new);
             vec![Command::Editor(
-                crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(Box::new(
-                    epic.clone(),
-                ))),
+                crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(
+                    Box::new(epic.clone()),
+                    switch,
+                )),
             )]
         } else {
             vec![]

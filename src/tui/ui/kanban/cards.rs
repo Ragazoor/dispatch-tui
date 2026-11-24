@@ -602,6 +602,19 @@ fn frame_card(
     ]
 }
 
+/// The ready marker a backlog card's indicator line carries
+/// (`board-visuals.allium`, "Ready marker"): a real mark only.
+fn ready_marker(task: &Task, app: &App) -> Option<String> {
+    if task.status != TaskStatus::Backlog {
+        return None;
+    }
+    let mark = app.board.orchestration.ready_mark(task.id)?;
+    Some(match mark.agent_name.as_deref() {
+        Some(agent) => format!(" \u{2713} ready \u{00b7} {agent}"),
+        None => " \u{2713} ready".to_string(),
+    })
+}
+
 /// The marker a task's title line carries for its phoenix flag, or `""`.
 fn phoenix_marker(task: &Task) -> &'static str {
     if task.phoenix {
@@ -760,7 +773,12 @@ pub(super) fn build_task_list_item<'a>(
     // Read the severity off the indicator before it is consumed, so the border and
     // the glyph beneath it come from one classification rather than two.
     let state_border = state_border_color(&indicator);
-    let line2 = render_card_indicator(indicator, &task.labels);
+    let mut line2 = render_card_indicator(indicator, &task.labels);
+    if let Some(marker) = ready_marker(task, app) {
+        line2
+            .spans
+            .insert(2, Span::styled(marker, Style::default().fg(CYAN)));
+    }
 
     // Precedence: cursor, then state, then neutral (`board-visuals.allium`: "Selection").
     //

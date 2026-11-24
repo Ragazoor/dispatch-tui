@@ -235,6 +235,12 @@ impl TuiRuntime {
         id: models::EpicId,
         new_parent: Option<models::EpicId>,
     ) {
+        let moved = crate::store::switches_a_move_turns_off(&*self.database, id, new_parent).await;
+        let before = self
+            .board_reads
+            .get_epic(id)
+            .await
+            .map(|e| e.parent_epic_id);
         self.exec_patch_epic(
             app,
             crate::service::UpdateEpicParams {
@@ -244,6 +250,21 @@ impl TuiRuntime {
             "reparenting epic",
         )
         .await;
+        // The reply names the switches the move turned off
+        // (ReparentEpicFromTui), once the move is known to have landed.
+        let landed = self
+            .board_reads
+            .get_epic(id)
+            .await
+            .map(|e| e.parent_epic_id);
+        if let Some((above, off)) = moved.filter(|(_, off)| !off.is_empty()) {
+            if landed == Some(new_parent) && landed != before {
+                let lines = crate::store::switched_off_lines(above, &off);
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(lines.join(" ")),
+                ));
+            }
+        }
         // Refresh so the board reflects the new hierarchy.
         self.exec_refresh_epics_from_db(app).await;
     }

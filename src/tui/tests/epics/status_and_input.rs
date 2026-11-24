@@ -116,7 +116,7 @@ fn e_key_in_epic_view_edits_epic() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
     assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e))) if e.id == EpicId(10))
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e, _))) if e.id == EpicId(10))
     );
 }
 

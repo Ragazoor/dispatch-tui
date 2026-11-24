@@ -43,4 +43,19 @@ pub enum EpicCommand {
     /// `feeds.allium: OverrideFeedOwner`, fired after
     /// `ConfirmOverrideFeedOwner` accepts.
     OverrideFeedOwner(EpicId),
+    /// The ready key: the operator's mark on a backlog task, set or cleared.
+    SetReady {
+        task: crate::models::TaskId,
+        ready: bool,
+    },
+    /// "Start an orchestrator for this epic?" answered y.
+    SwitchOrchestratorOn(EpicId),
+    /// The orchestrator key on an orchestrator with no session: a fresh
+    /// restart, then the session and its window now.
+    RestartOrchestrator {
+        epic: EpicId,
+        id: i64,
+    },
+    /// "Resolve item #N?" answered y.
+    ResolveWaitingItem(i64),
 }

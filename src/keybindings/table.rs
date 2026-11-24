@@ -364,6 +364,18 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Open the selected task's URL (its pull request, once one is set) in a browser; reports `No URL set` when there is none",
     ),
     normal(
+        &["Y"],
+        Some(C::OnTaskCard),
+        "toggle_ready",
+        "Mark the backlog task ready for its epic's orchestrator to start, or clear the mark. A ready card says so, and names the agent when an agent marked it",
+    ),
+    normal(
+        &["O"],
+        None,
+        "open_orchestrator",
+        "Open the orchestrator's window: in an epic view, or on a task of an orchestrated epic. Starts its session first when it has none. In an epic nothing orchestrates, asks to switch one on",
+    ),
+    normal(
         &["b"],
         Some(C::OnTaskCard),
         "toggle_bookmark",
@@ -381,6 +393,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         Some(C::InsideEpicView),
         "toggle_group_by_repo",
         "Toggle group-by-repo for the epic you are inside",
+    ),
+    normal(
+        &["I"],
+        Some(C::InsideEpicView),
+        "resolve_waiting_item",
+        "Resolve the oldest item that waits for you in the epic's orchestrator header, after a confirmation",
     ),
     // ---- board.normal: filters, views, overlays ----
     normal(
@@ -1370,6 +1388,32 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &[ANY_OTHER_KEY],
         "confirm_delete_work_package_no",
         "Keep the work package",
+    ),
+    // ---- BoardConfirmStartOrchestrator ----
+    r(
+        N::BoardConfirmStartOrchestrator,
+        &["y", "Y"],
+        "confirm_start_orchestrator_yes",
+        "Switch an orchestrator on for the epic, with the default start rule and limit",
+    ),
+    r(
+        N::BoardConfirmStartOrchestrator,
+        &[ANY_OTHER_KEY],
+        "confirm_start_orchestrator_no",
+        "Leave the epic without an orchestrator",
+    ),
+    // ---- BoardConfirmResolveItem ----
+    r(
+        N::BoardConfirmResolveItem,
+        &["y", "Y"],
+        "confirm_resolve_item_yes",
+        "Resolve the item: it no longer waits for you",
+    ),
+    r(
+        N::BoardConfirmResolveItem,
+        &[ANY_OTHER_KEY],
+        "confirm_resolve_item_no",
+        "Keep the item open",
     ),
     // ---- board.key_editor ----
     r(

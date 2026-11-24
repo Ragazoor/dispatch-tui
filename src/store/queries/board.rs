@@ -29,4 +29,40 @@ impl crate::store::BoardReads for Store {
     async fn revision(&self) -> u64 {
         self.rows.generation()
     }
+
+    async fn orchestration_board(&self) -> crate::models::OrchestrationBoard {
+        use crate::sync::decode;
+        fn kept<R, T, E: std::fmt::Display>(
+            rows: Vec<R>,
+            decode: impl Fn(&R) -> Result<T, E>,
+        ) -> Vec<T> {
+            rows.iter()
+                .filter_map(|row| decode(row).map_err(|e| tracing::warn!("{e}")).ok())
+                .collect()
+        }
+        let orchestrations = kept(self.rows.epic_orchestrations(), decode::epic_orchestration);
+        let mut open_items: Vec<crate::models::WaitingItem> =
+            kept(self.rows.waiting_items(), decode::waiting_item)
+                .into_iter()
+                .filter(crate::models::WaitingItem::is_open)
+                .collect();
+        open_items.sort_by_key(|i| i.id);
+        let mut log: Vec<crate::models::OrchestratorLogEntry> =
+            kept(self.rows.orchestrator_log(), decode::orchestrator_log_entry);
+        log.sort_by_key(|e| std::cmp::Reverse(e.id));
+        let mut shown: std::collections::HashMap<crate::models::EpicId, usize> =
+            std::collections::HashMap::new();
+        log.retain(|e| {
+            let n = shown.entry(e.epic_id).or_default();
+            *n += 1;
+            *n <= crate::models::ORCHESTRATOR_LOG_SHOWN
+        });
+        crate::models::OrchestrationBoard {
+            orchestrations,
+            orchestrators: kept(self.rows.orchestrators(), decode::orchestrator),
+            open_items,
+            log,
+            ready_marks: kept(self.rows.ready_marks(), decode::ready_mark),
+        }
+    }
 }

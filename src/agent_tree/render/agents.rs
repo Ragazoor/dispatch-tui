@@ -18,12 +18,38 @@ use ratatui::Frame;
 use crate::agent_tree::keys::KeyAction;
 use crate::agent_tree::list_cursor::ListCursor;
 use crate::hooks::wire::PaneEpic;
-use crate::models::{TaskId, TmuxWindow};
+use crate::models::{EpicId, TaskId, TmuxWindow};
+
+/// What a row is the agent of, and what the cursor follows it by: a task, or
+/// the orchestrator of an epic, which has no task id
+/// (`OrchestratorLeadsItsEpicGroup`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentRowId {
+    Task(TaskId),
+    Orchestrator(EpicId),
+}
+
+impl AgentRowId {
+    /// The task, for a task agent's row.
+    pub fn task(self) -> Option<TaskId> {
+        match self {
+            Self::Task(id) => Some(id),
+            Self::Orchestrator(_) => None,
+        }
+    }
+}
+
+/// A task id matches only a task agent's row.
+impl PartialEq<TaskId> for AgentRowId {
+    fn eq(&self, other: &TaskId) -> bool {
+        self.task() == Some(*other)
+    }
+}
 
 /// One listed agent, as its row draws it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentRow {
-    pub id: TaskId,
+    pub id: AgentRowId,
     pub title: String,
     /// The word the row leads with, the task's display name; empty before the
     /// backfill has named it, and the row then leads with its title alone.
@@ -187,7 +213,7 @@ impl AgentsSection {
         let row = self.selected().filter(|row| !row.is_own)?;
         Some(match &row.window {
             Some(window) => KeyAction::JumpTo(window.clone()),
-            None => KeyAction::Resume(row.id),
+            None => KeyAction::Resume(row.id.task()?),
         })
     }
 }
@@ -262,8 +288,9 @@ fn epic_groups(rows: &[AgentRow]) -> (Vec<crate::models::EpicId>, Vec<Vec<crate:
 }
 
 /// Order `rows` as the section draws them: the epic groups in compact tree
-/// order, siblings by epic id, each group's agents by task id, then the
-/// epicless agents by task id (RefreshAgentTreeAgentList's grouped_by_epic).
+/// order, siblings by epic id, each group's orchestrator first and then its
+/// agents by task id, then the epicless agents by task id
+/// (RefreshAgentTreeAgentList's grouped_by_epic, OrchestratorLeadsItsEpicGroup).
 pub(crate) fn order_rows(rows: &mut [AgentRow]) {
     let (ids, full) = epic_groups(rows);
     let tree = crate::epic_tree::CompactTree::build(&full, |e| e.0);
@@ -275,7 +302,7 @@ pub(crate) fn order_rows(rows: &mut [AgentRow]) {
     }
     rows.sort_by_key(|row| {
         let place = row.epic.as_ref().and_then(|e| rank.get(&e.id).copied());
-        (place.is_none(), place, row.id)
+        (place.is_none(), place, row.id.task())
     });
 }
 
@@ -361,11 +388,30 @@ pub(crate) fn border_style(focused: bool, alert: bool) -> Style {
     }
 }
 
+/// The word an orchestrator's row carries after its name
+/// (`OrchestratorLeadsItsEpicGroup`).
+pub(crate) const ORCHESTRATOR_MARK: &str = "orchestrator";
+
+/// An orchestrator's row: it has a window, never a title or the pane's own
+/// task, and sits in its epic's group.
+pub(crate) fn orchestrator_row(
+    orchestrator: crate::hooks::wire::PaneOrchestrator,
+) -> Option<AgentRow> {
+    Some(AgentRow {
+        id: AgentRowId::Orchestrator(orchestrator.epic.id),
+        title: String::new(),
+        window: Some(TmuxWindow::parse(&orchestrator.tmux_window)?),
+        agent_name: orchestrator.name,
+        is_own: false,
+        epic: Some(orchestrator.epic),
+    })
+}
+
 /// A listed agent for tests: `#<id> task <id>`, window `task-<id>`.
 #[cfg(test)]
 pub(crate) fn test_row(id: i64, own: bool) -> AgentRow {
     AgentRow {
-        id: TaskId(id),
+        id: AgentRowId::Task(TaskId(id)),
         title: format!("task {id}"),
         agent_name: String::new(),
         window: Some(crate::models::test_tmux_window(&format!("task-{id}"))),
@@ -504,6 +550,12 @@ pub fn render_agents(
             let indent = paths.get(index).and_then(Option::as_ref).map_or(0, |p| {
                 crate::epic_header::epic_indent(p.len().saturating_sub(1))
             });
+            if let AgentRowId::Orchestrator(_) = row.id {
+                return Some(Line::from(vec![
+                    Span::styled(format!("{:indent$}{dot} {} ", "", row.agent_name), style),
+                    Span::styled(ORCHESTRATOR_MARK, style.fg(MUTED)),
+                ]));
+            }
             let text = match row.lead() {
                 Some(name) => format!("{:indent$}{dot} {name} {}", "", row.title),
                 None => format!("{:indent$}{dot} {}", "", row.title),
@@ -907,6 +959,106 @@ mod tests {
         assert!(section.selected().is_none());
     }
 
+    // ---- OrchestratorLeadsItsEpicGroup / JumpToOrchestratorWindow --------
+
+    fn orchestrator_in(epic: i64, breadcrumb: &[&str]) -> AgentRow {
+        orchestrator_row(crate::hooks::wire::PaneOrchestrator {
+            name: "maple".into(),
+            tmux_window: format!("orch-{epic}"),
+            epic: test_pane_epic(epic, breadcrumb),
+        })
+        .expect("window parses")
+    }
+
+    #[test]
+    fn an_orchestrator_row_leads_its_group_above_lower_task_ids() {
+        let mut rows = vec![in_epic(1, 3, &["Three"]), orchestrator_in(3, &["Three"])];
+        order_rows(&mut rows);
+        let mut section = on_all();
+        section.set_rows(rows);
+        let out = rendered(&mut section, true, 6);
+        assert!(line_of(&out, "Three") < line_of(&out, "maple"), "{out}");
+        assert!(line_of(&out, "maple") < line_of(&out, "task 1"), "{out}");
+        assert!(out.contains("● maple orchestrator"), "{out}");
+    }
+
+    #[test]
+    fn an_orchestrator_alone_still_draws_its_group() {
+        let mut section = on_all();
+        section.set_rows(vec![orchestrator_in(3, &["Three"])]);
+        let out = rendered(&mut section, true, 5);
+        assert!(line_of(&out, "Three") < line_of(&out, "maple"), "{out}");
+    }
+
+    #[test]
+    fn the_orchestrator_mark_is_muted_and_its_name_is_not() {
+        use crate::palette::MUTED;
+        let mut section = on_all();
+        section.set_rows(vec![orchestrator_in(3, &["Three"])]);
+        let mut terminal = Terminal::new(TestBackend::new(40, 5)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                render_agents(
+                    frame,
+                    frame.area(),
+                    KEY_BINDINGS,
+                    &mut section,
+                    false,
+                    false,
+                    None,
+                )
+            })
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let out = crate::agent_tree::pane::buffer_to_string(buffer);
+        let line = out.lines().nth(2).expect("row line");
+        let name = line.find("maple").expect("name drawn") as u16;
+        let mark = line.find("orchestrator").expect("mark drawn") as u16;
+        assert_ne!(buffer[(name, 2)].fg, MUTED);
+        assert_eq!(buffer[(mark, 2)].fg, MUTED);
+    }
+
+    #[test]
+    fn the_running_filter_shows_an_orchestrator() {
+        let mut section = AgentsSection::new();
+        section.set_rows(vec![orchestrator_in(3, &["Three"])]);
+        assert_eq!(section.rows().len(), 1);
+    }
+
+    #[test]
+    fn space_on_an_orchestrator_jumps_to_its_window() {
+        let mut section = on_all();
+        section.set_rows(vec![orchestrator_in(3, &["Three"])]);
+        assert_eq!(
+            section.space_action(),
+            Some(KeyAction::JumpTo(test_tmux_window("orch-3")))
+        );
+    }
+
+    #[test]
+    fn the_cursor_stays_on_an_orchestrator_when_an_agent_starts_above_it() {
+        let mut section = on_all();
+        section.set_rows(vec![row(5, false), orchestrator_in(3, &["Three"])]);
+        section.down();
+        section.set_rows(vec![
+            row(1, false),
+            row(5, false),
+            orchestrator_in(3, &["Three"]),
+        ]);
+        assert_eq!(
+            section.selected().map(|r| r.id),
+            Some(AgentRowId::Orchestrator(crate::models::EpicId(3)))
+        );
+    }
+
+    #[test]
+    fn a_task_id_never_matches_an_orchestrator_row() {
+        assert_ne!(
+            AgentRowId::Orchestrator(crate::models::EpicId(3)),
+            TaskId(3)
+        );
+    }
+
     // ---- JumpToAgentWindow / ResumeDetachedAgentFromThePane --------------
 
     #[test]
@@ -1055,7 +1207,12 @@ mod tests {
         section.set_rows(vec![row(1, true), test_detached_row(2), row(3, false)]);
         section.cycle_filter();
         assert_eq!(section.filter(), AgentFilter::Running);
-        let shown: Vec<i64> = section.rows().iter().map(|r| r.id.0).collect();
+        let shown: Vec<i64> = section
+            .rows()
+            .iter()
+            .filter_map(|r| r.id.task())
+            .map(|t| t.0)
+            .collect();
         assert_eq!(shown, vec![1, 3]);
         assert_eq!(section.listed().len(), 3);
         section.cycle_filter();

@@ -151,6 +151,82 @@ pub struct ReadyMark {
     pub marked_at: DateTime<Utc>,
 }
 
+/// What the board draws of the orchestrators, read in one go with the rest
+/// of the board (`orchestrators.allium: OrchestratorInEpicView`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OrchestrationBoard {
+    pub orchestrations: Vec<EpicOrchestration>,
+    /// Every machine's.
+    pub orchestrators: Vec<Orchestrator>,
+    /// Every machine's, oldest first.
+    pub open_items: Vec<WaitingItem>,
+    /// The newest [`ORCHESTRATOR_LOG_SHOWN`] entries of each orchestrated
+    /// epic, newest first.
+    pub log: Vec<OrchestratorLogEntry>,
+    pub ready_marks: Vec<ReadyMark>,
+}
+
+impl OrchestrationBoard {
+    pub fn orchestration_of(&self, epic: EpicId) -> Option<&EpicOrchestration> {
+        self.orchestrations.iter().find(|o| o.epic_id == epic)
+    }
+
+    /// `covering(epic)`: the switch on `epic` or on its nearest ancestor,
+    /// with `parent_of` answering an epic's parent.
+    pub fn covering(
+        &self,
+        epic: Option<EpicId>,
+        parent_of: impl Fn(EpicId) -> Option<EpicId>,
+    ) -> Option<&EpicOrchestration> {
+        let mut next = epic;
+        for _ in 0..64 {
+            let id = next?;
+            if let Some(on) = self.orchestration_of(id) {
+                return Some(on);
+            }
+            next = parent_of(id);
+        }
+        None
+    }
+
+    /// `host`'s orchestrator of `epic`.
+    pub fn orchestrator_on(&self, epic: EpicId, host: &str) -> Option<&Orchestrator> {
+        self.orchestrators
+            .iter()
+            .find(|o| o.epic_id == epic && o.host == host)
+    }
+
+    pub fn ready_mark(&self, task: TaskId) -> Option<&ReadyMark> {
+        self.ready_marks.iter().find(|m| m.task_id == task)
+    }
+
+    /// The open items of `epic`, oldest first.
+    pub fn open_items_of(&self, epic: EpicId) -> Vec<&WaitingItem> {
+        open_items(&self.open_items, epic)
+    }
+
+    /// The log entries of `epic` this board read, newest first.
+    pub fn log_of(&self, epic: EpicId) -> Vec<&OrchestratorLogEntry> {
+        newest_first(&self.log, |e| e.epic_id == epic)
+    }
+}
+
+/// `orchestrators.allium: orchestrator_state`.
+pub fn orchestrator_state(o: &Orchestrator, subtree_tasks: &[&super::Task]) -> &'static str {
+    let open = subtree_tasks
+        .iter()
+        .any(|t| t.status != super::TaskStatus::Done);
+    let running_here = subtree_tasks.iter().any(|t| {
+        t.status == super::TaskStatus::Running && t.host.as_deref() == Some(o.host.as_str())
+    });
+    match (o.is_live(), open, running_here) {
+        (true, _, true) => "working",
+        (true, _, false) => "idle",
+        (false, false, _) => "resting",
+        (false, true, _) => "down",
+    }
+}
+
 /// `orchestrators.allium: config.orchestrator_log_shown`: how many log
 /// entries a read and the orchestrator's prompt show, newest first.
 pub const ORCHESTRATOR_LOG_SHOWN: usize = 10;

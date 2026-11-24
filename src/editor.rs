@@ -107,11 +107,27 @@ pub struct EpicEditorFields {
     /// Parsed seconds, or `None` if the section was empty or unparseable.
     /// Parse failures are recorded in `errors`.
     pub feed_interval_secs: Option<i64>,
+    /// ORCHESTRATOR: on or off; `None` when empty or unparseable, which
+    /// leaves the switch as it was.
+    pub orchestrator: Option<bool>,
+    /// START_RULE; `None` when empty or unparseable.
+    pub start_rule: Option<crate::models::StartRule>,
+    /// MAX_PARALLEL: `Some(None)` when empty (the default limit),
+    /// `Some(Some(n))` for a limit, `None` when unparseable.
+    pub max_parallel: Option<Option<i64>>,
     pub errors: Vec<EditorParseError>,
 }
 
 const DESCRIPTION_SECTIONS: &[&str] = &["DESCRIPTION"];
-const EPIC_SECTIONS: &[&str] = &["TITLE", "DESCRIPTION", "FEED_COMMAND", "FEED_INTERVAL_SECS"];
+const EPIC_SECTIONS: &[&str] = &[
+    "TITLE",
+    "DESCRIPTION",
+    "FEED_COMMAND",
+    "FEED_INTERVAL_SECS",
+    "ORCHESTRATOR",
+    "START_RULE",
+    "MAX_PARALLEL",
+];
 const TASK_SECTIONS: &[&str] = &[
     "TITLE",
     "DESCRIPTION",
@@ -239,15 +255,26 @@ pub fn parse_description_editor_output(input: &str) -> String {
     s.remove("DESCRIPTION").unwrap_or_default()
 }
 
-pub fn format_epic_for_editor(epic: &Epic) -> String {
+/// `switch` is the epic's own orchestrator switch, `None` when it has none
+/// (`epics.allium: EditEpic`, "The orchestrator section").
+pub fn format_epic_for_editor(
+    epic: &Epic,
+    switch: Option<&crate::models::EpicOrchestration>,
+) -> String {
     let feed_cmd = epic.feed_command.as_deref().unwrap_or("");
     let esc = |v: &str| escape_headers(v, EPIC_SECTIONS);
     let feed_interval = epic
         .feed_interval_secs
         .map(|n| n.to_string())
         .unwrap_or_default();
+    let on = if switch.is_some() { "on" } else { "off" };
+    let rule = switch.map_or(crate::models::StartRule::MarkedOnly, |s| s.start_rule);
+    let limit = switch
+        .and_then(|s| s.max_parallel)
+        .map(|n| n.to_string())
+        .unwrap_or_default();
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n",
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- FEED_COMMAND ---\n{}\n--- FEED_INTERVAL_SECS ---\n{}\n--- ORCHESTRATOR ---\n{on}\n--- START_RULE ---\n{rule}\n--- MAX_PARALLEL ---\n{limit}\n",
         esc(&epic.title),
         esc(&epic.description),
         esc(feed_cmd),
@@ -304,11 +331,45 @@ pub fn parse_epic_editor_output(input: &str) -> EpicEditorFields {
         interval_parse_failure_message,
         &mut errors,
     );
+    let orchestrator = parse_section(
+        single_line(s.remove("ORCHESTRATOR")),
+        "ORCHESTRATOR",
+        |raw| match raw {
+            "on" => Some(true),
+            "off" => Some(false),
+            _ => None,
+        },
+        |raw| format!("not on or off: {raw:?}"),
+        &mut errors,
+    );
+    let start_rule = parse_section(
+        single_line(s.remove("START_RULE")),
+        "START_RULE",
+        crate::models::StartRule::parse,
+        |raw| format!("unknown start rule: {raw:?} (valid: marked_only, everything)"),
+        &mut errors,
+    );
+    let limit = single_line(s.remove("MAX_PARALLEL"));
+    let max_parallel = if limit.is_empty() {
+        Some(None)
+    } else {
+        parse_section(
+            limit,
+            "MAX_PARALLEL",
+            |raw| raw.parse::<i64>().ok().filter(|n| *n >= 1),
+            |raw| format!("not a limit of at least 1: {raw:?}"),
+            &mut errors,
+        )
+        .map(Some)
+    };
     EpicEditorFields {
         title: single_line(s.remove("TITLE")),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
         feed_command: single_line(s.remove("FEED_COMMAND")),
         feed_interval_secs,
+        orchestrator,
+        start_rule,
+        max_parallel,
         errors,
     }
 }
@@ -472,6 +533,53 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
         url,
         resolved_url: desired_url,
         phoenix,
+    }
+}
+
+/// The switch write an epic editor save makes (`epics.allium: EditEpic`,
+/// "The orchestrator section").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrchestrationChange {
+    On {
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    },
+    Off,
+    /// A limit of `Some(0)` sets it back to the default.
+    Settings {
+        start_rule: Option<crate::models::StartRule>,
+        max_parallel: Option<i64>,
+    },
+}
+
+/// What the save's orchestrator section asks of `opened`, the epic's own
+/// switch as the editor opened it. `None` when it asks nothing.
+pub fn orchestration_change(
+    opened: Option<&crate::models::EpicOrchestration>,
+    fields: &EpicEditorFields,
+) -> Option<OrchestrationChange> {
+    let want_on = fields.orchestrator.unwrap_or(opened.is_some());
+    match (opened, want_on) {
+        (None, false) => None,
+        (Some(_), false) => Some(OrchestrationChange::Off),
+        (None, true) => Some(OrchestrationChange::On {
+            start_rule: fields.start_rule,
+            max_parallel: fields.max_parallel.flatten(),
+        }),
+        (Some(on), true) => {
+            let start_rule = fields.start_rule.filter(|r| *r != on.start_rule);
+            let max_parallel = match fields.max_parallel {
+                Some(None) => on.max_parallel.map(|_| 0),
+                Some(Some(n)) => Some(n).filter(|n| Some(*n) != on.max_parallel),
+                None => None,
+            };
+            (start_rule.is_some() || max_parallel.is_some()).then_some(
+                OrchestrationChange::Settings {
+                    start_rule,
+                    max_parallel,
+                },
+            )
+        }
     }
 }
 

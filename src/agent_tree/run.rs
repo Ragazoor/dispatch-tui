@@ -596,7 +596,7 @@ pub(crate) async fn read_agent_list(
         )
     })?;
     let row = |agent: crate::hooks::wire::PaneAgent, window: Option<TmuxWindow>| AgentRow {
-        id: agent.id,
+        id: crate::agent_tree::render::agents::AgentRowId::Task(agent.id),
         title: agent.title,
         agent_name: agent.agent_name,
         window,
@@ -613,7 +613,11 @@ pub(crate) async fn read_agent_list(
         .detached_agents
         .into_iter()
         .map(|agent| row(agent, None));
-    let mut rows: Vec<AgentRow> = live.chain(detached).collect();
+    let orchestrators = view
+        .orchestrators
+        .into_iter()
+        .filter_map(crate::agent_tree::render::agents::orchestrator_row);
+    let mut rows: Vec<AgentRow> = live.chain(detached).chain(orchestrators).collect();
     // Grouped by epic and laid out as the compact epic tree; epicless last,
     // tasks by id inside a group (RefreshAgentTreeAgentList's grouped_by_epic).
     crate::agent_tree::render::agents::order_rows(&mut rows);

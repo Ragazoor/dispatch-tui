@@ -4,6 +4,7 @@
 
 mod cards;
 mod columns;
+mod orchestrator_header;
 mod popups;
 mod status_bar;
 
@@ -260,16 +261,33 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let panel_h = input_panel_height(app, area.height);
+    // epics.allium: OrchestratorHeader, at most a third of the board's rows.
+    let board_rows = area.height.saturating_sub(3 + panel_h);
+    let header = orchestrator_header::orchestrator_header_lines(
+        app,
+        area.width,
+        usize::from(board_rows / 3),
+    );
+    let header_h = u16::try_from(header.len()).unwrap_or(0);
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints(vec![
-            Constraint::Length(1),       // top indicator bar
-            Constraint::Length(1),       // summary row
-            Constraint::Min(6),          // kanban board
-            Constraint::Length(panel_h), // input form
-            Constraint::Length(1),       // status bar
+            Constraint::Length(1),        // top indicator bar
+            Constraint::Length(1),        // summary row
+            Constraint::Length(header_h), // orchestrator header
+            Constraint::Min(6),           // kanban board
+            Constraint::Length(panel_h),  // input form
+            Constraint::Length(1),        // status bar
         ])
         .split(area);
+    let vertical = [
+        vertical[0],
+        vertical[1],
+        vertical[3],
+        vertical[4],
+        vertical[5],
+        vertical[2],
+    ];
 
     let epic_stats = app.cached_epic_stats();
     // Build the ColumnLayout once per frame (4 sorts total) so both
@@ -286,6 +304,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_columns(frame, app, cols_data);
     render_input_form_panel(frame, app, vertical[3]);
     render_status_bar(frame, app, vertical[4]);
+    frame.render_widget(Paragraph::new(header), vertical[5]);
 
     render_help_overlay(frame, app, area);
     render_board_filter_overlay(frame, app, area);
@@ -633,6 +652,7 @@ pub(in crate::tui) fn action_hints(
                 // first, not what the user is doing by pressing Space.
                 let (context, action) = space_row(C::BacklogTask, "dispatch_task");
                 bar.push(context, action, "Space", "dispatch");
+                bar.push(Some(C::OnTaskCard), "toggle_ready", "Y", "ready");
                 bar.push(None, "edit_task", "e", "edit");
                 bar.push(off_epic, "move_task_forward", "L", "move");
                 bar.push(None, "delete_task", "x", "done");

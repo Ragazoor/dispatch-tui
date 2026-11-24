@@ -1184,3 +1184,94 @@ async fn a_trouble_action_is_recorded_once_then_refused() {
         error_message(&plain)
     );
 }
+
+#[tokio::test]
+async fn a_limit_of_zero_sets_it_back_to_the_default() {
+    let state = test_state().await;
+    let e = epic(&state, "E", None).await;
+    ok_text(
+        &tool(
+            &state,
+            "epic_update",
+            json!({ "epic_id": e.0, "orchestrator": true, "max_parallel": 2 }),
+        )
+        .await,
+    );
+
+    ok_text(
+        &tool(
+            &state,
+            "epic_update",
+            json!({ "epic_id": e.0, "max_parallel": 0 }),
+        )
+        .await,
+    );
+
+    assert_eq!(
+        state.db.epic_orchestration(e).await.unwrap().max_parallel,
+        None
+    );
+}
+
+// -- orchestrator_restart --------------------------------------------------------
+
+/// mcp-task-tools.allium: RestartOrchestratorViaMcp.
+#[tokio::test]
+async fn the_restart_gives_a_down_orchestrator_of_this_machine_a_fresh_restart() {
+    let state = test_state().await;
+    let e = epic(&state, "E", None).await;
+    let sub = epic(&state, "Sub", Some(e)).await;
+    let elsewhere = epic(&state, "Elsewhere", None).await;
+    let refused = tool(&state, "orchestrator_restart", json!({ "epic_id": e.0 })).await;
+    assert!(
+        error_message(&refused).contains("no orchestrator covers"),
+        "{}",
+        error_message(&refused)
+    );
+
+    let db = state.db_write();
+    db.switch_orchestrator_on(e, None, None).await.unwrap();
+    let refused = tool(&state, "orchestrator_restart", json!({ "epic_id": e.0 })).await;
+    assert!(
+        error_message(&refused).contains("no orchestrator on this machine"),
+        "{}",
+        error_message(&refused)
+    );
+
+    let host = crate::store::HostStore::host_id(&*state.db).to_string();
+    db.ensure_orchestrator(e, &host).await.unwrap();
+    let id = state.db.list_orchestrators().await[0].id;
+    for _ in 0..2 {
+        db.start_orchestrator_session(id, &host, false)
+            .await
+            .unwrap();
+        db.end_orchestrator_session(id, &host, true).await.unwrap();
+    }
+    assert!(
+        db.start_orchestrator_session(id, &host, false)
+            .await
+            .is_err(),
+        "down"
+    );
+
+    let reply = ok_text(&tool(&state, "orchestrator_restart", json!({ "epic_id": sub.0 })).await);
+    assert!(reply.contains("Restarted orchestrator"), "{reply}");
+    assert!(!state.db.list_orchestrators().await[0].restarted_once);
+
+    db.start_orchestrator_session(id, &host, false)
+        .await
+        .unwrap();
+    let refused = tool(&state, "orchestrator_restart", json!({ "epic_id": e.0 })).await;
+    assert!(
+        error_message(&refused).contains("is running"),
+        "{}",
+        error_message(&refused)
+    );
+    let refused = tool(
+        &state,
+        "orchestrator_restart",
+        json!({ "epic_id": elsewhere.0 }),
+    )
+    .await;
+    assert!(is_error(&refused));
+}

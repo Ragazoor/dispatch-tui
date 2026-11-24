@@ -49,6 +49,8 @@ impl App {
             InputMode::KeyCapture => N::BoardKeyCapture,
             InputMode::ConfirmDiscardKeyEdits => N::BoardConfirmDiscardKeyEdits,
             InputMode::ConfirmDeleteWorkPackage(_) => N::BoardConfirmDeleteWorkPackage,
+            InputMode::ConfirmStartOrchestrator(_) => N::BoardConfirmStartOrchestrator,
+            InputMode::ConfirmResolveItem(_) => N::BoardConfirmResolveItem,
             InputMode::InputRepoPath => N::BoardPickerRepoPath,
             InputMode::InputBaseBranch => N::BoardPickerBaseBranch,
             InputMode::InputTag => N::BoardPickerTag,
@@ -424,7 +426,9 @@ impl App {
             | N::BoardConfirmDeleteRepoPath
             | N::BoardConfirmTrustRepo
             | N::BoardConfirmTrustRepoQuickDispatch
-            | N::BoardConfirmDeleteWorkPackage => self.run_confirm(action.ends_with("_yes"), label),
+            | N::BoardConfirmDeleteWorkPackage
+            | N::BoardConfirmStartOrchestrator
+            | N::BoardConfirmResolveItem => self.run_confirm(action.ends_with("_yes"), label),
             N::AgentTreeTree
             | N::AgentTreeCommits
             | N::AgentTreeAgents
@@ -634,6 +638,12 @@ impl App {
             }
             InputMode::ConfirmDeleteWorkPackage(id) => {
                 self.handle_key_confirm_delete_work_package(label, yes, id)
+            }
+            InputMode::ConfirmStartOrchestrator(epic) => {
+                self.handle_key_confirm_start_orchestrator(label, yes, epic)
+            }
+            InputMode::ConfirmResolveItem(item) => {
+                self.handle_key_confirm_resolve_item(label, yes, item)
             }
             _ => vec![],
         }

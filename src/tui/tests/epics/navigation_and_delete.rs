@@ -24,7 +24,7 @@ fn e_on_epic_opens_editor() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
     assert!(
-        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e))) if e.id == EpicId(10))
+        matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::EpicEdit(e, _))) if e.id == EpicId(10))
     );
 }
 

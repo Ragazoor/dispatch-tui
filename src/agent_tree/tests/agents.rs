@@ -73,7 +73,13 @@ fn agents_rig(rows: Vec<AgentRow>) -> KeyRig {
 }
 
 fn shown_ids(state: &RenderState) -> Vec<i64> {
-    state.agents.rows().iter().map(|row| row.id.0).collect()
+    state
+        .agents
+        .rows()
+        .iter()
+        .filter_map(|row| row.id.task())
+        .map(|id| id.0)
+        .collect()
 }
 
 /// ShowAgentTreePane: a fresh pane shows the running agents alone, and keeps
@@ -722,6 +728,7 @@ async fn detached_agents_are_listed_beside_attached_ones_without_a_window() {
         live_agents: vec![pane_agent(9), pane_agent(4)],
         detached_agents: vec![detached_pane_agent(6)],
         hidden_agents: 0,
+        orchestrators: vec![],
     }));
 
     let rows = read_agent_list(&board, TaskId(4))
@@ -756,6 +763,7 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
         task: None,
         detached_agents: vec![],
         hidden_agents: 0,
+        orchestrators: vec![],
         live_agents: vec![
             crate::hooks::wire::PaneAgent {
                 epic: Some(five.clone()),
@@ -780,7 +788,12 @@ async fn the_agent_list_groups_agents_by_epic_with_epicless_last() {
 
     let order: Vec<(i64, Option<crate::models::EpicId>)> = rows
         .iter()
-        .map(|row| (row.id.0, row.epic.as_ref().map(|e| e.id)))
+        .map(|row| {
+            (
+                row.id.task().map_or(0, |id| id.0),
+                row.epic.as_ref().map(|e| e.id),
+            )
+        })
         .collect();
     let (e3, e5) = (Some(three.id), Some(five.id));
     assert_eq!(order, vec![(7, e3), (2, e5), (9, e5), (4, None)]);
@@ -794,6 +807,7 @@ async fn the_boards_agent_name_reaches_the_agent_row() {
         task: None,
         detached_agents: vec![],
         hidden_agents: 0,
+        orchestrators: vec![],
         live_agents: vec![crate::hooks::wire::PaneAgent {
             agent_name: "scar".into(),
             ..pane_agent(9)
@@ -817,6 +831,7 @@ async fn the_agent_list_is_the_boards_live_agents_by_id_with_own_marked() {
         task: None,
         detached_agents: vec![],
         hidden_agents: 0,
+        orchestrators: vec![],
         live_agents: vec![pane_agent(9), pane_agent(4), pane_agent(7)],
     }));
 
@@ -866,6 +881,7 @@ async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
         task: None,
         detached_agents: vec![],
         hidden_agents: 0,
+        orchestrators: vec![],
         live_agents: vec![with(1, &twenty), with(2, &thirty), with(3, &ten)],
     }));
 
@@ -874,8 +890,53 @@ async fn the_agent_list_lays_its_groups_out_as_the_epic_tree() {
         .map(|list| list.rows)
         .unwrap();
 
-    let order: Vec<i64> = rows.iter().map(|row| row.id.0).collect();
+    let order: Vec<i64> = rows
+        .iter()
+        .filter_map(|row| row.id.task())
+        .map(|id| id.0)
+        .collect();
     assert_eq!(order, vec![1, 3, 2]);
+}
+
+/// OrchestratorLeadsItsEpicGroup: the board's orchestrators reach the list
+/// as rows leading their epic's group, an epic with no task agent included.
+#[tokio::test]
+async fn the_boards_orchestrators_lead_their_epic_groups() {
+    use crate::agent_tree::render::agents::AgentRowId;
+    let three = pane_epic(3, &["Three"]);
+    let five = pane_epic(5, &["Five"]);
+    let orchestrator = |epic: &crate::hooks::wire::PaneEpic| crate::hooks::wire::PaneOrchestrator {
+        name: format!("orch {}", epic.id.0),
+        tmux_window: format!("orch-{}", epic.id.0),
+        epic: epic.clone(),
+    };
+    let board = FakeBoard(Ok(crate::hooks::wire::PaneView {
+        task: None,
+        detached_agents: vec![],
+        hidden_agents: 0,
+        live_agents: vec![crate::hooks::wire::PaneAgent {
+            epic: Some(three.clone()),
+            ..pane_agent(1)
+        }],
+        orchestrators: vec![orchestrator(&five), orchestrator(&three)],
+    }));
+
+    let rows = read_agent_list(&board, TaskId(9))
+        .await
+        .map(|list| list.rows)
+        .unwrap();
+
+    let ids: Vec<AgentRowId> = rows.iter().map(|row| row.id).collect();
+    assert_eq!(
+        ids,
+        vec![
+            AgentRowId::Orchestrator(three.id),
+            AgentRowId::Task(TaskId(1)),
+            AgentRowId::Orchestrator(five.id),
+        ]
+    );
+    assert_eq!(rows[0].window, Some(test_tmux_window("orch-3")));
+    assert!(!rows[0].is_own);
 }
 
 // ---- the board's filter (agent-tree.allium: ListsFollowTheBoardFilter) ----
@@ -888,6 +949,7 @@ async fn the_agent_read_carries_the_boards_hidden_count() {
         live_agents: vec![pane_agent(4)],
         detached_agents: vec![],
         hidden_agents: 3,
+        orchestrators: vec![],
     }));
 
     let list = read_agent_list(&board, TaskId(4)).await.unwrap();
@@ -924,6 +986,7 @@ async fn the_agent_list_poller_sends_an_unchanged_list_again() {
         live_agents: vec![pane_agent(4)],
         detached_agents: vec![detached_pane_agent(6)],
         hidden_agents: 0,
+        orchestrators: vec![],
     })));
     let (reads, poller) =
         spawn_agent_list_poller(board, TaskId(4), std::time::Duration::from_millis(1));

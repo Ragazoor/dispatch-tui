@@ -141,6 +141,33 @@ pub(super) struct OrchestratorHost {
     /// (`plan_orchestrators`' `seen_here`).
     seen_here: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
     wakes: Arc<std::sync::Mutex<std::collections::HashMap<EpicId, WakeState>>>,
+    /// Where the board hears what a tick did (`NotifyEpicFinished`, an
+    /// open that found nothing to start). `None` in tests that do not
+    /// listen.
+    board: Option<tokio::sync::mpsc::UnboundedSender<crate::tui::Message>>,
+    opener: OrchestratorOpener,
+}
+
+/// The board's handle on the runner: the orchestrator key asks for a
+/// session and its window now (`OrchestratorKey`), not at the next check.
+#[derive(Clone, Default)]
+pub(super) struct OrchestratorOpener {
+    now: Arc<tokio::sync::Notify>,
+    /// The epics whose window is switched to once their session starts.
+    open: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
+}
+
+impl OrchestratorOpener {
+    /// Run the next check now, and switch to `epic`'s window if it starts
+    /// its session.
+    pub(super) fn open_after_start(&self, epic: EpicId) {
+        self.pending().insert(epic);
+        self.now.notify_one();
+    }
+
+    fn pending(&self) -> std::sync::MutexGuard<'_, BTreeSet<EpicId>> {
+        self.open.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 impl OrchestratorHost {
@@ -159,6 +186,27 @@ impl OrchestratorHost {
             emb_svc,
             seen_here: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
             wakes: Arc::default(),
+            board: None,
+            opener: OrchestratorOpener::default(),
+        }
+    }
+
+    /// Tell the board what the ticks do.
+    pub(super) fn reporting_to(
+        mut self,
+        board: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
+    ) -> Self {
+        self.board = Some(board);
+        self
+    }
+
+    pub(super) fn opener(&self) -> OrchestratorOpener {
+        self.opener.clone()
+    }
+
+    fn tell_board(&self, message: crate::tui::Message) {
+        if let Some(board) = &self.board {
+            let _ = board.send(message);
         }
     }
 
@@ -167,8 +215,12 @@ impl OrchestratorHost {
     pub(super) fn start(self, every: Duration) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut clock = tokio::time::interval(every);
+            let now = self.opener.now.clone();
             loop {
-                clock.tick().await;
+                tokio::select! {
+                    _ = clock.tick() => {}
+                    () = now.notified() => {}
+                }
                 self.tick().await;
             }
         })
@@ -245,6 +297,18 @@ impl OrchestratorHost {
             .collect();
         if !live.is_empty() {
             self.wake_live(&host, &live, &epics, &tasks, now).await;
+        }
+        let unopened = std::mem::take(&mut *self.opener.pending());
+        for epic in unopened {
+            let title = epics
+                .iter()
+                .find(|e| e.id == epic)
+                .map_or_else(|| format!("epic {}", epic.0), |e| e.title.clone());
+            self.tell_board(crate::tui::Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(format!(
+                    "The orchestrator of {title} did not start: its epic has no open work"
+                )),
+            ));
         }
     }
 
@@ -391,6 +455,16 @@ impl OrchestratorHost {
             OrchestratorAction::Start(o) => {
                 self.start_session(host, &o, epics, orchestrations, tasks)
                     .await;
+                if self.opener.pending().remove(&o.epic_id) {
+                    let runner = self.runner.clone();
+                    let window = TmuxWindow::for_orchestrator(o.epic_id);
+                    let shown =
+                        tokio::task::spawn_blocking(move || tmux::select_window(&window, &*runner))
+                            .await;
+                    if !matches!(shown, Ok(Ok(()))) {
+                        tracing::warn!(orchestrator = %o.name, "could not switch to the orchestrator's window");
+                    }
+                }
             }
             OrchestratorAction::End(o) => {
                 if let Some(window) = o.tmux_window.clone() {
@@ -400,6 +474,15 @@ impl OrchestratorHost {
                 }
                 if let Err(e) = db.end_orchestrator_session(o.id, host, false).await {
                     tracing::warn!(orchestrator = %o.name, "could not end the orchestrator's session: {e:#}");
+                    return;
+                }
+                let done = epics
+                    .iter()
+                    .any(|e| e.id == o.epic_id && e.status == TaskStatus::Done);
+                if done {
+                    self.tell_board(crate::tui::Message::Epic(
+                        crate::tui::messages::EpicMessage::EpicFinished(o.epic_id),
+                    ));
                 }
             }
             OrchestratorAction::GiveUp(o) => {
@@ -822,13 +905,27 @@ mod tests {
         );
         let tmp = tempfile::tempdir().unwrap();
         let claude_json = tmp.path().join(".claude.json");
+        let (board, mut heard) = tokio::sync::mpsc::unbounded_channel();
         let host = OrchestratorHost::new(
             db.clone(),
             runner.clone(),
             tmp.path().join("data"),
             claude_json,
             crate::embeddings::EmbeddingService::new_noop(),
-        );
+        )
+        .reporting_to(board);
+        let finished = |heard: &mut tokio::sync::mpsc::UnboundedReceiver<crate::tui::Message>| {
+            std::iter::from_fn(|| heard.try_recv().ok())
+                .filter(|m| {
+                    matches!(
+                        m,
+                        crate::tui::Message::Epic(crate::tui::messages::EpicMessage::EpicFinished(
+                            _
+                        ))
+                    )
+                })
+                .count()
+        };
 
         host.tick().await;
         let rows = db.list_orchestrators().await;
@@ -865,10 +962,13 @@ mod tests {
             runner.flattened_calls()
         );
 
+        assert_eq!(finished(&mut heard), 0, "not before the session ends");
         db.record_orchestrator_summary(&row.name, "delivered the step")
             .await
             .unwrap();
         host.tick().await;
+        // NotifyEpicFinished: the board hears of the finish once.
+        assert_eq!(finished(&mut heard), 1);
         let row = db.list_orchestrators().await.remove(0);
         assert!(!row.is_live());
         assert!(!row.session_died, "the board ended it");
@@ -951,6 +1051,89 @@ mod tests {
 
         host.tick().await;
         assert_eq!(typed(&runner).len(), 2, "a quiet tick types nothing");
+    }
+
+    /// orchestrators.allium: OrchestratorKey — the board asks for the session
+    /// now, and its window is switched to once it starts.
+    #[tokio::test]
+    async fn an_open_starts_the_session_and_switches_to_its_window() {
+        let db = crate::runtime::tests::test_db().await;
+        let epic = db.create_epic("E", "", None).await.unwrap();
+        db.switch_orchestrator_on(epic.id, None, None)
+            .await
+            .unwrap();
+        db.create_task(crate::models::CreateTaskRequest {
+            epic_id: Some(epic.id),
+            ..crate::models::CreateTaskRequest::fixture("t", "/repo")
+        })
+        .await
+        .unwrap();
+        let host_id = crate::store::HostStore::host_id(&*db).to_string();
+        db.ensure_orchestrator(epic.id, &host_id).await.unwrap();
+        let runner = Arc::new(MockProcessRunner::new(vec![
+            // The plan's listing, the launch's two window checks, the new
+            // window, then the switch to it.
+            listing(""),
+            listing(""),
+            listing(""),
+            MockProcessRunner::ok(),
+            MockProcessRunner::ok(),
+        ]));
+        let tmp = tempfile::tempdir().unwrap();
+        let host = OrchestratorHost::new(
+            db.clone(),
+            runner.clone(),
+            tmp.path().join("data"),
+            tmp.path().join(".claude.json"),
+            crate::embeddings::EmbeddingService::new_noop(),
+        );
+
+        host.opener().open_after_start(epic.id);
+        host.tick().await;
+
+        let calls = runner.flattened_calls();
+        assert!(
+            calls.iter().any(|c| c.contains("select-window")),
+            "{calls:?}"
+        );
+        assert!(host.opener().pending().is_empty());
+    }
+
+    /// An open that finds nothing to start says so to the board.
+    #[tokio::test]
+    async fn an_open_with_no_open_work_tells_the_board() {
+        let db = crate::runtime::tests::test_db().await;
+        let epic = db.create_epic("Quiet", "", None).await.unwrap();
+        db.switch_orchestrator_on(epic.id, None, None)
+            .await
+            .unwrap();
+        let runner = Arc::new(MockProcessRunner::new(vec![listing("")]));
+        let tmp = tempfile::tempdir().unwrap();
+        let (board, mut heard) = tokio::sync::mpsc::unbounded_channel();
+        let host = OrchestratorHost::new(
+            db.clone(),
+            runner,
+            tmp.path().join("data"),
+            tmp.path().join(".claude.json"),
+            crate::embeddings::EmbeddingService::new_noop(),
+        )
+        .reporting_to(board);
+
+        host.opener().open_after_start(epic.id);
+        host.tick().await;
+
+        let said: Vec<String> = std::iter::from_fn(|| heard.try_recv().ok())
+            .filter_map(|m| match m {
+                crate::tui::Message::System(crate::tui::messages::SystemMessage::StatusInfo(s)) => {
+                    Some(s)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            said.iter().any(|s| s.contains("Quiet did not start")),
+            "{said:?}"
+        );
     }
 
     /// orchestrators.allium: OrchestratorThatKeepsDyingWaitsForTheOperator.

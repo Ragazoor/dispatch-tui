@@ -355,6 +355,10 @@ async fn dispatch_epic(
         RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
         Reparent { id, new_parent } => rt.exec_reparent_epic(app, id, new_parent).await,
         OverrideFeedOwner(id) => rt.exec_override_feed_owner(app, id).await,
+        SetReady { task, ready } => rt.exec_set_ready(app, task, ready).await,
+        SwitchOrchestratorOn(epic) => rt.exec_switch_orchestrator_on(app, epic).await,
+        RestartOrchestrator { epic, id } => rt.exec_restart_orchestrator(app, epic, id).await,
+        ResolveWaitingItem(item) => rt.exec_resolve_waiting_item(app, item).await,
     }
 }
 

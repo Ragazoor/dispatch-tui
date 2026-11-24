@@ -535,6 +535,12 @@ fn apps_in(binding: &KeyBinding) -> Vec<App> {
         N::BoardConfirmDeleteWorkPackage => one(draft_app(InputMode::ConfirmDeleteWorkPackage(
             crate::models::WorkPackageId(1),
         ))),
+        N::BoardConfirmStartOrchestrator => {
+            let mut app = inside_epic_view();
+            app.input.mode = InputMode::ConfirmStartOrchestrator(EpicId(10));
+            one(app)
+        }
+        N::BoardConfirmResolveItem => one(draft_app(InputMode::ConfirmResolveItem(1))),
         N::BoardKeyEditor => one(key_editor_app(InputMode::KeyEditor)),
         N::BoardKeyEditorSearch => one(key_editor_app(InputMode::KeyEditorSearch)),
         N::BoardKeyCapture => one(key_editor_app(InputMode::KeyCapture)),
@@ -1007,7 +1013,7 @@ fn a_key_with_no_row_runs_nothing_and_records_nothing() {
 // Rebinding is an edit to one row (KeypressRunsItsRowsAction)
 // ---------------------------------------------------------------------------
 
-/// The real table with board.normal's delete_task row answering `O` instead
+/// The real table with board.normal's delete_task row answering `V` instead
 /// of `x`, and nothing else changed.
 fn table_with_delete_rebound_to_o() -> &'static [KeyBinding] {
     let rows: Vec<KeyBinding> = KEY_BINDINGS
@@ -1019,7 +1025,7 @@ fn table_with_delete_rebound_to_o() -> &'static [KeyBinding] {
                     &["x"],
                     "the fixture assumes x is delete_task's only key"
                 );
-                KeyBinding { keys: &["O"], ..*b }
+                KeyBinding { keys: &["V"], ..*b }
             } else {
                 *b
             }
@@ -1027,9 +1033,9 @@ fn table_with_delete_rebound_to_o() -> &'static [KeyBinding] {
         .collect();
     assert!(
         !rows.iter().any(|b| b.namespace == KeyNamespace::BoardNormal
-            && b.keys.contains(&"O")
+            && b.keys.contains(&"V")
             && b.action != "delete_task"),
-        "O must be free in board.normal for this fixture"
+        "V must be free in board.normal for this fixture"
     );
     Box::leak(rows.into_boxed_slice())
 }
@@ -1038,15 +1044,15 @@ fn table_with_delete_rebound_to_o() -> &'static [KeyBinding] {
 fn a_rebound_key_runs_the_rows_action() {
     let mut app = on_running_card(make_app());
     app.set_key_table(table_with_delete_rebound_to_o());
-    let cmds = press(&mut app, "O");
+    let cmds = press(&mut app, "V");
     assert_eq!(
         recorded(&cmds),
-        vec![("delete_task".to_string(), Some("O".to_string()))]
+        vec![("delete_task".to_string(), Some("V".to_string()))]
     );
     assert_eq!(
         app.input.mode,
         InputMode::ConfirmDone,
-        "O on a Running task runs delete_task, which asks to move it to Done"
+        "V on a Running task runs delete_task, which asks to move it to Done"
     );
 }
 
@@ -1081,7 +1087,7 @@ fn app_loaded_from(file: &str) -> (App, tempfile::TempDir) {
 }
 
 const DELETE_ON_O: &str =
-    r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]}]"#;
+    r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]}]"#;
 
 #[test]
 fn the_board_answers_a_key_from_the_override_file() {
@@ -1092,12 +1098,12 @@ fn the_board_answers_a_key_from_the_override_file() {
 
     let (mut app, _dir) = app_loaded_from(DELETE_ON_O);
     assert_eq!(app.error_popup(), None, "a good file reports nothing");
-    let cmds = press(&mut app, "O");
+    let cmds = press(&mut app, "V");
     assert_eq!(
         recorded(&cmds),
-        vec![("delete_task".to_string(), Some("O".to_string()))]
+        vec![("delete_task".to_string(), Some("V".to_string()))]
     );
-    assert_eq!(app.input.mode, InputMode::ConfirmDone, "O has x's effect");
+    assert_eq!(app.input.mode, InputMode::ConfirmDone, "V has x's effect");
 
     let (mut app, _dir) = app_loaded_from(DELETE_ON_O);
     let cmds = press(&mut app, "x");
@@ -1108,7 +1114,7 @@ fn the_board_answers_a_key_from_the_override_file() {
 #[test]
 fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
     let (mut app, dir) = app_loaded_from(
-        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["O"]},
+        r#"[{"namespace": "board.normal", "action": "delete_task", "keys": ["V"]},
             {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
     );
     let shown = app
@@ -1134,7 +1140,7 @@ fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
 
     press(&mut app, "q");
     assert_eq!(app.error_popup(), None, "any key dismisses the error");
-    press(&mut app, "O");
+    press(&mut app, "V");
     assert_eq!(
         app.input.mode,
         InputMode::ConfirmDone,
@@ -1147,7 +1153,7 @@ fn a_refused_entry_is_shown_and_the_rest_of_the_file_applies() {
 #[test]
 fn the_key_load_errors_fit_a_small_board() {
     let (mut app, _dir) = app_loaded_from(
-        r#"[{"namespace": "board.normal", "action": "jump_rope", "keys": ["O"]},
+        r#"[{"namespace": "board.normal", "action": "jump_rope", "keys": ["V"]},
             {"namespace": "board.normal", "action": "navigate_row_last", "keys": ["ctrl+e"]}]"#,
     );
     let buf = render_to_buffer(&mut app, 80, 24);
@@ -1167,7 +1173,7 @@ fn the_key_load_errors_fit_a_small_board() {
     let many: Vec<String> = (0..10)
         .map(|n| {
             format!(
-                r#"{{"namespace": "board.normal", "action": "no_such_action_{n}", "keys": ["O"]}}"#
+                r#"{{"namespace": "board.normal", "action": "no_such_action_{n}", "keys": ["V"]}}"#
             )
         })
         .collect();
@@ -1221,8 +1227,8 @@ fn the_default_table_is_key_bindings() {
     assert_eq!(app.input.mode, InputMode::ConfirmDone);
 
     let mut app = on_running_card(make_app());
-    let cmds = press(&mut app, "O");
-    assert!(cmds.is_empty(), "O has no row in the real table");
+    let cmds = press(&mut app, "V");
+    assert!(cmds.is_empty(), "V has no row in the real table");
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 

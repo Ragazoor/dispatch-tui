@@ -64,4 +64,9 @@ pub trait BoardReads:
     /// The tasks this person has not yet seen (`core.allium: UnseenTask`),
     /// ascending. Drives the board's new-task signal.
     async fn unseen_task_ids(&self) -> Vec<TaskId>;
+
+    /// The switches, the orchestrators, the open items, the newest log
+    /// entries and the ready marks (`orchestrators.allium:
+    /// OrchestratorInEpicView`). A row that does not decode is left out.
+    async fn orchestration_board(&self) -> crate::models::OrchestrationBoard;
 }

@@ -40,6 +40,13 @@ pub struct BoardState {
     /// Drives the bookmark mark (`board-visuals.allium`, "Bookmark"); an
     /// epic's mark is derived by [`BoardState::epic_marks`].
     pub(in crate::tui) bookmarked_tasks: HashSet<TaskId>,
+    /// The orchestrators and what they keep, as the latest board reload read
+    /// them (`orchestrators.allium: OrchestratorInEpicView`).
+    pub(in crate::tui) orchestration: crate::models::OrchestrationBoard,
+    /// The waiting items this board has seen open, so each notifies once
+    /// (`orchestrators.allium: EachOnItsOwnMachine`). `None` until the
+    /// first reload, whose open items are the baseline.
+    pub(in crate::tui) items_seen: Option<HashSet<i64>>,
 }
 
 /// The epics whose cards carry a derived mark, for one render pass

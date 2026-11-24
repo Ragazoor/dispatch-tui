@@ -88,7 +88,9 @@ pub enum EditKind {
     /// Full task editor (title/description/repo_path/status/plan/tag/base_branch).
     TaskEdit(Box<Task>),
     /// Full epic editor (title/description/repo_path).
-    EpicEdit(Box<Epic>),
+    /// The epic and its own orchestrator switch as the editor opened them
+    /// (`epics.allium: EditEpic`, "The orchestrator section").
+    EpicEdit(Box<Epic>, Option<Box<crate::models::EpicOrchestration>>),
     /// Description-only editor used during task/epic creation.
     /// `is_epic` distinguishes the epic-create flow from the task-create flow.
     Description { is_epic: bool },
@@ -358,6 +360,11 @@ pub enum InputMode {
     InputDisplayName,
     /// `x` on a package card: delete the package (its links only).
     ConfirmDeleteWorkPackage(crate::models::WorkPackageId),
+    /// The orchestrator key in the view of an epic nothing orchestrates
+    /// (`orchestrators.allium: OrchestratorKey`).
+    ConfirmStartOrchestrator(EpicId),
+    /// The resolve key on the oldest open item (`ResolveKey`).
+    ConfirmResolveItem(i64),
     /// The key editor (`keybindings.allium: KeyEditor`). Its state is
     /// `InputState::key_editor`, which the next three modes keep too.
     KeyEditor,

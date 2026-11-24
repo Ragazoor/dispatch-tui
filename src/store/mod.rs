@@ -654,6 +654,41 @@ pub async fn covering(
     None
 }
 
+/// `epics.allium: ReparentingKeepsOneOrchestratorOnAPath`, read before the
+/// move: the epic whose switch covers `new_parent`, with the switched-on
+/// epics of the moved subtree (`epic` included), which the move turns off.
+/// `None` when nothing covers `new_parent`.
+pub async fn switches_a_move_turns_off(
+    db: &dyn TaskReadStore,
+    epic: EpicId,
+    new_parent: Option<EpicId>,
+) -> Option<(EpicId, Vec<(EpicId, String)>)> {
+    let (above, _) = covering(db, new_parent).await?;
+    let epics = db.list_epics().await;
+    let subtree = crate::models::descendant_epic_ids(epic, &epics);
+    let mut off = Vec::new();
+    for e in epics.iter().filter(|e| subtree.contains(&e.id)) {
+        if db.epic_orchestration(e.id).await.is_some() {
+            off.push((e.id, e.title.clone()));
+        }
+    }
+    off.sort_unstable_by_key(|(id, _)| *id);
+    Some((above.id, off))
+}
+
+/// What a move says about the switches it turned off, one line each, in the
+/// words both the board and `epic_update` use.
+pub fn switched_off_lines(above: EpicId, off: &[(EpicId, String)]) -> Vec<String> {
+    off.iter()
+        .map(|(id, title)| {
+            format!(
+                "Switched off the orchestrator of epic {} ({title}): epic {} above it has one.",
+                id.0, above.0
+            )
+        })
+        .collect()
+}
+
 /// An orchestrated epic's orchestrator on each machine (`core.allium:
 /// Orchestrator`). Its rows touch no task or epic, so, like
 /// [`PollOwnershipStore`], the reads and the writes sit together on the

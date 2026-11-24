@@ -706,6 +706,20 @@ open items are on the epic's read.",
             "required": ["waiting_item_id"]
         };
 
+    async write "orchestrator_restart" => orchestrator_memory::handle_orchestrator_restart,
+        "Start an epic's orchestrator on this machine again when its session is down, the same \
+as the board's orchestrator key. Pass the orchestrated epic or any epic it covers. It gives the \
+orchestrator a fresh restart, and the board starts its session at its next check. A running \
+orchestrator, an epic no orchestrator covers and one with no orchestrator on this machine are \
+refused.",
+        {
+            "type": "object",
+            "properties": {
+                "epic_id": {"type": "integer", "description": "The orchestrated epic, or any epic below it"}
+            },
+            "required": ["epic_id"]
+        };
+
     async write "epic-note_create" => orchestrator_memory::handle_note_create,
         "Write a note for your epic: a to-do or a fact about the epic's work now, such as a \
 decision that binds later tasks or the next free version number. Only an epic's orchestrator \

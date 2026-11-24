@@ -1415,3 +1415,56 @@ mod store_address_record {
         assert!(target.managed().is_some());
     }
 }
+
+/// epics.allium: ReparentEpicFromTui — the board's move says which switches
+/// it turned off, as epic_update's reply does.
+mod reparent_switches {
+    use super::*;
+
+    #[tokio::test]
+    async fn a_move_under_an_orchestrated_epic_names_the_switch_it_turned_off() {
+        let db = test_db().await;
+        let above = db.create_epic("Above", "", None).await.unwrap();
+        let moved = db.create_epic("Moved", "", None).await.unwrap();
+        db.switch_orchestrator_on(above.id, None, None)
+            .await
+            .unwrap();
+        db.switch_orchestrator_on(moved.id, None, None)
+            .await
+            .unwrap();
+        let (rt, mut app) = test_runtime_over(db.clone()).await;
+
+        rt.exec_reparent_epic(&mut app, moved.id, Some(above.id))
+            .await;
+
+        let said = app.status_message().unwrap_or_default().to_string();
+        assert!(
+            said.contains(&format!(
+                "Switched off the orchestrator of epic {} (Moved): epic {} above it has one.",
+                moved.id.0, above.id.0
+            )),
+            "{said}"
+        );
+        assert!(db.epic_orchestration(moved.id).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_move_that_switches_nothing_off_says_nothing_of_it() {
+        let db = test_db().await;
+        let parent = db.create_epic("Parent", "", None).await.unwrap();
+        let moved = db.create_epic("Moved", "", None).await.unwrap();
+        db.switch_orchestrator_on(moved.id, None, None)
+            .await
+            .unwrap();
+        let (rt, mut app) = test_runtime_over(db.clone()).await;
+
+        rt.exec_reparent_epic(&mut app, moved.id, Some(parent.id))
+            .await;
+
+        assert!(!app
+            .status_message()
+            .unwrap_or_default()
+            .contains("Switched off"));
+        assert!(db.epic_orchestration(moved.id).await.is_some());
+    }
+}

@@ -181,6 +181,7 @@ fn view(task: Option<PaneTask>) -> FakeBoard {
             live_agents: vec![],
             detached_agents: vec![],
             hidden_agents: 0,
+            orchestrators: vec![],
         }),
     }
 }

@@ -980,6 +980,7 @@ impl TuiRuntime {
         // This host's dispatch requests, from the same read as the cards, so
         // DispatchingFeedback follows the row (dispatch.allium).
         let requests = db.dispatch_requests().await;
+        let orchestration = db.orchestration_board().await;
         let messages = vec![
             Message::Task(TaskMessage::Refresh(tasks)),
             Message::Task(TaskMessage::UnseenRefreshed(unseen)),
@@ -989,6 +990,7 @@ impl TuiRuntime {
             Message::RepoPathsUpdated(paths),
             Message::BaseBranchesUpdated(super::group_base_branches_by_repo(pairs)),
             Message::Task(TaskMessage::DispatchRequestsRefreshed(requests.clone())),
+            Message::Epic(EpicMessage::OrchestrationRefreshed(Box::new(orchestration))),
         ];
         (messages, requests)
     }

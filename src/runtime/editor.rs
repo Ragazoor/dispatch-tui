@@ -143,9 +143,9 @@ fn initial_content_for(kind: &EditKind) -> (String, String) {
             let content = format_editor_content(task);
             (prefix, content)
         }
-        EditKind::EpicEdit(epic) => {
+        EditKind::EpicEdit(epic, switch) => {
             let prefix = format!("epic-{}-", epic.id.0);
-            let content = format_epic_for_editor(epic);
+            let content = format_epic_for_editor(epic, switch.as_deref());
             (prefix, content)
         }
         EditKind::Description { .. } => (
@@ -323,7 +323,10 @@ impl TuiRuntime {
     ) -> Vec<Command> {
         match kind {
             EditKind::TaskEdit(task) => self.finalize_task_edit(app, *task, outcome).await,
-            EditKind::EpicEdit(epic) => self.finalize_epic_edit(app, *epic, outcome).await,
+            EditKind::EpicEdit(epic, switch) => {
+                self.finalize_epic_edit(app, *epic, switch.map(|s| *s), outcome)
+                    .await
+            }
             EditKind::Description { .. } => {
                 tracing::warn!("FinalizeEditorResult received Description kind; ignoring");
                 vec![]
@@ -457,6 +460,7 @@ impl TuiRuntime {
         &self,
         app: &mut App,
         epic: models::Epic,
+        switch: Option<models::EpicOrchestration>,
         outcome: EditorOutcome,
     ) -> Vec<Command> {
         let Some(text) = saved_text(outcome) else {
@@ -464,6 +468,7 @@ impl TuiRuntime {
         };
         let mut fields = parse_epic_editor_output(&text);
         let parse_errors = std::mem::take(&mut fields.errors);
+        let orchestration = crate::editor::orchestration_change(switch.as_ref(), &fields);
         let applied = apply_epic_editor_fields(&epic, fields);
 
         let epic_id = epic.id;
@@ -495,6 +500,9 @@ impl TuiRuntime {
         if params.updated_field_names().is_empty() {
             // Nothing sent: nothing changes on the board either.
             emit_parse_errors(app, &parse_errors);
+            if let Some(change) = orchestration {
+                self.write_orchestration_change(app, epic_id, change).await;
+            }
             return vec![];
         }
         if let Err(e) = self.epic_svc.update_epic(params).await {
@@ -512,6 +520,9 @@ impl TuiRuntime {
         let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
             edit,
         )));
+        if let Some(change) = orchestration {
+            self.write_orchestration_change(app, epic_id, change).await;
+        }
 
         // Take-over prompt (epics.allium: EditEpic, feeds.allium:
         // OverrideFeedOwner): only when this edit actually CHANGES
@@ -538,6 +549,44 @@ impl TuiRuntime {
             }
         }
         cmds
+    }
+}
+
+impl TuiRuntime {
+    /// The save's switch write, after the epic's other fields. A refusal is
+    /// reported and leaves them saved (`epics.allium: EditEpic`).
+    async fn write_orchestration_change(
+        &self,
+        app: &mut App,
+        epic: models::EpicId,
+        change: crate::editor::OrchestrationChange,
+    ) {
+        use crate::editor::OrchestrationChange as C;
+        let result = match change {
+            C::On {
+                start_rule,
+                max_parallel,
+            } => {
+                self.epic_svc
+                    .switch_orchestrator_on(epic, start_rule, max_parallel)
+                    .await
+            }
+            C::Off => self.epic_svc.switch_orchestrator_off(epic).await,
+            C::Settings {
+                start_rule,
+                max_parallel,
+            } => {
+                self.epic_svc
+                    .change_orchestrator_settings(epic, start_rule, max_parallel)
+                    .await
+            }
+        };
+        if let Err(e) = result {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("The orchestrator was not changed: {e}"),
+            )));
+        }
+        drop(self.spawn_refresh_from_db());
     }
 }
 

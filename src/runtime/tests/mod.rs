@@ -449,6 +449,7 @@ pub(super) async fn make_runtime(
         people_svc: Arc::new(crate::service::PeopleService::new(store.clone())),
         feed_runner: Some(feed_runner),
         orchestrator_host: None,
+        orchestrator_opener: Default::default(),
         feed_invalidate_tx,
         feed_sync_guard,
         learning_svc: Arc::new(crate::service::MockLearningService),

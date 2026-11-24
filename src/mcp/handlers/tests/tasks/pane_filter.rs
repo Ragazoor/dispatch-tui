@@ -155,3 +155,133 @@ async fn the_asking_panes_own_hidden_agent_is_left_out_but_its_task_is_answered(
     assert_eq!(view.hidden_agents, 1);
     assert!(view.task.is_some());
 }
+
+// -- agent-tree.allium: OrchestratorsAreThisMachinesLiveOnes ------------------
+
+/// An orchestrator of a fresh epic on this machine, its session started when
+/// `live`.
+async fn orchestrator_of(
+    state: &Arc<McpState>,
+    title: &str,
+    parent: Option<crate::models::EpicId>,
+    live: bool,
+) -> crate::models::Epic {
+    let epic = state
+        .db_write()
+        .create_epic(title, "", parent)
+        .await
+        .unwrap();
+    state
+        .db_write()
+        .switch_orchestrator_on(epic.id, None, None)
+        .await
+        .unwrap();
+    let host = state.db.host_id().to_string();
+    state.db.ensure_orchestrator(epic.id, &host).await.unwrap();
+    if live {
+        let row = state
+            .db
+            .list_orchestrators()
+            .await
+            .into_iter()
+            .find(|o| o.epic_id == epic.id)
+            .unwrap();
+        state
+            .db
+            .start_orchestrator_session(row.id, &host, false)
+            .await
+            .unwrap();
+    }
+    epic
+}
+
+#[tokio::test]
+async fn a_live_orchestrator_is_listed_with_its_epic_and_window() {
+    let state = test_state().await;
+    let root = state
+        .db_write()
+        .create_epic("Root", "", None)
+        .await
+        .unwrap();
+    let epic = orchestrator_of(&state, "Orchestrated", Some(root.id), true).await;
+    let own = create_running_task_with_window_in(&state, "/r", None).await;
+
+    let view = pane_view_for(&state, own).await;
+
+    assert_eq!(view.orchestrators.len(), 1, "{view:?}");
+    let listed = &view.orchestrators[0];
+    assert_eq!(listed.epic.id, epic.id);
+    assert_eq!(listed.epic.breadcrumb, vec!["Orchestrated".to_string()]);
+    assert_eq!(listed.epic.ancestors.len(), 1);
+    assert_eq!(
+        listed.tmux_window,
+        crate::models::TmuxWindow::for_orchestrator(epic.id).as_str()
+    );
+    assert!(!listed.name.is_empty());
+}
+
+#[tokio::test]
+async fn an_orchestrator_with_no_window_is_not_listed() {
+    let state = test_state().await;
+    orchestrator_of(&state, "Asleep", None, false).await;
+    let own = create_running_task_with_window_in(&state, "/r", None).await;
+
+    let view = pane_view_for(&state, own).await;
+
+    assert!(view.orchestrators.is_empty(), "{view:?}");
+}
+
+#[tokio::test]
+async fn an_orchestrator_of_a_hidden_epic_is_left_out_and_not_counted() {
+    let state = test_state().await;
+    let root = state
+        .db_write()
+        .create_epic("Root", "", None)
+        .await
+        .unwrap();
+    orchestrator_of(&state, "Under root", Some(root.id), true).await;
+    let own = create_running_task_with_window_in(&state, "/r", None).await;
+    save(&state, "hidden_epics", &format!("[{}]", root.id.0)).await;
+
+    let view = pane_view_for(&state, own).await;
+
+    assert!(view.orchestrators.is_empty(), "{view:?}");
+    assert_eq!(view.hidden_agents, 0);
+}
+
+#[tokio::test]
+async fn the_repo_filter_leaves_an_orchestrator_listed() {
+    let state = test_state().await;
+    orchestrator_of(&state, "Anywhere", None, true).await;
+    let own = create_running_task_with_window_in(&state, "/kept", None).await;
+    save(&state, "repo_filter", r#"["/kept"]"#).await;
+    save(&state, "repo_filter_mode", "include").await;
+
+    let view = pane_view_for(&state, own).await;
+
+    assert_eq!(view.orchestrators.len(), 1, "{view:?}");
+}
+
+#[test]
+fn another_machines_orchestrator_is_not_listed() {
+    let orchestrator = |host: &str, epic: i64| crate::models::Orchestrator {
+        id: epic,
+        epic_id: crate::models::EpicId(epic),
+        host: host.to_string(),
+        name: format!("orch {epic}"),
+        tmux_window: Some(crate::models::TmuxWindow::for_orchestrator(
+            crate::models::EpicId(epic),
+        )),
+        started_at: None,
+        restarted_once: false,
+        session_died: false,
+        last_turn_at: None,
+    };
+    let listed = crate::mcp::handlers::hooks::listed_orchestrators(
+        vec![orchestrator("here", 1), orchestrator("there", 2)],
+        "here",
+        &std::collections::HashSet::new(),
+    );
+    let epics: Vec<_> = listed.iter().map(|(_, o)| o.epic_id.0).collect();
+    assert_eq!(epics, vec![1]);
+}

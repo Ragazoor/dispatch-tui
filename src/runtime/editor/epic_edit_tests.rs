@@ -31,7 +31,7 @@ async fn a_refused_epic_edit_emits_no_edited_message_and_writes_nothing() {
     let epic = db.create_epic("Original", "", None).await.unwrap();
 
     let commands = rt
-        .finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "10"))
+        .finalize_epic_edit(&mut app, epic.clone(), None, saved("Renamed", "10"))
         .await;
 
     assert!(
@@ -60,7 +60,7 @@ async fn an_epic_edit_at_the_floor_is_applied() {
     let (db, rt, mut app) = runtime_and_app().await;
     let epic = db.create_epic("Original", "", None).await.unwrap();
 
-    rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, saved("Renamed", "60"))
         .await;
 
     let after = db.get_epic(epic.id).await.unwrap();
@@ -87,7 +87,7 @@ async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
     let rt = super::tests::editor_runtime_on_host(db.clone(), runner, tx, "this-host");
     let mut app = App::new(vec![]);
 
-    rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, saved("Renamed", "60"))
         .await;
 
     assert_eq!(
@@ -119,7 +119,7 @@ async fn changing_feed_command_when_this_host_already_owns_it_offers_no_takeover
     let rt = super::tests::editor_runtime_on_host(db.clone(), runner, tx, MEMORY_HOST_ID);
     let mut app = App::new(vec![]);
 
-    rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, saved("Renamed", "60"))
         .await;
 
     assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
@@ -150,7 +150,7 @@ async fn resubmitting_the_same_feed_command_offers_no_takeover() {
 
     // Same FEED_COMMAND value the epic already carries — only the title
     // is genuinely new.
-    rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, saved("Renamed", "60"))
         .await;
 
     assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
@@ -183,7 +183,8 @@ async fn clearing_feed_command_offers_no_takeover() {
              --- FEED_INTERVAL_SECS ---\n60\n"
             .to_string(),
     );
-    rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, outcome)
+        .await;
 
     assert_eq!(
         db.get_epic(epic.id).await.unwrap().feed_command,
@@ -213,6 +214,7 @@ async fn an_epic_edit_writes_only_the_fields_the_user_changed() {
     rt.finalize_epic_edit(
         &mut app,
         snapshot.clone(),
+        None,
         EditorOutcome::Saved(text.into()),
     )
     .await;
@@ -238,7 +240,8 @@ async fn a_refused_epic_edit_does_not_report_its_parse_errors_as_accepted() {
          --- FEED_INTERVAL_SECS ---\nsideways\n"
             .to_string(),
     );
-    rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, outcome)
+        .await;
 
     assert!(app.error_popup().is_some(), "the refusal is reported");
     assert!(
@@ -260,7 +263,8 @@ async fn an_accepted_epic_edit_reports_its_parse_errors() {
          --- FEED_INTERVAL_SECS ---\nsideways\n"
             .to_string(),
     );
-    rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+    rt.finalize_epic_edit(&mut app, epic.clone(), None, outcome)
+        .await;
 
     assert_eq!(db.get_epic(epic.id).await.unwrap().title, "Renamed");
     assert!(
@@ -289,7 +293,7 @@ async fn an_accepted_epic_edit_keeps_newer_board_data_it_did_not_send() {
          --- FEED_INTERVAL_SECS ---\n\n"
             .to_string(),
     );
-    rt.finalize_epic_edit(&mut app, opened.clone(), outcome)
+    rt.finalize_epic_edit(&mut app, opened.clone(), None, outcome)
         .await;
 
     let shown = app

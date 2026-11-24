@@ -22,6 +22,16 @@ pub enum EpicMessage {
     /// epic holding the work that puts the card there.
     JumpToDeepest(EpicId, crate::models::TaskStatus),
     Refresh(Vec<Epic>),
+    /// The orchestrators and what they keep, from the board reload.
+    OrchestrationRefreshed(Box<crate::models::OrchestrationBoard>),
+    /// The ready key on a task card (`orchestrators.allium: ReadyShowsOnTheCard`).
+    ToggleReady,
+    /// The orchestrator key (`OrchestratorKey`).
+    OpenOrchestrator,
+    /// The resolve key (`ResolveKey`).
+    ResolveItemKey,
+    /// This machine's orchestrator ended on a done epic (`NotifyEpicFinished`).
+    EpicFinished(EpicId),
     /// Splice a single fresh epic into `app.board.epics`.
     Updated(Box<Epic>),
     Created(Box<Epic>),
@@ -61,6 +71,13 @@ impl EpicMessage {
             EpicMessage::JumpTo(target) => app.handle_jump_to_epic(target),
             EpicMessage::JumpToDeepest(id, status) => app.handle_jump_to_deepest_epic(id, status),
             EpicMessage::Refresh(epics) => app.handle_refresh_epics(epics),
+            EpicMessage::OrchestrationRefreshed(board) => {
+                app.handle_orchestration_refreshed(*board)
+            }
+            EpicMessage::ToggleReady => app.handle_toggle_ready(),
+            EpicMessage::OpenOrchestrator => app.handle_open_orchestrator(),
+            EpicMessage::ResolveItemKey => app.handle_resolve_item_key(),
+            EpicMessage::EpicFinished(epic) => app.handle_epic_finished(epic),
             EpicMessage::Updated(epic) => app.handle_epic_updated(*epic),
             EpicMessage::Created(epic) => app.handle_epic_created(*epic),
             EpicMessage::Edit(id) => app.handle_edit_epic(id),

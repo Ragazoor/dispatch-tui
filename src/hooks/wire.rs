@@ -218,6 +218,21 @@ pub struct PaneView {
     /// Zero from a board that predates the filter, which left none out.
     #[serde(default)]
     pub hidden_agents: usize,
+    /// This machine's live orchestrators the epic hide-list admits
+    /// (`OrchestratorsAreThisMachinesLiveOnes`). Empty from a board that
+    /// predates them, and ignored by a pane that does.
+    #[serde(default)]
+    pub orchestrators: Vec<PaneOrchestrator>,
+}
+
+/// One listed orchestrator, as much as its row draws and jumps to
+/// (`agent-tree.allium: OrchestratorLeadsItsEpicGroup`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneOrchestrator {
+    pub name: String,
+    pub tmux_window: String,
+    /// The orchestrated epic, whose group the row leads.
+    pub epic: PaneEpic,
 }
 
 /// `agent-tree.allium`'s `PaneTask`.
@@ -328,6 +343,13 @@ mod pane_epic_tests {
     /// A board that predates the tree layout sends no ancestors; the pane
     /// then reads every group as top-level (agent-tree.allium:
     /// AgentListGroupsByEpic).
+    #[test]
+    fn a_pane_view_without_orchestrators_reads_as_none() {
+        let view: PaneView =
+            serde_json::from_str(r#"{"task":null,"live_agents":[]}"#).expect("parse");
+        assert!(view.orchestrators.is_empty());
+    }
+
     #[test]
     fn a_pane_epic_without_ancestors_reads_as_top_level() {
         let epic: PaneEpic =

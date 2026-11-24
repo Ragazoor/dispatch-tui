@@ -407,6 +407,8 @@ impl App {
                 work_package_links: Vec::new(),
                 unseen_tasks: HashSet::new(),
                 bookmarked_tasks: HashSet::new(),
+                orchestration: crate::models::OrchestrationBoard::default(),
+                items_seen: None,
             },
             status: StatusState::default(),
             should_quit: false,

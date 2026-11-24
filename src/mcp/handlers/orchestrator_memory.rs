@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
-    item_line, log_line, newest_first, note_line, notes_in_order, open_items, Epic, Orchestrator,
-    OrchestratorLogEntry, Task, TaskId, TaskStatus, ORCHESTRATOR_LOG_SHOWN as LOG_SHOWN,
+    item_line, log_line, newest_first, note_line, notes_in_order, open_items, orchestrator_state,
+    Epic, Orchestrator, OrchestratorLogEntry, Task, TaskId, ORCHESTRATOR_LOG_SHOWN as LOG_SHOWN,
 };
 
 use super::types::{
@@ -56,20 +56,6 @@ macro_rules! orchestrator_or_refuse {
             Err(why) => return JsonRpcResponse::err($id, INVALID_PARAMS, why),
         }
     };
-}
-
-/// `orchestrators.allium: orchestrator_state`.
-pub(crate) fn orchestrator_state(o: &Orchestrator, subtree_tasks: &[&Task]) -> &'static str {
-    let open = subtree_tasks.iter().any(|t| t.status != TaskStatus::Done);
-    let running_here = subtree_tasks
-        .iter()
-        .any(|t| t.status == TaskStatus::Running && t.host.as_deref() == Some(o.host.as_str()));
-    match (o.is_live(), open, running_here) {
-        (true, _, true) => "working",
-        (true, _, false) => "idle",
-        (false, false, _) => "resting",
-        (false, true, _) => "down",
-    }
 }
 
 /// The more-entries line a read ends on when it cut the log.
@@ -363,6 +349,75 @@ pub(super) async fn handle_item_resolve(
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct RestartArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    epic_id: i64,
+}
+
+/// `mcp-task-tools.allium: RestartOrchestratorViaMcp`.
+pub(super) async fn handle_orchestrator_restart(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let a = match parse_args::<RestartArgs>(&id, args) {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    let epic = crate::models::EpicId(a.epic_id);
+    let Some((covering, _)) = crate::store::covering(&*state.db, Some(epic)).await else {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            format!("no orchestrator covers epic {}", a.epic_id),
+        );
+    };
+    let host = crate::store::HostStore::host_id(&*state.db).to_string();
+    let Some(o) = state
+        .db
+        .list_orchestrators()
+        .await
+        .into_iter()
+        .find(|o| o.epic_id == covering.id && o.host == host)
+    else {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            format!(
+                "epic {} has no orchestrator on this machine yet; the board makes one once the epic has open work",
+                covering.id.0
+            ),
+        );
+    };
+    if o.is_live() {
+        return JsonRpcResponse::err(
+            id,
+            INVALID_PARAMS,
+            format!(
+                "orchestrator {} of epic {} is running; there is nothing to restart",
+                o.name, covering.id.0
+            ),
+        );
+    }
+    match state.db.restart_orchestrator(o.id, &host).await {
+        Ok(()) => {
+            state.notify_epic_changed(covering.id);
+            text(
+                id,
+                format!(
+                    "Restarted orchestrator {} of {}: the board starts its session at its next check.",
+                    o.name,
+                    covering.reference()
+                ),
+            )
+        }
+        Err(e) => write_err(id, e),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct NoteCreateArgs {
     text: String,
 }
@@ -507,6 +562,7 @@ pub(super) async fn handle_log_search(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::TaskStatus;
     use crate::models::{EpicId, TaskBuilder};
 
     fn row(live: bool) -> Orchestrator {

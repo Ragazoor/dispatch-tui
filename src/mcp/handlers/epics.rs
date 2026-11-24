@@ -379,7 +379,9 @@ pub(super) async fn handle_epic_update(
         return update_orchestration(state, id, parsed).await;
     }
     let moved = match parsed.parent_epic_id {
-        Some(new_parent) => switches_a_move_turns_off(state, parsed.epic_id, new_parent).await,
+        Some(new_parent) => {
+            crate::store::switches_a_move_turns_off(&*state.db, parsed.epic_id, new_parent).await
+        }
         None => None,
     };
 
@@ -416,36 +418,12 @@ pub(super) async fn handle_epic_update(
     let epic_ref = super::types::epic_ref(state, epic_id).await;
     let mut text = format!("{epic_ref} updated ({})", field_names.join(", "));
     if let Some((above, off)) = moved {
-        for (off_id, off_title) in off {
-            text.push_str(&format!(
-                "\nSwitched off the orchestrator of epic {} ({off_title}): epic {} above it has one.",
-                off_id.0, above.0
-            ));
+        for line in crate::store::switched_off_lines(above, &off) {
+            text.push('\n');
+            text.push_str(&line);
         }
     }
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
-}
-
-/// `epics.allium: ReparentingKeepsOneOrchestratorOnAPath`, read before the
-/// move: the epic whose switch covers `new_parent`, with the switched-on
-/// epics of the moved subtree (`epic_id` included), which the move turns
-/// off. `None` when nothing covers `new_parent`.
-async fn switches_a_move_turns_off(
-    state: &McpState,
-    epic_id: EpicId,
-    new_parent: Option<EpicId>,
-) -> Option<(EpicId, Vec<(EpicId, String)>)> {
-    let (above, _) = super::orchestration::covering(state, new_parent).await?;
-    let epics = state.db.list_epics().await;
-    let subtree = crate::models::descendant_epic_ids(epic_id, &epics);
-    let mut off = Vec::new();
-    for e in epics.iter().filter(|e| subtree.contains(&e.id)) {
-        if state.db.epic_orchestration(e.id).await.is_some() {
-            off.push((e.id, e.title.clone()));
-        }
-    }
-    off.sort_unstable_by_key(|(id, _)| *id);
-    Some((above.id, off))
 }
 
 /// `UpdateEpicViaMcp`'s orchestrator arguments: switch on, switch off, or

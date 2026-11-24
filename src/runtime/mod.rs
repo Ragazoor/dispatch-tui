@@ -760,6 +760,8 @@ struct TuiRuntime {
     /// The orchestrator runner (`orchestrators.allium:
     /// BoardRunsItsOrchestrators`), started beside the feed runner.
     orchestrator_host: Option<orchestrator_host::OrchestratorHost>,
+    /// Asks the runner for a session and its window now (`OrchestratorKey`).
+    orchestrator_opener: orchestrator_host::OrchestratorOpener,
     /// Fires the `FeedRunner`'s feed-command cache invalidation. Cloned from
     /// `feed_runner.epic_invalidate_tx()` at construction so both mutation-
     /// carrying MCP events (`Refresh` and `EpicChanged`) can reset the cache
@@ -840,6 +842,7 @@ mod keep_awake;
 mod learnings;
 mod orchestrator_host;
 mod orchestrator_wake;
+mod orchestrators;
 mod people;
 mod pr;
 mod session_host;
@@ -1085,6 +1088,14 @@ impl TuiRuntime {
         );
         let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
         let feed_sync_guard = feed_runner.sync_guard();
+        let orchestrators = orchestrator_host::OrchestratorHost::new(
+            database.clone(),
+            runner.clone(),
+            inputs.data_dir.to_path_buf(),
+            inputs.paths.claude_json_path.clone(),
+            emb_svc.clone(),
+        )
+        .reporting_to(msg_tx.clone());
         let runtime = TuiRuntime {
             task_svc: services.tasks,
             epic_svc: services.epics,
@@ -1092,13 +1103,8 @@ impl TuiRuntime {
             people_svc: services.people,
             learning_svc: services.learnings,
             feed_runner: Some(feed_runner),
-            orchestrator_host: Some(orchestrator_host::OrchestratorHost::new(
-                database.clone(),
-                runner.clone(),
-                inputs.data_dir.to_path_buf(),
-                inputs.paths.claude_json_path.clone(),
-                emb_svc.clone(),
-            )),
+            orchestrator_opener: orchestrators.opener(),
+            orchestrator_host: Some(orchestrators),
             feed_invalidate_tx,
             feed_sync_guard,
             feed_db: database.clone(),

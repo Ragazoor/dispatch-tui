@@ -318,6 +318,24 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             );
             hint_text(app, &fallback, RED)
         }
+        InputMode::ConfirmStartOrchestrator(_) => hint_text(
+            app,
+            &crate::tui::update::start_orchestrator_prompt(t),
+            YELLOW,
+        ),
+        InputMode::ConfirmResolveItem(id) => {
+            let fallback = app
+                .board
+                .orchestration
+                .open_items
+                .iter()
+                .find(|i| i.id == *id)
+                .map_or_else(
+                    || format!("Resolve item #{id}? {}", yes_no(N::BoardConfirmResolveItem)),
+                    |item| crate::tui::update::resolve_item_prompt(t, item),
+                );
+            hint_text(app, &fallback, YELLOW)
+        }
     }
 }
 
@@ -366,6 +384,29 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             }
         }
     };
+    if !app.has_selection() {
+        // orchestrators.allium: OrchestratorKey and ResolveKey, where they act.
+        let mut orch = HintBar::new(t, N::BoardNormal, key_color);
+        let view = app.current_epic_id();
+        let covered = app
+            .selected_task()
+            .and_then(|task| app.covering_epic(task.epic_id))
+            .or_else(|| app.covering_epic(view));
+        if covered.is_some() || view.is_some() {
+            orch.push(None, "open_orchestrator", "O", "orchestrator");
+        }
+        if let Some(epic) = view.and(covered) {
+            if !app.board.orchestration.open_items_of(epic).is_empty() {
+                orch.push(
+                    Some(crate::keybindings::KeyContext::InsideEpicView),
+                    "resolve_waiting_item",
+                    "I",
+                    "resolve",
+                );
+            }
+        }
+        prepend(&mut spans, orch.spans);
+    }
     if app.split_active() {
         let mut split = HintBar::new(t, N::BoardNormal, GREEN);
         split.push_styled(

@@ -17,7 +17,8 @@ use axum::{
 
 use crate::hooks::wire::{
     Answer, HookRequest, HookResponse, ObserveOutcome, ObservedEvent, OrchestratorEvent, PaneAgent,
-    PaneEpic, PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView, PaneViewRequest, Question,
+    PaneEpic, PaneOrchestrator, PaneResumeAnswer, PaneResumeRequest, PaneTask, PaneView,
+    PaneViewRequest, Question,
 };
 use crate::mcp::{trajectory, BackgroundWrite, McpState};
 use crate::models::{HookEventKind, TaskId, TaskStatus};
@@ -130,8 +131,11 @@ pub async fn handle_pane_view(
             worktree: task.worktree,
             base_branch: task.base_branch,
         });
-    let ((mut live_tasks, mut detached_tasks), epics) =
-        tokio::join!(state.db.list_agent_tasks(), state.db.list_epics());
+    let ((mut live_tasks, mut detached_tasks), epics, orchestrators) = tokio::join!(
+        state.db.list_agent_tasks(),
+        state.db.list_epics(),
+        state.db.list_orchestrators()
+    );
     let filter = crate::store::load_saved_board_filter(state.db.as_ref()).await;
     // The board's saved repo filter and epic hide-list narrow both lists, and
     // the answer says how many they left out (ListsFollowTheBoardFilter).
@@ -140,6 +144,7 @@ pub async fn handle_pane_view(
     live_tasks.retain(|t| filter.admits(t, &hidden));
     detached_tasks.retain(|t| filter.admits(t, &hidden));
     let hidden_agents = listed_before - live_tasks.len() - detached_tasks.len();
+    let orchestrators = listed_orchestrators(orchestrators, &state.host_id, &hidden);
     // Each epic once, however many of its agents are listed.
     let by_id = crate::models::epics::epic_id_lookup(&epics);
     let mut pane_epics: std::collections::HashMap<crate::models::EpicId, PaneEpic> =
@@ -148,6 +153,7 @@ pub async fn handle_pane_view(
         .iter()
         .chain(&detached_tasks)
         .filter_map(|task| task.epic_id)
+        .chain(orchestrators.iter().map(|(_, o)| o.epic_id))
     {
         if let (Some(epic), std::collections::hash_map::Entry::Vacant(slot)) =
             (by_id.get(&id), pane_epics.entry(id))
@@ -182,12 +188,39 @@ pub async fn handle_pane_view(
     let live_agents = live_tasks.into_iter().map(pane_agent).collect();
     // A detached agent has no window (DetachedIsTheBoardsOwnDefinition).
     let detached_agents = detached_tasks.into_iter().map(pane_agent).collect();
+    // An orchestrator of an epic the board does not hold has no group to lead.
+    let orchestrators = orchestrators
+        .into_iter()
+        .filter_map(|(window, o)| {
+            Some(PaneOrchestrator {
+                tmux_window: window.as_str().to_string(),
+                epic: pane_epics.get(&o.epic_id)?.clone(),
+                name: o.name,
+            })
+        })
+        .collect();
     Ok(Json(PaneView {
         task,
         live_agents,
         detached_agents,
         hidden_agents,
+        orchestrators,
     }))
+}
+
+/// `OrchestratorsAreThisMachinesLiveOnes` (`docs/specs/agent-tree.allium`):
+/// the orchestrators on `host` with a window, each with it, whose epic is not
+/// in `hidden` (the epic hide-list's closure). An orchestrator has no repo for
+/// the repo filter to judge.
+pub(super) fn listed_orchestrators(
+    all: Vec<crate::models::Orchestrator>,
+    host: &str,
+    hidden: &std::collections::HashSet<crate::models::EpicId>,
+) -> Vec<(crate::models::TmuxWindow, crate::models::Orchestrator)> {
+    all.into_iter()
+        .filter(|o| o.host == host && !hidden.contains(&o.epic_id))
+        .filter_map(|o| Some((o.tmux_window.clone()?, o)))
+        .collect()
 }
 
 /// `BoardPaneView.resume_agent` (`docs/specs/agent-tree.allium`): a companion

@@ -112,6 +112,8 @@ pub enum KeyNamespace {
     BoardConfirmTrustRepo,
     BoardConfirmTrustRepoQuickDispatch,
     BoardConfirmDeleteWorkPackage,
+    BoardConfirmStartOrchestrator,
+    BoardConfirmResolveItem,
     BoardKeyEditor,
     BoardKeyEditorSearch,
     BoardKeyCapture,
@@ -126,7 +128,7 @@ pub enum KeyNamespace {
 impl KeyNamespace {
     /// Every namespace, in the order the spec's enum lists them. This is the
     /// order `keybinding_search` and the help overlay group by.
-    pub const ALL: [KeyNamespace; 41] = [
+    pub const ALL: [KeyNamespace; 43] = [
         Self::BoardNormal,
         Self::BoardDetail,
         Self::BoardSearch,
@@ -159,6 +161,8 @@ impl KeyNamespace {
         Self::BoardConfirmTrustRepo,
         Self::BoardConfirmTrustRepoQuickDispatch,
         Self::BoardConfirmDeleteWorkPackage,
+        Self::BoardConfirmStartOrchestrator,
+        Self::BoardConfirmResolveItem,
         Self::BoardKeyEditor,
         Self::BoardKeyEditorSearch,
         Self::BoardKeyCapture,
@@ -205,6 +209,8 @@ impl KeyNamespace {
             Self::BoardConfirmTrustRepo => "board.confirm.trust_repo",
             Self::BoardConfirmTrustRepoQuickDispatch => "board.confirm.trust_repo_quick_dispatch",
             Self::BoardConfirmDeleteWorkPackage => "board.confirm.delete_work_package",
+            Self::BoardConfirmStartOrchestrator => "board.confirm.start_orchestrator",
+            Self::BoardConfirmResolveItem => "board.confirm.resolve_item",
             Self::BoardKeyEditor => "board.key_editor",
             Self::BoardKeyEditorSearch => "board.key_editor_search",
             Self::BoardKeyCapture => "board.key_capture",

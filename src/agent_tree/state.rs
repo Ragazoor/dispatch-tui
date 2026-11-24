@@ -318,7 +318,7 @@ impl RenderState {
             // row, since the answer can arrive after the user moved on — or
             // while the agents filter hides a row that is still listed.
             Ok(PaneResumeAnswer::Accepted) => {
-                let on_row = self.agents.selected().map(|row| row.id) == Some(task);
+                let on_row = self.agents.selected().is_some_and(|row| row.id == task);
                 let listed = self.agents.listed().iter().any(|row| row.id == task);
                 let shown = self.agents.rows().iter().any(|row| row.id == task);
                 self.pending_jump = (on_row || (listed && !shown)).then_some(task);
@@ -339,7 +339,7 @@ impl RenderState {
             return;
         };
         let shown = self.agents.rows().iter().any(|row| row.id == waiting);
-        if shown && self.agents.selected().map(|row| row.id) != Some(waiting) {
+        if shown && !self.agents.selected().is_some_and(|row| row.id == waiting) {
             self.pending_jump = None;
         }
     }

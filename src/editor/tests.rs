@@ -63,7 +63,7 @@ fn make_epic(title: &str, description: &str) -> Epic {
 #[test]
 fn epic_editor_roundtrip_basic() {
     let epic = make_epic("My Epic", "A description");
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.title, "My Epic");
     assert_eq!(fields.description, "A description");
@@ -72,7 +72,7 @@ fn epic_editor_roundtrip_basic() {
 #[test]
 fn epic_editor_roundtrip_multiline_description() {
     let epic = make_epic("Title", "Line 1\nLine 2\nLine 3");
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.description, "Line 1\nLine 2\nLine 3");
 }
@@ -80,7 +80,7 @@ fn epic_editor_roundtrip_multiline_description() {
 #[test]
 fn epic_editor_roundtrip_colons_in_title() {
     let epic = make_epic("Fix: auth system", "desc");
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.title, "Fix: auth system");
 }
@@ -344,7 +344,7 @@ fn description_header_line_survives_task_roundtrip() {
 fn description_header_line_survives_epic_roundtrip() {
     let desc = "x\n--- FEED_COMMAND ---\ny";
     let epic = make_epic("T", desc);
-    let fields = parse_epic_editor_output(&format_epic_for_editor(&epic));
+    let fields = parse_epic_editor_output(&format_epic_for_editor(&epic, None));
     assert_eq!(fields.description, desc);
     assert_eq!(fields.feed_command, "");
 }
@@ -941,7 +941,7 @@ fn epic_editor_feed_interval_rejects_zero() {
 #[test]
 fn apply_epic_editor_fields_roundtrip() {
     let epic = make_epic("E title", "E desc");
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     let applied = apply_epic_editor_fields(&epic, fields);
     assert_eq!(applied.title, epic.title);
@@ -968,7 +968,7 @@ fn apply_epic_empty_fields_preserve_prior() {
 fn epic_editor_includes_feed_command_section() {
     let mut epic = make_epic("T", "D");
     epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     assert!(content.contains("--- FEED_COMMAND ---"));
     assert!(content.contains("scripts/fetch-dependabot.sh"));
 }
@@ -977,7 +977,7 @@ fn epic_editor_includes_feed_command_section() {
 fn epic_editor_includes_feed_interval_section() {
     let mut epic = make_epic("T", "D");
     epic.feed_interval_secs = Some(FEED_INTERVAL_SLOW_SECS);
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     assert!(content.contains("--- FEED_INTERVAL_SECS ---"));
     assert!(content.contains("300"));
 }
@@ -986,7 +986,7 @@ fn epic_editor_includes_feed_interval_section() {
 fn epic_editor_roundtrip_feed_command_set() {
     let mut epic = make_epic("T", "D");
     epic.feed_command = Some("my-script.sh".into());
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.feed_command, "my-script.sh");
 }
@@ -994,7 +994,7 @@ fn epic_editor_roundtrip_feed_command_set() {
 #[test]
 fn epic_editor_roundtrip_feed_command_empty() {
     let epic = make_epic("T", "D");
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.feed_command, "");
 }
@@ -1003,7 +1003,7 @@ fn epic_editor_roundtrip_feed_command_empty() {
 fn epic_editor_roundtrip_feed_interval_set() {
     let mut epic = make_epic("T", "D");
     epic.feed_interval_secs = Some(FEED_INTERVAL_MED_SECS);
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     assert_eq!(fields.feed_interval_secs, Some(FEED_INTERVAL_MED_SECS));
     assert!(fields.errors.is_empty());
@@ -1026,6 +1026,9 @@ fn apply_epic_feed_command_set() {
         description: "D".into(),
         feed_command: "my-script.sh".into(),
         feed_interval_secs: None,
+        orchestrator: None,
+        start_rule: None,
+        max_parallel: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1045,6 +1048,9 @@ fn apply_epic_feed_command_clear() {
         description: "D".into(),
         feed_command: String::new(),
         feed_interval_secs: None,
+        orchestrator: None,
+        start_rule: None,
+        max_parallel: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1059,6 +1065,9 @@ fn apply_epic_feed_interval_valid() {
         description: "D".into(),
         feed_command: String::new(),
         feed_interval_secs: Some(FEED_INTERVAL_SLOW_SECS),
+        orchestrator: None,
+        start_rule: None,
+        max_parallel: None,
         errors: Vec::new(),
     };
     let applied = apply_epic_editor_fields(&epic, fields);
@@ -1070,7 +1079,7 @@ fn apply_epic_editor_fields_full_roundtrip() {
     let mut epic = make_epic("E title", "E desc");
     epic.feed_command = Some("scripts/fetch-dependabot.sh".into());
     epic.feed_interval_secs = Some(FEED_INTERVAL_FAST_SECS);
-    let content = format_epic_for_editor(&epic);
+    let content = format_epic_for_editor(&epic, None);
     let fields = parse_epic_editor_output(&content);
     let applied = apply_epic_editor_fields(&epic, fields);
     assert_eq!(applied.title, "E title");
@@ -1185,4 +1194,99 @@ fn epic_single_line_fields_are_trimmed() {
     assert_eq!(f.title, "E");
     assert_eq!(f.description, "  keep");
     assert_eq!(f.feed_command, "echo hi");
+}
+
+// -- the orchestrator section (epics.allium: EditEpic) ----------------------
+
+fn orchestration(
+    rule: crate::models::StartRule,
+    limit: Option<i64>,
+) -> crate::models::EpicOrchestration {
+    crate::models::EpicOrchestration {
+        epic_id: crate::models::EpicId(1),
+        start_rule: rule,
+        max_parallel: limit,
+        switched_on_at: chrono::Utc::now(),
+    }
+}
+
+fn section(on: &str, rule: &str, limit: &str) -> EpicEditorFields {
+    parse_epic_editor_output(&format!(
+        "--- TITLE ---\nT\n--- ORCHESTRATOR ---\n{on}\n--- START_RULE ---\n{rule}\n--- MAX_PARALLEL ---\n{limit}\n"
+    ))
+}
+
+#[test]
+fn the_editor_opens_with_the_switch_as_it_stands() {
+    let epic = make_epic("T", "D");
+    let off = format_epic_for_editor(&epic, None);
+    assert!(
+        off.contains(
+            "--- ORCHESTRATOR ---\noff\n--- START_RULE ---\nmarked_only\n--- MAX_PARALLEL ---\n\n"
+        ),
+        "{off}"
+    );
+
+    let on = orchestration(crate::models::StartRule::Everything, Some(2));
+    let fields = parse_epic_editor_output(&format_epic_for_editor(&epic, Some(&on)));
+    assert_eq!(fields.orchestrator, Some(true));
+    assert_eq!(
+        fields.start_rule,
+        Some(crate::models::StartRule::Everything)
+    );
+    assert_eq!(fields.max_parallel, Some(Some(2)));
+    assert!(fields.errors.is_empty());
+    assert_eq!(
+        orchestration_change(Some(&on), &fields),
+        None,
+        "an untouched section sends nothing"
+    );
+}
+
+#[test]
+fn switching_on_and_off_from_the_editor() {
+    assert_eq!(
+        orchestration_change(None, &section("on", "everything", "4")),
+        Some(OrchestrationChange::On {
+            start_rule: Some(crate::models::StartRule::Everything),
+            max_parallel: Some(4),
+        })
+    );
+    let on = orchestration(crate::models::StartRule::MarkedOnly, None);
+    assert_eq!(
+        orchestration_change(Some(&on), &section("off", "marked_only", "")),
+        Some(OrchestrationChange::Off)
+    );
+    assert_eq!(
+        orchestration_change(None, &section("off", "everything", "4")),
+        None
+    );
+}
+
+#[test]
+fn an_emptied_limit_goes_back_to_the_default_and_a_changed_rule_is_sent_alone() {
+    let on = orchestration(crate::models::StartRule::MarkedOnly, Some(2));
+    assert_eq!(
+        orchestration_change(Some(&on), &section("on", "marked_only", "")),
+        Some(OrchestrationChange::Settings {
+            start_rule: None,
+            max_parallel: Some(0),
+        })
+    );
+    assert_eq!(
+        orchestration_change(Some(&on), &section("on", "everything", "2")),
+        Some(OrchestrationChange::Settings {
+            start_rule: Some(crate::models::StartRule::Everything),
+            max_parallel: None,
+        })
+    );
+}
+
+#[test]
+fn an_unparseable_orchestrator_value_is_a_parse_error_and_leaves_the_switch() {
+    let on = orchestration(crate::models::StartRule::MarkedOnly, Some(2));
+    let fields = section("maybe", "sometimes", "0");
+    assert_eq!(fields.errors.len(), 3, "{:?}", fields.errors);
+    assert_eq!(orchestration_change(Some(&on), &fields), None);
+    assert_eq!(orchestration_change(None, &fields), None);
 }
