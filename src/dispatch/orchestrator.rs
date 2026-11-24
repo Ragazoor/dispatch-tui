@@ -40,9 +40,10 @@ pub struct OrchestratorLaunch<'a> {
     /// Claude Code's user-global configuration (`~/.claude.json`): where the
     /// dispatch MCP entry is read from and where the directory is trusted.
     pub claude_json: &'a Path,
-    /// Whether the conversation Claude Code keeps for the directory may be
-    /// continued. A session after one that died starts fresh.
-    pub may_resume: bool,
+    /// Whether to continue the conversation Claude Code keeps for the
+    /// directory: decided by the caller before the start is recorded
+    /// ([`holds_a_conversation`]), so the start's log entry says which it was.
+    pub resume: bool,
 }
 
 /// Open the orchestrator's window and start its session in it.
@@ -62,7 +63,7 @@ pub fn launch_orchestrator(
         super::trust_at(launch.claude_json, &dir)?;
     }
     let config = write_mcp_config(launch);
-    let resume = launch.may_resume && holds_a_conversation(launch.claude_json, launch.dir);
+    let resume = launch.resume;
     std::fs::write(launch.dir.join(PROMPT_FILE), launch.prompt)
         .with_context(|| format!("failed to write the prompt in {dir}"))?;
 
@@ -117,7 +118,7 @@ fn write_mcp_config(launch: &OrchestratorLaunch<'_>) -> Option<PathBuf> {
 /// `~/.claude/projects/<the directory with every character that is not a
 /// letter or a digit replaced by '-'>/`, one `.jsonl` file each; `--continue`
 /// with none there fails, which would end the session at once.
-fn holds_a_conversation(claude_json: &Path, dir: &Path) -> bool {
+pub fn holds_a_conversation(claude_json: &Path, dir: &Path) -> bool {
     let Some(home) = claude_json.parent() else {
         return false;
     };

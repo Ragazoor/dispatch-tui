@@ -42,7 +42,7 @@ fn row_on(store: &Store, epic: i64, host: &str) -> Orchestrator {
 }
 
 fn start(store: &Store, id: i64) -> Result<(), String> {
-    store.call("alice", |ctx| start_orchestrator_session(ctx, id, HOST.to_string()))
+    store.call("alice", |ctx| start_orchestrator_session(ctx, id, HOST.to_string(), false))
 }
 
 fn end(store: &Store, id: i64, died: bool) -> Result<(), String> {

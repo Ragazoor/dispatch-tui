@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub(super) struct StartOrchestratorSessionArgs {
     pub id: i64,
     pub host: String,
+    pub resumed: bool,
 }
 
 impl From<StartOrchestratorSessionArgs> for super::Reducer {
@@ -16,6 +17,7 @@ impl From<StartOrchestratorSessionArgs> for super::Reducer {
         Self::StartOrchestratorSession {
             id: args.id,
             host: args.host,
+            resumed: args.resumed,
         }
     }
 }
@@ -35,8 +37,13 @@ pub trait start_orchestrator_session {
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
     /// /// Use [`start_orchestrator_session:start_orchestrator_session_then`] to run a callback after the reducer completes.
-    fn start_orchestrator_session(&self, id: i64, host: String) -> __sdk::Result<()> {
-        self.start_orchestrator_session_then(id, host, |_, _| {})
+    fn start_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        resumed: bool,
+    ) -> __sdk::Result<()> {
+        self.start_orchestrator_session_then(id, host, resumed, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `start_orchestrator_session` to run as soon as possible,
@@ -49,6 +56,7 @@ pub trait start_orchestrator_session {
         &self,
         id: i64,
         host: String,
+        resumed: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -61,12 +69,15 @@ impl start_orchestrator_session for super::RemoteReducers {
         &self,
         id: i64,
         host: String,
+        resumed: bool,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(StartOrchestratorSessionArgs { id, host }, callback)
+        self.imp.invoke_reducer_with_callback(
+            StartOrchestratorSessionArgs { id, host, resumed },
+            callback,
+        )
     }
 }

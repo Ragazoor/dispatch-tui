@@ -72,6 +72,7 @@ fn store_task(ctx: &ReducerContext, row: Task) -> Result<Task, String> {
     if let Some(prior) = prior.as_ref() {
         end_marks_on_finish(ctx, prior, &row);
         drop_ready_mark_on_leaving_backlog(ctx, prior, &row);
+        resolve_items_on_finish(ctx, prior, &row);
     }
     if prior.is_some() {
         let row = ctx.db.tasks().id().update(row);
@@ -637,6 +638,7 @@ pub(crate) fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
     delete_agent_state_for(ctx, task_id);
     clear_task_marks(ctx, task_id);
     delete_ready_mark(ctx, task_id);
+    resolve_items_of_deleted_task(ctx, task_id);
     // agents.allium: AgentsGoWithTheirTask. That frees their names (A4).
     delete_agents_of(&mut AgentTables(ctx), task_id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_TASK, task_id);
@@ -1219,6 +1221,7 @@ pub(crate) fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     }
     ctx.db.epics().id().delete(id);
     delete_orchestration(ctx, id);
+    delete_orchestrator_memory(ctx, id);
     delete_work_package_links_to(ctx, WORK_PACKAGE_ITEM_EPIC, id);
 }
 

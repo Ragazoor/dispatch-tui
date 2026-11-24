@@ -10,12 +10,13 @@ use crate::spacetime::bindings::{
     OwnPackagesTableAccess as _, OwnSettingsTableAccess as _, OwnSubscriptionsTableAccess as _,
     OwnTasksTableAccess as _, OwnUnseenTasksTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, UserProfilesTableAccess as _, VisibleAgentsTableAccess as _,
-    VisibleDispatchRequestsTableAccess as _, VisibleEpicOrchestrationsTableAccess as _,
-    VisibleFeedRequestsTableAccess as _, VisibleLearningRetrievalsTableAccess as _,
-    VisibleLearningVerdictsTableAccess as _, VisibleLearningsTableAccess as _,
+    VisibleDispatchRequestsTableAccess as _, VisibleEpicNotesTableAccess as _,
+    VisibleEpicOrchestrationsTableAccess as _, VisibleFeedRequestsTableAccess as _,
+    VisibleLearningRetrievalsTableAccess as _, VisibleLearningVerdictsTableAccess as _,
+    VisibleLearningsTableAccess as _, VisibleOrchestratorLogTableAccess as _,
     VisibleOrchestratorsTableAccess as _, VisiblePollOwnersTableAccess as _,
     VisibleReadyMarksTableAccess as _, VisibleSessionRequestsTableAccess as _,
-    VisibleWorkPackageLinksTableAccess as _,
+    VisibleWaitingItemsTableAccess as _, VisibleWorkPackageLinksTableAccess as _,
 };
 
 // One table's three callbacks, so "every table gets all three" is
@@ -217,6 +218,27 @@ impl SpacetimeSdkConnector {
             visible_orchestrators,
             upsert_orchestrator,
             retire_orchestrator
+        );
+        wire_view!(
+            self,
+            db,
+            visible_orchestrator_log,
+            upsert_orchestrator_log_entry,
+            retire_orchestrator_log_entry
+        );
+        wire_view!(
+            self,
+            db,
+            visible_epic_notes,
+            upsert_epic_note,
+            retire_epic_note
+        );
+        wire_view!(
+            self,
+            db,
+            visible_waiting_items,
+            upsert_waiting_item,
+            retire_waiting_item
         );
         wire_view!(
             self,

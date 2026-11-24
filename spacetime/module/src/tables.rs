@@ -891,6 +891,64 @@ pub struct Orchestrator {
     pub last_turn_at: String,
 }
 
+/// One line of an orchestrated epic's log (`core.allium:
+/// OrchestratorLogEntry`). Append-only. Not in the snapshot
+/// (`spacetime-seed.allium`). `task_id` is `0` for none; every other
+/// optional column is `""` for absent.
+#[spacetimedb::table(accessor = orchestrator_log)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct OrchestratorLogEntry {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub epic_id: i64,
+    pub host: String,
+    pub at: String,
+    pub kind: String,
+    #[index(btree)]
+    pub task_id: i64,
+    pub text: String,
+    pub question: String,
+    pub trouble: String,
+}
+
+/// A note an epic's orchestrator keeps (`core.allium: EpicNote`). Not in the
+/// snapshot (`spacetime-seed.allium`).
+#[spacetimedb::table(accessor = epic_notes)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EpicNote {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub epic_id: i64,
+    pub text: String,
+    pub done: bool,
+    pub written_at: String,
+}
+
+/// Something that waits for the operator (`core.allium: WaitingItem`). Not
+/// in the snapshot (`spacetime-seed.allium`). `task_id` is `0` for an item
+/// about the epic as a whole; `resolved_at` is `""` while it is open.
+#[spacetimedb::table(accessor = waiting_items)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct WaitingItem {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub epic_id: i64,
+    pub host: String,
+    #[index(btree)]
+    pub task_id: i64,
+    pub about: String,
+    pub tried: String,
+    pub recommendation: String,
+    pub raised_at: String,
+    pub resolved_at: String,
+}
+
 /// The ready mark on a backlog task (`core.allium: ReadyMark`). Not in the
 /// snapshot (`spacetime-seed.allium`).
 #[spacetimedb::table(accessor = ready_marks)]

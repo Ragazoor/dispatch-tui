@@ -174,8 +174,68 @@ pub trait ReducerCaller: Send + Sync {
     /// `orchestrators.allium: BoardRunsItsOrchestrators`'s create, once per
     /// epic and host.
     async fn ensure_orchestrator(&self, epic: EpicId, host: String) -> Result<ReducerOutcome>;
-    /// `orchestrators.allium: StartOrchestratorSession`.
-    async fn start_orchestrator_session(&self, id: i64, host: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: StartOrchestratorSession`. `resumed` is whether
+    /// the board continues the conversation it last held, which the start's
+    /// log entry says.
+    async fn start_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        resumed: bool,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorStartsATask`: `RequestDispatch`
+    /// for orchestrator `name`, with its `started_task` log entry in the same
+    /// transaction. An applied call reads the request's id back, as
+    /// [`Self::request_dispatch`] does.
+    async fn orchestrator_request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        name: String,
+        reason: String,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorAnswersAnAgent`.
+    async fn record_orchestrator_answer(
+        &self,
+        name: String,
+        task: TaskId,
+        question: String,
+        answer: String,
+        reason: String,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorRecordsItsSummary`.
+    async fn record_orchestrator_summary(
+        &self,
+        name: String,
+        text: String,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorPassesOnToTheOperator`. `task` `0`
+    /// is the epic as a whole. An applied call reads the new item's id back.
+    async fn raise_waiting_item(
+        &self,
+        name: String,
+        task: i64,
+        about: String,
+        tried: String,
+        recommendation: String,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: OrchestratorThatKeepsDyingWaitsForTheOperator`.
+    async fn raise_orchestrator_down_item(&self, id: i64, host: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: WaitingItemResolved`.
+    async fn resolve_waiting_item(&self, id: i64) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: WriteEpicNote`. An applied call reads the new
+    /// note's id back.
+    async fn write_epic_note(&self, name: String, text: String) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: ChangeEpicNote`.
+    async fn change_epic_note(
+        &self,
+        name: String,
+        id: i64,
+        text: Option<String>,
+        done: Option<bool>,
+    ) -> Result<ReducerOutcome>;
+    /// `orchestrators.allium: RemoveEpicNote`.
+    async fn remove_epic_note(&self, name: String, id: i64) -> Result<ReducerOutcome>;
     /// `orchestrators.allium: EndOrchestratorSession` (`died` false) and
     /// `OrchestratorWindowGone` (`died` true).
     async fn end_orchestrator_session(

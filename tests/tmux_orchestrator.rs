@@ -66,7 +66,7 @@ fn launch_with(f: &Fixture, may_resume: bool) {
             dir: &f.dir,
             prompt: PROMPT,
             claude_json: &f.claude_json,
-            may_resume,
+            resume: may_resume && dispatch::holds_a_conversation(&f.claude_json, &f.dir),
         },
         &f.server.runner(),
     )

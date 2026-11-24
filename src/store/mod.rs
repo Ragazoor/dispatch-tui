@@ -437,6 +437,15 @@ pub trait DispatchRequestStore: DispatchRequestRead {
         origin: DispatchOrigin,
         mode: Option<DispatchMode>,
     ) -> Result<RequestDispatchAnswer>;
+    /// `orchestrators.allium: OrchestratorStartsATask`: `RequestDispatch` for
+    /// orchestrator `name`, with its reason written as the epic's log entry
+    /// in the same transaction.
+    async fn request_orchestrated_dispatch(
+        &self,
+        task: TaskId,
+        name: &str,
+        reason: &str,
+    ) -> Result<RequestDispatchAnswer>;
     /// `HostClaimsDispatch`. `false` is a refused claim — another board, or
     /// a redelivery, got it — and the caller provisions nothing.
     async fn claim_dispatch_request(&self, id: DispatchRequestId) -> Result<bool>;
@@ -639,8 +648,54 @@ pub trait OrchestratorStore: Send + Sync {
     async fn orchestrator_named(&self, name: &str) -> Option<crate::models::Orchestrator>;
     /// `BoardRunsItsOrchestrators`'s create, once per epic and host.
     async fn ensure_orchestrator(&self, epic: EpicId, host: &str) -> Result<()>;
-    /// `StartOrchestratorSession`.
-    async fn start_orchestrator_session(&self, id: i64, host: &str) -> Result<()>;
+    /// `StartOrchestratorSession`. `resumed`: the board continues the
+    /// conversation it last held for the epic.
+    async fn start_orchestrator_session(&self, id: i64, host: &str, resumed: bool) -> Result<()>;
+    /// Every log entry this board holds, every epic's, oldest first
+    /// (`core.allium: OrchestratorLogEntry`).
+    async fn list_orchestrator_log(&self) -> Vec<crate::models::OrchestratorLogEntry>;
+    /// Every epic note this board holds (`core.allium: EpicNote`).
+    async fn list_epic_notes(&self) -> Vec<crate::models::EpicNote>;
+    /// Every waiting item this board holds, open or resolved (`core.allium:
+    /// WaitingItem`).
+    async fn list_waiting_items(&self) -> Vec<crate::models::WaitingItem>;
+    /// `OrchestratorAnswersAnAgent`, for orchestrator `name`.
+    async fn record_orchestrator_answer(
+        &self,
+        name: &str,
+        task: TaskId,
+        question: &str,
+        answer: &str,
+        reason: &str,
+    ) -> Result<()>;
+    /// `OrchestratorRecordsItsSummary`, for orchestrator `name`.
+    async fn record_orchestrator_summary(&self, name: &str, text: &str) -> Result<()>;
+    /// `OrchestratorPassesOnToTheOperator`, for orchestrator `name`: the new
+    /// item's id. `None` is the epic as a whole.
+    async fn raise_waiting_item(
+        &self,
+        name: &str,
+        task: Option<TaskId>,
+        about: &str,
+        tried: &str,
+        recommendation: &str,
+    ) -> Result<i64>;
+    /// `OrchestratorThatKeepsDyingWaitsForTheOperator`.
+    async fn raise_orchestrator_down_item(&self, id: i64, host: &str) -> Result<()>;
+    /// `WaitingItemResolved`.
+    async fn resolve_waiting_item(&self, id: i64) -> Result<()>;
+    /// `WriteEpicNote`, for orchestrator `name`: the new note's id.
+    async fn write_epic_note(&self, name: &str, text: &str) -> Result<i64>;
+    /// `ChangeEpicNote`, for orchestrator `name`.
+    async fn change_epic_note(
+        &self,
+        name: &str,
+        id: i64,
+        text: Option<&str>,
+        done: Option<bool>,
+    ) -> Result<()>;
+    /// `RemoveEpicNote`, for orchestrator `name`.
+    async fn remove_epic_note(&self, name: &str, id: i64) -> Result<()>;
     /// `EndOrchestratorSession` (`died` false) and `OrchestratorWindowGone`
     /// (`died` true).
     async fn end_orchestrator_session(&self, id: i64, host: &str, died: bool) -> Result<()>;

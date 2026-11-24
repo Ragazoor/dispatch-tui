@@ -101,6 +101,30 @@ impl StoreReads for Tables {
     fn agent_named(&self, name: &str) -> bool {
         self.agents.values().any(|a| a.name == name)
     }
+    fn log_of_epic(&self, epic_id: i64) -> Vec<module::OrchestratorLogEntry> {
+        keep(self.orchestrator_log.values().cloned(), |e| {
+            e.epic_id == epic_id
+        })
+    }
+    fn note(&self, id: i64) -> Option<module::EpicNote> {
+        self.epic_notes.get(&id).cloned()
+    }
+    fn notes_of_epic(&self, epic_id: i64) -> Vec<module::EpicNote> {
+        keep(self.epic_notes.values().cloned(), |n| n.epic_id == epic_id)
+    }
+    fn waiting_item(&self, id: i64) -> Option<module::WaitingItem> {
+        self.waiting_items.get(&id).cloned()
+    }
+    fn items_of_epic(&self, epic_id: i64) -> Vec<module::WaitingItem> {
+        keep(self.waiting_items.values().cloned(), |i| {
+            i.epic_id == epic_id
+        })
+    }
+    fn items_of_task(&self, task_id: i64) -> Vec<module::WaitingItem> {
+        keep(self.waiting_items.values().cloned(), |i| {
+            i.task_id == task_id
+        })
+    }
     fn bookmarks_of(&self, subscriber: &str) -> Vec<module::Bookmark> {
         keep(self.bookmarks.values().cloned(), |b| {
             b.subscriber == subscriber
@@ -208,6 +232,18 @@ impl MemoryReducerCaller {
             "visible_orchestrators" => ids(module::orchestrators_of_held(t, who)
                 .iter()
                 .map(|o| o.id)
+                .collect()),
+            "visible_orchestrator_log" => ids(module::orchestrator_log_of_held(t, who)
+                .iter()
+                .map(|e| e.id)
+                .collect()),
+            "visible_epic_notes" => ids(module::epic_notes_of_held(t, who)
+                .iter()
+                .map(|n| n.id)
+                .collect()),
+            "visible_waiting_items" => ids(module::waiting_items_of_held(t, who)
+                .iter()
+                .map(|i| i.id)
                 .collect()),
             "own_bookmarks" => module::own_bookmarks_of(t, who)
                 .into_iter()

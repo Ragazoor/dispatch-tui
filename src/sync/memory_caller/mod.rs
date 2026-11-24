@@ -64,6 +64,7 @@ mod identity;
 mod learnings;
 mod orchestration;
 mod orchestrator;
+mod orchestrator_memory;
 mod pr_status;
 mod session_requests;
 mod tasks_epics;
@@ -123,6 +124,9 @@ struct Tables {
     epic_orchestrations: BTreeMap<i64, module::EpicOrchestration>,
     ready_marks: BTreeMap<i64, module::ReadyMark>,
     orchestrators: BTreeMap<i64, module::Orchestrator>,
+    orchestrator_log: BTreeMap<i64, module::OrchestratorLogEntry>,
+    epic_notes: BTreeMap<i64, module::EpicNote>,
+    waiting_items: BTreeMap<i64, module::WaitingItem>,
     user_profiles: BTreeMap<String, module::UserProfile>,
     settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
@@ -174,6 +178,9 @@ struct Tables {
     next_feed_request_id: i64,
     next_agent_id: i64,
     next_orchestrator_id: i64,
+    next_log_entry_id: i64,
+    next_epic_note_id: i64,
+    next_waiting_item_id: i64,
 }
 
 impl Tables {
@@ -195,6 +202,9 @@ impl Tables {
             next_feed_request_id: 1,
             next_agent_id: 1,
             next_orchestrator_id: 1,
+            next_log_entry_id: 1,
+            next_epic_note_id: 1,
+            next_waiting_item_id: 1,
             ..Self::default()
         }
     }
@@ -459,8 +469,79 @@ impl ReducerCaller for MemoryReducerCaller {
         self.apply_ensure_orchestrator(epic, host)
     }
 
-    async fn start_orchestrator_session(&self, id: i64, host: String) -> Result<ReducerOutcome> {
-        self.apply_start_orchestrator_session(id, host)
+    async fn start_orchestrator_session(
+        &self,
+        id: i64,
+        host: String,
+        resumed: bool,
+    ) -> Result<ReducerOutcome> {
+        self.apply_start_orchestrator_session(id, host, resumed)
+    }
+
+    async fn orchestrator_request_dispatch(
+        &self,
+        task: TaskId,
+        requester: String,
+        name: String,
+        reason: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_orchestrator_request_dispatch(task, requester, name, reason)
+    }
+
+    async fn record_orchestrator_answer(
+        &self,
+        name: String,
+        task: TaskId,
+        question: String,
+        answer: String,
+        reason: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_record_orchestrator_answer(name, task, question, answer, reason)
+    }
+
+    async fn record_orchestrator_summary(
+        &self,
+        name: String,
+        text: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_record_orchestrator_summary(name, text)
+    }
+
+    async fn raise_waiting_item(
+        &self,
+        name: String,
+        task: i64,
+        about: String,
+        tried: String,
+        recommendation: String,
+    ) -> Result<ReducerOutcome> {
+        self.apply_raise_waiting_item(name, task, about, tried, recommendation)
+    }
+
+    async fn raise_orchestrator_down_item(&self, id: i64, host: String) -> Result<ReducerOutcome> {
+        self.apply_raise_orchestrator_down_item(id, host)
+    }
+
+    async fn resolve_waiting_item(&self, id: i64) -> Result<ReducerOutcome> {
+        self.apply_resolve_waiting_item(id)
+    }
+
+    async fn write_epic_note(&self, name: String, text: String) -> Result<ReducerOutcome> {
+        self.apply_write_epic_note(name, text)
+    }
+
+    async fn change_epic_note(
+        &self,
+        name: String,
+        id: i64,
+        text: Option<String>,
+        done: Option<bool>,
+    ) -> Result<ReducerOutcome> {
+        self.apply_change_epic_note(name, id, text, done)
+    }
+
+    async fn remove_epic_note(&self, name: String, id: i64) -> Result<ReducerOutcome> {
+        self.apply_remove_epic_note(name, id)
     }
 
     async fn end_orchestrator_session(

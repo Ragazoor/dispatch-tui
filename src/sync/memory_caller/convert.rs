@@ -254,6 +254,47 @@ mirror!(
 );
 
 mirror!(
+    module::OrchestratorLogEntry,
+    bindings::OrchestratorLogEntry {
+        id,
+        epic_id,
+        host,
+        at,
+        kind,
+        task_id,
+        text,
+        question,
+        trouble
+    }
+);
+
+mirror!(
+    module::EpicNote,
+    bindings::EpicNote {
+        id,
+        epic_id,
+        text,
+        done,
+        written_at
+    }
+);
+
+mirror!(
+    module::WaitingItem,
+    bindings::WaitingItem {
+        id,
+        epic_id,
+        host,
+        task_id,
+        about,
+        tried,
+        recommendation,
+        raised_at,
+        resolved_at
+    }
+);
+
+mirror!(
     module::ReadyMark,
     bindings::ReadyMark {
         task_id,

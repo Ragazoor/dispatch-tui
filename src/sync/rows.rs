@@ -162,6 +162,12 @@ struct Rows {
     /// `core.allium: Orchestrator`, keyed by id. Arrive scoped to the
     /// epics this person holds by the `visible_orchestrators` view.
     orchestrators: BTreeMap<i64, bindings::Orchestrator>,
+    /// `core.allium: OrchestratorLogEntry`, `EpicNote`, `WaitingItem`, keyed
+    /// by id. Arrive scoped to the epics this person holds by their
+    /// `visible_*` views.
+    orchestrator_log: BTreeMap<i64, bindings::OrchestratorLogEntry>,
+    epic_notes: BTreeMap<i64, bindings::EpicNote>,
+    waiting_items: BTreeMap<i64, bindings::WaitingItem>,
     /// `people.allium: UserProfile`. Unfiltered (`SubscribeToUserProfiles`):
     /// the directory of identities and names is readable by every client.
     user_profiles: BTreeMap<String, bindings::UserProfile>,
@@ -283,6 +289,9 @@ impl Rows {
             && self.epic_orchestrations.is_empty()
             && self.ready_marks.is_empty()
             && self.orchestrators.is_empty()
+            && self.orchestrator_log.is_empty()
+            && self.epic_notes.is_empty()
+            && self.waiting_items.is_empty()
             && self.user_profiles.is_empty()
             && self.settings.is_empty()
             && self.work_packages.is_empty()
@@ -677,6 +686,54 @@ impl SharedRows {
         self.read(|rows| rows.orchestrators.values().cloned().collect())
     }
 
+    pub fn upsert_orchestrator_log_entry(&self, row: &bindings::OrchestratorLogEntry) {
+        self.write(|rows| {
+            rows.orchestrator_log.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_orchestrator_log_entry(&self, id: i64) {
+        self.write(|rows| rows.orchestrator_log.remove(&id).is_some());
+    }
+
+    /// Every log entry this subscription holds, oldest first.
+    pub fn orchestrator_log(&self) -> Vec<bindings::OrchestratorLogEntry> {
+        self.read(|rows| rows.orchestrator_log.values().cloned().collect())
+    }
+
+    pub fn upsert_epic_note(&self, row: &bindings::EpicNote) {
+        self.write(|rows| {
+            rows.epic_notes.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_epic_note(&self, id: i64) {
+        self.write(|rows| rows.epic_notes.remove(&id).is_some());
+    }
+
+    /// Every epic note this subscription holds, by id.
+    pub fn epic_notes(&self) -> Vec<bindings::EpicNote> {
+        self.read(|rows| rows.epic_notes.values().cloned().collect())
+    }
+
+    pub fn upsert_waiting_item(&self, row: &bindings::WaitingItem) {
+        self.write(|rows| {
+            rows.waiting_items.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_waiting_item(&self, id: i64) {
+        self.write(|rows| rows.waiting_items.remove(&id).is_some());
+    }
+
+    /// Every waiting item this subscription holds, by id.
+    pub fn waiting_items(&self) -> Vec<bindings::WaitingItem> {
+        self.read(|rows| rows.waiting_items.values().cloned().collect())
+    }
+
     /// The ready mark on `task` (`core.allium: ReadyMark`).
     pub fn ready_mark(&self, task: TaskId) -> Option<bindings::ReadyMark> {
         self.read(|rows| rows.ready_marks.get(&task.0).cloned())
@@ -1069,6 +1126,18 @@ impl SharedRows {
 
     pub fn retire_orchestrator(&self, old: &bindings::Orchestrator) {
         self.write(|rows| remove_if_held(&mut rows.orchestrators, &old.id, old));
+    }
+
+    pub fn retire_orchestrator_log_entry(&self, old: &bindings::OrchestratorLogEntry) {
+        self.write(|rows| remove_if_held(&mut rows.orchestrator_log, &old.id, old));
+    }
+
+    pub fn retire_epic_note(&self, old: &bindings::EpicNote) {
+        self.write(|rows| remove_if_held(&mut rows.epic_notes, &old.id, old));
+    }
+
+    pub fn retire_waiting_item(&self, old: &bindings::WaitingItem) {
+        self.write(|rows| remove_if_held(&mut rows.waiting_items, &old.id, old));
     }
 
     pub fn retire_ready_mark(&self, old: &bindings::ReadyMark) {

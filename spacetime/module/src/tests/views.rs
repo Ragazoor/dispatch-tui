@@ -25,6 +25,9 @@ struct Store {
     archived_tasks: Vec<ArchivedTask>,
     orchestrations: Vec<EpicOrchestration>,
     orchestrators: Vec<Orchestrator>,
+    log: Vec<OrchestratorLogEntry>,
+    notes: Vec<EpicNote>,
+    items: Vec<WaitingItem>,
 }
 
 fn keep<T: Clone>(rows: &[T], f: impl Fn(&T) -> bool) -> Vec<T> {
@@ -109,6 +112,24 @@ impl StoreReads for Store {
     }
     fn agent_named(&self, name: &str) -> bool {
         self.agents.iter().any(|a| a.name == name)
+    }
+    fn log_of_epic(&self, epic: i64) -> Vec<OrchestratorLogEntry> {
+        keep(&self.log, |e| e.epic_id == epic)
+    }
+    fn note(&self, id: i64) -> Option<EpicNote> {
+        self.notes.iter().find(|n| n.id == id).cloned()
+    }
+    fn notes_of_epic(&self, epic: i64) -> Vec<EpicNote> {
+        keep(&self.notes, |n| n.epic_id == epic)
+    }
+    fn waiting_item(&self, id: i64) -> Option<WaitingItem> {
+        self.items.iter().find(|i| i.id == id).cloned()
+    }
+    fn items_of_epic(&self, epic: i64) -> Vec<WaitingItem> {
+        keep(&self.items, |i| i.epic_id == epic)
+    }
+    fn items_of_task(&self, task: i64) -> Vec<WaitingItem> {
+        keep(&self.items, |i| i.task_id == task)
     }
     fn subagents_of(&self, _: i64) -> Vec<TaskSubagent> {
         Vec::new()

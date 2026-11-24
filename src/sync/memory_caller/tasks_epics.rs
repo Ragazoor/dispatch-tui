@@ -41,6 +41,7 @@ impl MemoryReducerCaller {
         if let Some(prior) = prior.as_ref() {
             self.end_marks_on_finish(tables, prior, &row);
             self.drop_ready_mark_on_leaving_backlog(tables, prior, &row);
+            self.resolve_items_on_finish(tables, prior, &row);
         }
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).
@@ -243,6 +244,7 @@ impl MemoryReducerCaller {
         }
         self.delete_epic_row(tables, id);
         self.delete_orchestration(tables, id);
+        self.delete_orchestrator_memory(tables, id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_EPIC, id);
     }
 

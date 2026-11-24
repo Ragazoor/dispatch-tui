@@ -7,6 +7,71 @@ use crate::define_str_enum;
 
 use super::{EpicId, TaskId};
 
+/// `core.allium: LogEntryKind`: what an orchestrator's log entry records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogEntryKind {
+    StartedTask,
+    Answered,
+    PassedOn,
+    ActedOnTrouble,
+    Session,
+    Summary,
+}
+
+define_str_enum!(LogEntryKind, "log entry kind" {
+    StartedTask => "started_task",
+    Answered => "answered",
+    PassedOn => "passed_on",
+    ActedOnTrouble => "acted_on_trouble",
+    Session => "session",
+    Summary => "summary",
+});
+
+/// `core.allium: OrchestratorLogEntry`: one line of an orchestrated epic's
+/// log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrchestratorLogEntry {
+    pub id: i64,
+    pub epic_id: EpicId,
+    pub host: String,
+    pub at: DateTime<Utc>,
+    pub kind: LogEntryKind,
+    pub task_id: Option<TaskId>,
+    pub text: String,
+    pub question: Option<String>,
+    pub trouble: Option<String>,
+}
+
+/// `core.allium: EpicNote`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpicNote {
+    pub id: i64,
+    pub epic_id: EpicId,
+    pub text: String,
+    pub done: bool,
+    pub written_at: DateTime<Utc>,
+}
+
+/// `core.allium: WaitingItem`: something that waits for the operator.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaitingItem {
+    pub id: i64,
+    pub epic_id: EpicId,
+    pub host: String,
+    pub task_id: Option<TaskId>,
+    pub about: String,
+    pub tried: String,
+    pub recommendation: String,
+    pub raised_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+impl WaitingItem {
+    pub fn is_open(&self) -> bool {
+        self.resolved_at.is_none()
+    }
+}
+
 /// `core.allium: StartRule`: which backlog tasks an orchestrator may start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StartRule {

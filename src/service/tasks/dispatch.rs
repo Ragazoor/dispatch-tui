@@ -68,6 +68,21 @@ impl TaskService {
         Ok(self.db.request_dispatch(task_id, origin, mode).await?)
     }
 
+    /// `orchestrators.allium: OrchestratorStartsATask`: [`Self::request_dispatch`]
+    /// for orchestrator `orchestrator`, whose `reason` the store writes as
+    /// the epic's log entry in the same transaction.
+    pub async fn request_orchestrated_dispatch(
+        &self,
+        task_id: TaskId,
+        orchestrator: String,
+        reason: String,
+    ) -> Result<RequestDispatchAnswer, ServiceError> {
+        Ok(self
+            .db
+            .request_orchestrated_dispatch(task_id, &orchestrator, &reason)
+            .await?)
+    }
+
     /// `HostRestartFailsInterrupted`: fail the rows this host left
     /// `provisioning` when its previous board stopped, releasing their claims.
     /// Run once, on the first connection, before any `requested` row is served

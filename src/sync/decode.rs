@@ -716,6 +716,55 @@ pub fn orchestrator(row: &bindings::Orchestrator) -> Decoded<crate::models::Orch
     })
 }
 
+/// The store's `orchestrator_log` row. An unknown kind refuses the row.
+pub fn orchestrator_log_entry(
+    row: &bindings::OrchestratorLogEntry,
+) -> Decoded<crate::models::OrchestratorLogEntry> {
+    const T: &str = "orchestrator_log";
+    Ok(crate::models::OrchestratorLogEntry {
+        id: row.id,
+        epic_id: EpicId(row.epic_id),
+        host: row.host.clone(),
+        at: required_timestamp(T, row.id, "at", &row.at)?,
+        kind: row
+            .kind
+            .parse()
+            .map_err(|e| DecodeError::new(T, row.id, format!("kind: {e}")))?,
+        task_id: (row.task_id != 0).then_some(TaskId(row.task_id)),
+        text: row.text.clone(),
+        question: text(&row.question).map(str::to_string),
+        trouble: text(&row.trouble).map(str::to_string),
+    })
+}
+
+/// The store's `epic_notes` row.
+pub fn epic_note(row: &bindings::EpicNote) -> Decoded<crate::models::EpicNote> {
+    const T: &str = "epic_notes";
+    Ok(crate::models::EpicNote {
+        id: row.id,
+        epic_id: EpicId(row.epic_id),
+        text: row.text.clone(),
+        done: row.done,
+        written_at: required_timestamp(T, row.id, "written_at", &row.written_at)?,
+    })
+}
+
+/// The store's `waiting_items` row.
+pub fn waiting_item(row: &bindings::WaitingItem) -> Decoded<crate::models::WaitingItem> {
+    const T: &str = "waiting_items";
+    Ok(crate::models::WaitingItem {
+        id: row.id,
+        epic_id: EpicId(row.epic_id),
+        host: row.host.clone(),
+        task_id: (row.task_id != 0).then_some(TaskId(row.task_id)),
+        about: row.about.clone(),
+        tried: row.tried.clone(),
+        recommendation: row.recommendation.clone(),
+        raised_at: required_timestamp(T, row.id, "raised_at", &row.raised_at)?,
+        resolved_at: timestamp(T, row.id, "resolved_at", &row.resolved_at)?,
+    })
+}
+
 /// The store's `ready_marks` row. An unknown marker refuses the row.
 pub fn ready_mark(row: &bindings::ReadyMark) -> Decoded<crate::models::ReadyMark> {
     const T: &str = "ready_marks";

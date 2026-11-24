@@ -311,6 +311,9 @@ pub(crate) fn delete_ready_mark(ctx: &ReducerContext, task_id: i64) {
 }
 
 pub(crate) fn delete_orchestration(ctx: &ReducerContext, epic_id: i64) {
+    if ctx.db.epic_orchestrations().epic_id().find(epic_id).is_some() {
+        resolve_items_of_epic(ctx, epic_id);
+    }
     ctx.db.epic_orchestrations().epic_id().delete(epic_id);
     delete_orchestrators_of(ctx, epic_id);
 }

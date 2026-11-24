@@ -122,9 +122,6 @@ pub(super) struct OrchestratorHost {
     runner: Arc<dyn ProcessRunner>,
     data_dir: PathBuf,
     claude_json: PathBuf,
-    /// The rows already logged as waiting for the operator, so the log says
-    /// it once per bout.
-    given_up: Arc<std::sync::Mutex<HashSet<i64>>>,
     /// The epics of the rows on this host at the last tick
     /// (`plan_orchestrators`' `seen_here`).
     seen_here: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
@@ -142,7 +139,6 @@ impl OrchestratorHost {
             runner,
             data_dir,
             claude_json,
-            given_up: Arc::new(std::sync::Mutex::new(HashSet::new())),
             seen_here: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
         }
     }
@@ -225,7 +221,6 @@ impl OrchestratorHost {
                 }
             }
             OrchestratorAction::Start(o) => {
-                self.given_up().remove(&o.id);
                 self.start_session(host, &o, epics, orchestrations, tasks)
                     .await;
             }
@@ -240,15 +235,10 @@ impl OrchestratorHost {
                 }
             }
             OrchestratorAction::GiveUp(o) => {
-                // Until the items that wait for the operator exist (step 5),
-                // the board's own log is where this is said.
-                if self.given_up().insert(o.id) {
-                    tracing::warn!(
-                        orchestrator = %o.name,
-                        epic = o.epic_id.0,
-                        "the orchestrator's session died twice in a row; it is not started again \
-                         until its epic's orchestrator is switched off and on"
-                    );
+                // Asked on every tick that finds it down: the store raises the
+                // item once per bout, and again if it was resolved meanwhile.
+                if let Err(e) = db.raise_orchestrator_down_item(o.id, host).await {
+                    tracing::warn!(orchestrator = %o.name, "could not raise the down orchestrator's item: {e:#}");
                 }
             }
             OrchestratorAction::CloseGone(window) => {
@@ -271,10 +261,6 @@ impl OrchestratorHost {
         matches!(closed, Ok(Ok(())))
     }
 
-    fn given_up(&self) -> std::sync::MutexGuard<'_, HashSet<i64>> {
-        self.given_up.lock().unwrap_or_else(|e| e.into_inner())
-    }
-
     async fn start_session(
         &self,
         host: &str,
@@ -290,19 +276,20 @@ impl OrchestratorHost {
         ) else {
             return;
         };
-        if let Err(e) = db.start_orchestrator_session(o.id, host).await {
+        let dir = crate::dispatch::orchestrator_dir(&self.data_dir, o.epic_id);
+        // A session that died may have died of its conversation; the next one
+        // starts fresh, and the prompt carries what it needs (O13).
+        let resume =
+            !o.session_died && crate::dispatch::holds_a_conversation(&self.claude_json, &dir);
+        if let Err(e) = db.start_orchestrator_session(o.id, host, resume).await {
             tracing::warn!(orchestrator = %o.name, "the store refused the orchestrator's start: {e:#}");
             return;
         }
         let prompt = self.prompt(o, epic, on, epics, tasks).await;
         let window = TmuxWindow::for_orchestrator(o.epic_id);
         let runner = self.runner.clone();
-        let dir = crate::dispatch::orchestrator_dir(&self.data_dir, o.epic_id);
         let claude_json = self.claude_json.clone();
         let name = o.name.clone();
-        // A session that died may have died of its conversation; the next one
-        // starts fresh, and the prompt carries what it needs (O13).
-        let may_resume = !o.session_died;
         let launched = tokio::task::spawn_blocking(move || {
             crate::dispatch::launch_orchestrator(
                 &crate::dispatch::OrchestratorLaunch {
@@ -311,7 +298,7 @@ impl OrchestratorHost {
                     dir: &dir,
                     prompt: &prompt,
                     claude_json: &claude_json,
-                    may_resume,
+                    resume,
                 },
                 &*runner,
             )

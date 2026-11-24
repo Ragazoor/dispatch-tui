@@ -105,6 +105,9 @@ impl MemoryReducerCaller {
     }
 
     pub(super) fn delete_orchestration(&self, tables: &mut Tables, epic_id: i64) {
+        if tables.epic_orchestrations.contains_key(&epic_id) {
+            self.resolve_items_of_epic(tables, epic_id);
+        }
         if tables.epic_orchestrations.remove(&epic_id).is_some() {
             self.rows.remove_epic_orchestration(EpicId(epic_id));
         }

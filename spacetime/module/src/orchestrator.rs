@@ -89,6 +89,24 @@ pub fn check_start_orchestrator_session(
     })
 }
 
+/// The text of a session start's log entry.
+pub fn start_entry_text(resumed: bool) -> &'static str {
+    if resumed {
+        SESSION_RESUMED
+    } else {
+        SESSION_STARTED
+    }
+}
+
+/// The text of a session end's log entry.
+pub fn end_entry_text(died: bool) -> &'static str {
+    if died {
+        SESSION_DIED
+    } else {
+        SESSION_ENDED
+    }
+}
+
 /// `EndOrchestratorSession` (`died` false: the board ended it) and
 /// `OrchestratorWindowGone` (`died` true).
 pub fn check_end_orchestrator_session(
@@ -139,10 +157,18 @@ pub fn ensure_orchestrator(ctx: &ReducerContext, epic_id: i64, host: String) -> 
     Ok(())
 }
 
+/// `resumed`: the board continues the conversation it last held for the
+/// epic, which the start's log entry says.
 #[spacetimedb::reducer]
-pub fn start_orchestrator_session(ctx: &ReducerContext, id: i64, host: String) -> Result<(), String> {
+pub fn start_orchestrator_session(
+    ctx: &ReducerContext,
+    id: i64,
+    host: String,
+    resumed: bool,
+) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
     let row = check_start_orchestrator_session(ctx, id, &host)?;
+    insert_log_entry(ctx, session_entry(&row, start_entry_text(resumed)));
     ctx.db.orchestrators().id().update(Orchestrator {
         started_at: now(ctx),
         ..row
@@ -159,6 +185,7 @@ pub fn end_orchestrator_session(
 ) -> Result<(), String> {
     require_acting_for(ctx, &host)?;
     let row = check_end_orchestrator_session(ctx, id, &host, died)?;
+    insert_log_entry(ctx, session_entry(&row, end_entry_text(died)));
     ctx.db.orchestrators().id().update(row);
     Ok(())
 }

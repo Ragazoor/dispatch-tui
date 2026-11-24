@@ -36,6 +36,7 @@ impl MemoryReducerCaller {
         &self,
         id: i64,
         host: String,
+        resumed: bool,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
         if let Err(why) = self.acting_for(&tables, &host) {
@@ -43,6 +44,10 @@ impl MemoryReducerCaller {
         }
         match module::check_start_orchestrator_session(&*tables, id, &host) {
             Ok(row) => {
+                self.insert_log_entry(
+                    &mut tables,
+                    module::session_entry(&row, module::start_entry_text(resumed)),
+                );
                 let row = module::Orchestrator {
                     started_at: self.now(),
                     ..row
@@ -66,6 +71,10 @@ impl MemoryReducerCaller {
         }
         match module::check_end_orchestrator_session(&*tables, id, &host, died) {
             Ok(row) => {
+                self.insert_log_entry(
+                    &mut tables,
+                    module::session_entry(&row, module::end_entry_text(died)),
+                );
                 self.write_orchestrator(&mut tables, row);
                 Ok(ReducerOutcome::Applied(vec![]))
             }

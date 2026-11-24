@@ -352,8 +352,16 @@ use super::*;
 /// RequestDispatch`). A board on an older build would let its mirror start
 /// what the store refuses.
 ///
+/// Bumped: an orchestrated epic's memory (`orchestrator_memory.rs`): its log,
+/// notes and waiting items, their views and reducers, the orchestrator's
+/// start that writes its log entry in the request's transaction, the session
+/// entries `start_orchestrator_session` (now told whether it resumed) and
+/// `end_orchestrator_session` write, and the rules that resolve items when a
+/// task finishes or is deleted and when the switch goes off, and remove the
+/// memory with its epic. A board on an older build lacks the reducers.
+///
 /// `0` is what a module that predates the gate reads as, so this is never 0.
-pub const RULES_VERSION: i64 = 67;
+pub const RULES_VERSION: i64 = 68;
 
 /// The rules version that removed the learning task scope: a store stamped
 /// with anything older has its task-scoped learnings archived once, on its

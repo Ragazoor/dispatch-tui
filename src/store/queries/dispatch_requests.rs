@@ -84,6 +84,34 @@ impl DispatchRequestStore for Store {
         }
     }
 
+    async fn request_orchestrated_dispatch(
+        &self,
+        task: TaskId,
+        name: &str,
+        reason: &str,
+    ) -> Result<RequestDispatchAnswer> {
+        match self
+            .caller
+            .orchestrator_request_dispatch(
+                task,
+                self.host.clone(),
+                name.to_string(),
+                reason.to_string(),
+            )
+            .await?
+        {
+            ReducerOutcome::Applied(ids) => match ids.as_slice() {
+                [id] => Ok(RequestDispatchAnswer::Requested(DispatchRequestId(*id))),
+                _ => anyhow::bail!(
+                    "the shared store made a dispatch request for task {} but it is not in \
+                     this board's subscription",
+                    task.0
+                ),
+            },
+            ReducerOutcome::Refused(why) => Ok(RequestDispatchAnswer::Refused(why)),
+        }
+    }
+
     async fn claim_dispatch_request(&self, id: DispatchRequestId) -> Result<bool> {
         Ok(won_logged(
             self.caller

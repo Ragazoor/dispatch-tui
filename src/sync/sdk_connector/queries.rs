@@ -101,6 +101,11 @@ pub(in crate::sync) fn subscription_queries(
         // The orchestrators of those epics, every machine's
         // (core.allium: Orchestrator).
         "SELECT * FROM visible_orchestrators".to_string(),
+        // Their memory (core.allium: OrchestratorLogEntry, EpicNote,
+        // WaitingItem).
+        "SELECT * FROM visible_orchestrator_log".to_string(),
+        "SELECT * FROM visible_epic_notes".to_string(),
+        "SELECT * FROM visible_waiting_items".to_string(),
         // Settings (`docs/specs/settings.allium`). The view serves the
         // settings of every host this person owns; a setting is this
         // machine's own, so the ask narrows it by host.

@@ -29,6 +29,7 @@ impl MemoryReducerCaller {
         tables.task_subagents.retain(|s| s.task_id != task_id);
         self.clear_task_marks(tables, task_id);
         self.delete_ready_mark(tables, task_id);
+        self.resolve_items_of_deleted_task(tables, task_id);
         // agents.allium: AgentsGoWithTheirTask.
         module::delete_agents_of(&mut self.agent_store(tables), task_id);
         self.delete_work_package_links_to(tables, module::WORK_PACKAGE_ITEM_TASK, task_id);

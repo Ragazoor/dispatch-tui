@@ -364,6 +364,16 @@ macro_rules! task_service_api {
                 mode: Option<$crate::models::DispatchMode>
             ) -> Result<$crate::store::RequestDispatchAnswer, $crate::service::ServiceError>;
 
+            /// `orchestrators.allium: OrchestratorStartsATask`: a request for
+            /// orchestrator `orchestrator`, its `reason` logged in the same
+            /// transaction.
+            async fn request_orchestrated_dispatch(
+                &self,
+                task_id: $crate::models::TaskId,
+                orchestrator: String,
+                reason: String
+            ) -> Result<$crate::store::RequestDispatchAnswer, $crate::service::ServiceError>;
+
             /// `HostClaimsDispatch` -> `ProvisionDispatch` for one delivered
             /// row: claim it, provision with the row's mode under the row's
             /// deadline, report dispatched or failed. THE dispatch seam — the

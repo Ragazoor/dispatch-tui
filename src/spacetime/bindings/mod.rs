@@ -17,6 +17,7 @@ pub mod batch_delete_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod bookmark_type;
 pub mod burn_id_sequence_reducer;
+pub mod change_epic_note_reducer;
 pub mod change_orchestrator_settings_reducer;
 pub mod check_deletable_procedure;
 pub mod claim_dispatch_request_reducer;
@@ -47,6 +48,7 @@ pub mod dispatch_request_type;
 pub mod end_orchestrator_session_reducer;
 pub mod ensure_managed_epics_reducer;
 pub mod ensure_orchestrator_reducer;
+pub mod epic_note_type;
 pub mod epic_orchestration_type;
 pub mod epic_patch_type;
 pub mod epic_type;
@@ -74,6 +76,8 @@ pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod mark_task_ready_reducer;
 pub mod mark_task_seen_reducer;
 pub mod membership_type;
+pub mod orchestrator_log_entry_type;
+pub mod orchestrator_request_dispatch_reducer;
 pub mod orchestrator_turn_completed_reducer;
 pub mod orchestrator_type;
 pub mod override_poll_owner_reducer;
@@ -91,16 +95,21 @@ pub mod patch_task_reducer;
 pub mod patch_work_package_reducer;
 pub mod poll_owner_type;
 pub mod probe_generated_task_id_reducer;
+pub mod raise_orchestrator_down_item_reducer;
+pub mod raise_waiting_item_reducer;
 pub mod read_archived_task_procedure;
 pub mod ready_mark_type;
 pub mod record_base_branch_reducer;
 pub mod record_learning_retrieval_reducer;
 pub mod record_notification_reducer;
+pub mod record_orchestrator_answer_reducer;
+pub mod record_orchestrator_summary_reducer;
 pub mod record_pre_tool_use_reducer;
 pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
 pub mod regroup_epic_reducer;
+pub mod remove_epic_note_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
@@ -118,6 +127,7 @@ pub mod request_exit_session_reducer;
 pub mod request_feed_refresh_reducer;
 pub mod request_wrap_up_reducer;
 pub mod rescope_epic_learnings_reducer;
+pub mod resolve_waiting_item_reducer;
 pub mod retired_feed_item_type;
 pub mod rules_version_table;
 pub mod rules_version_type;
@@ -190,23 +200,28 @@ pub mod user_profile_type;
 pub mod user_profiles_table;
 pub mod visible_agents_table;
 pub mod visible_dispatch_requests_table;
+pub mod visible_epic_notes_table;
 pub mod visible_epic_orchestrations_table;
 pub mod visible_feed_requests_table;
 pub mod visible_learning_retrievals_table;
 pub mod visible_learning_verdicts_table;
 pub mod visible_learnings_table;
+pub mod visible_orchestrator_log_table;
 pub mod visible_orchestrators_table;
 pub mod visible_poll_owners_table;
 pub mod visible_ready_marks_table;
 pub mod visible_session_requests_table;
 pub mod visible_task_subagents_table;
 pub mod visible_task_watchers_table;
+pub mod visible_waiting_items_table;
 pub mod visible_work_package_links_table;
+pub mod waiting_item_type;
 pub mod work_package_item_ref_type;
 pub mod work_package_link_type;
 pub mod work_package_patch_type;
 pub mod work_package_type;
 pub mod workspace_type;
+pub mod write_epic_note_reducer;
 
 pub use adopt_repo_path_reducer::adopt_repo_path;
 pub use agent_type::Agent;
@@ -219,6 +234,7 @@ pub use batch_delete_reducer::batch_delete;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use bookmark_type::Bookmark;
 pub use burn_id_sequence_reducer::burn_id_sequence;
+pub use change_epic_note_reducer::change_epic_note;
 pub use change_orchestrator_settings_reducer::change_orchestrator_settings;
 pub use check_deletable_procedure::check_deletable;
 pub use claim_dispatch_request_reducer::claim_dispatch_request;
@@ -249,6 +265,7 @@ pub use dispatch_request_type::DispatchRequest;
 pub use end_orchestrator_session_reducer::end_orchestrator_session;
 pub use ensure_managed_epics_reducer::ensure_managed_epics;
 pub use ensure_orchestrator_reducer::ensure_orchestrator;
+pub use epic_note_type::EpicNote;
 pub use epic_orchestration_type::EpicOrchestration;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
@@ -276,6 +293,8 @@ pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use mark_task_ready_reducer::mark_task_ready;
 pub use mark_task_seen_reducer::mark_task_seen;
 pub use membership_type::Membership;
+pub use orchestrator_log_entry_type::OrchestratorLogEntry;
+pub use orchestrator_request_dispatch_reducer::orchestrator_request_dispatch;
 pub use orchestrator_turn_completed_reducer::orchestrator_turn_completed;
 pub use orchestrator_type::Orchestrator;
 pub use override_poll_owner_reducer::override_poll_owner;
@@ -293,16 +312,21 @@ pub use patch_task_reducer::patch_task;
 pub use patch_work_package_reducer::patch_work_package;
 pub use poll_owner_type::PollOwner;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
+pub use raise_orchestrator_down_item_reducer::raise_orchestrator_down_item;
+pub use raise_waiting_item_reducer::raise_waiting_item;
 pub use read_archived_task_procedure::read_archived_task;
 pub use ready_mark_type::ReadyMark;
 pub use record_base_branch_reducer::record_base_branch;
 pub use record_learning_retrieval_reducer::record_learning_retrieval;
 pub use record_notification_reducer::record_notification;
+pub use record_orchestrator_answer_reducer::record_orchestrator_answer;
+pub use record_orchestrator_summary_reducer::record_orchestrator_summary;
 pub use record_pre_tool_use_reducer::record_pre_tool_use;
 pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
 pub use regroup_epic_reducer::regroup_epic;
+pub use remove_epic_note_reducer::remove_epic_note;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
@@ -320,6 +344,7 @@ pub use request_exit_session_reducer::request_exit_session;
 pub use request_feed_refresh_reducer::request_feed_refresh;
 pub use request_wrap_up_reducer::request_wrap_up;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
+pub use resolve_waiting_item_reducer::resolve_waiting_item;
 pub use retired_feed_item_type::RetiredFeedItem;
 pub use rules_version_table::*;
 pub use rules_version_type::RulesVersion;
@@ -392,23 +417,28 @@ pub use user_profile_type::UserProfile;
 pub use user_profiles_table::*;
 pub use visible_agents_table::*;
 pub use visible_dispatch_requests_table::*;
+pub use visible_epic_notes_table::*;
 pub use visible_epic_orchestrations_table::*;
 pub use visible_feed_requests_table::*;
 pub use visible_learning_retrievals_table::*;
 pub use visible_learning_verdicts_table::*;
 pub use visible_learnings_table::*;
+pub use visible_orchestrator_log_table::*;
 pub use visible_orchestrators_table::*;
 pub use visible_poll_owners_table::*;
 pub use visible_ready_marks_table::*;
 pub use visible_session_requests_table::*;
 pub use visible_task_subagents_table::*;
 pub use visible_task_watchers_table::*;
+pub use visible_waiting_items_table::*;
 pub use visible_work_package_links_table::*;
+pub use waiting_item_type::WaitingItem;
 pub use work_package_item_ref_type::WorkPackageItemRef;
 pub use work_package_link_type::WorkPackageLink;
 pub use work_package_patch_type::WorkPackagePatch;
 pub use work_package_type::WorkPackage;
 pub use workspace_type::Workspace;
+pub use write_epic_note_reducer::write_epic_note;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -440,6 +470,12 @@ pub enum Reducer {
     BurnIdSequence {
         table: String,
         ceiling: i64,
+    },
+    ChangeEpicNote {
+        name: String,
+        id: i64,
+        text: Option<String>,
+        done: Option<bool>,
     },
     ChangeOrchestratorSettings {
         epic_id: i64,
@@ -563,6 +599,12 @@ pub enum Reducer {
         subscriber: String,
         task_id: i64,
     },
+    OrchestratorRequestDispatch {
+        task_id: i64,
+        requester: String,
+        name: String,
+        reason: String,
+    },
     OrchestratorTurnCompleted {
         name: String,
     },
@@ -588,6 +630,17 @@ pub enum Reducer {
         patch: WorkPackagePatch,
     },
     ProbeGeneratedTaskId,
+    RaiseOrchestratorDownItem {
+        id: i64,
+        host: String,
+    },
+    RaiseWaitingItem {
+        name: String,
+        task_id: i64,
+        about: String,
+        tried: String,
+        recommendation: String,
+    },
     RecordBaseBranch {
         repo_path: String,
         branch: String,
@@ -602,6 +655,17 @@ pub enum Reducer {
         id: i64,
         mode: String,
         at: String,
+    },
+    RecordOrchestratorAnswer {
+        name: String,
+        task_id: i64,
+        question: String,
+        answer: String,
+        reason: String,
+    },
+    RecordOrchestratorSummary {
+        name: String,
+        text: String,
     },
     RecordPreToolUse {
         id: i64,
@@ -624,6 +688,10 @@ pub enum Reducer {
     },
     RegroupEpic {
         root_id: i64,
+    },
+    RemoveEpicNote {
+        name: String,
+        id: i64,
     },
     ReportDispatchFailed {
         request_id: i64,
@@ -691,6 +759,9 @@ pub enum Reducer {
     RescopeEpicLearnings {
         from: i64,
         to: i64,
+    },
+    ResolveWaitingItem {
+        id: i64,
     },
     SaveRepoPath {
         path: String,
@@ -807,6 +878,7 @@ pub enum Reducer {
     StartOrchestratorSession {
         id: i64,
         host: String,
+        resumed: bool,
     },
     SubagentClear {
         task_id: i64,
@@ -870,6 +942,10 @@ pub enum Reducer {
         unlink: Vec<WorkPackageItemRef>,
         link: Vec<WorkPackageItemRef>,
     },
+    WriteEpicNote {
+        name: String,
+        text: String,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -886,6 +962,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::BatchDelete { .. } => "batch_delete",
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
+            Reducer::ChangeEpicNote { .. } => "change_epic_note",
             Reducer::ChangeOrchestratorSettings { .. } => "change_orchestrator_settings",
             Reducer::ClaimDispatchRequest { .. } => "claim_dispatch_request",
             Reducer::ClaimFeedRequest { .. } => "claim_feed_request",
@@ -918,6 +995,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::MarkTaskReady { .. } => "mark_task_ready",
             Reducer::MarkTaskSeen { .. } => "mark_task_seen",
+            Reducer::OrchestratorRequestDispatch { .. } => "orchestrator_request_dispatch",
             Reducer::OrchestratorTurnCompleted { .. } => "orchestrator_turn_completed",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
@@ -925,14 +1003,19 @@ impl __sdk::Reducer for Reducer {
             Reducer::PatchTask { .. } => "patch_task",
             Reducer::PatchWorkPackage { .. } => "patch_work_package",
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
+            Reducer::RaiseOrchestratorDownItem { .. } => "raise_orchestrator_down_item",
+            Reducer::RaiseWaitingItem { .. } => "raise_waiting_item",
             Reducer::RecordBaseBranch { .. } => "record_base_branch",
             Reducer::RecordLearningRetrieval { .. } => "record_learning_retrieval",
             Reducer::RecordNotification { .. } => "record_notification",
+            Reducer::RecordOrchestratorAnswer { .. } => "record_orchestrator_answer",
+            Reducer::RecordOrchestratorSummary { .. } => "record_orchestrator_summary",
             Reducer::RecordPreToolUse { .. } => "record_pre_tool_use",
             Reducer::RecordUsageEvent { .. } => "record_usage_event",
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::RegroupEpic { .. } => "regroup_epic",
+            Reducer::RemoveEpicNote { .. } => "remove_epic_note",
             Reducer::ReportDispatchFailed { .. } => "report_dispatch_failed",
             Reducer::ReportDispatchProvisioned { .. } => "report_dispatch_provisioned",
             Reducer::ReportFeedRequestDone { .. } => "report_feed_request_done",
@@ -946,6 +1029,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RequestFeedRefresh { .. } => "request_feed_refresh",
             Reducer::RequestWrapUp { .. } => "request_wrap_up",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
+            Reducer::ResolveWaitingItem { .. } => "resolve_waiting_item",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedAgents { .. } => "seed_agents",
@@ -995,6 +1079,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::UpdateEpic { .. } => "update_epic",
             Reducer::UpdateTask { .. } => "update_task",
             Reducer::UpdateWorkPackageWithLinks { .. } => "update_work_package_with_links",
+            Reducer::WriteEpicNote { .. } => "write_epic_note",
             _ => unreachable!(),
         }
     }
@@ -1040,6 +1125,17 @@ Reducer::BatchDelete{
 }             => __sats::bsatn::to_vec(&burn_id_sequence_reducer::BurnIdSequenceArgs {
                 table: table.clone(),
                 ceiling: ceiling.clone(),
+}),
+            Reducer::ChangeEpicNote{
+                name,
+                id,
+                text,
+                done,
+}             => __sats::bsatn::to_vec(&change_epic_note_reducer::ChangeEpicNoteArgs {
+                name: name.clone(),
+                id: id.clone(),
+                text: text.clone(),
+                done: done.clone(),
 }),
             Reducer::ChangeOrchestratorSettings{
                 epic_id,
@@ -1254,6 +1350,17 @@ Reducer::ClearReadyMark{
                 subscriber: subscriber.clone(),
                 task_id: task_id.clone(),
 }),
+            Reducer::OrchestratorRequestDispatch{
+                task_id,
+                requester,
+                name,
+                reason,
+}             => __sats::bsatn::to_vec(&orchestrator_request_dispatch_reducer::OrchestratorRequestDispatchArgs {
+                task_id: task_id.clone(),
+                requester: requester.clone(),
+                name: name.clone(),
+                reason: reason.clone(),
+}),
             Reducer::OrchestratorTurnCompleted{
                 name,
 }             => __sats::bsatn::to_vec(&orchestrator_turn_completed_reducer::OrchestratorTurnCompletedArgs {
@@ -1298,7 +1405,27 @@ Reducer::ClearReadyMark{
 }),
             Reducer::ProbeGeneratedTaskId => __sats::bsatn::to_vec(&probe_generated_task_id_reducer::ProbeGeneratedTaskIdArgs {
                 }),
-Reducer::RecordBaseBranch{
+Reducer::RaiseOrchestratorDownItem{
+                id,
+                host,
+}             => __sats::bsatn::to_vec(&raise_orchestrator_down_item_reducer::RaiseOrchestratorDownItemArgs {
+                id: id.clone(),
+                host: host.clone(),
+}),
+            Reducer::RaiseWaitingItem{
+                name,
+                task_id,
+                about,
+                tried,
+                recommendation,
+}             => __sats::bsatn::to_vec(&raise_waiting_item_reducer::RaiseWaitingItemArgs {
+                name: name.clone(),
+                task_id: task_id.clone(),
+                about: about.clone(),
+                tried: tried.clone(),
+                recommendation: recommendation.clone(),
+}),
+            Reducer::RecordBaseBranch{
                 repo_path,
                 branch,
                 last_used,
@@ -1324,6 +1451,26 @@ Reducer::RecordBaseBranch{
                 id: id.clone(),
                 mode: mode.clone(),
                 at: at.clone(),
+}),
+            Reducer::RecordOrchestratorAnswer{
+                name,
+                task_id,
+                question,
+                answer,
+                reason,
+}             => __sats::bsatn::to_vec(&record_orchestrator_answer_reducer::RecordOrchestratorAnswerArgs {
+                name: name.clone(),
+                task_id: task_id.clone(),
+                question: question.clone(),
+                answer: answer.clone(),
+                reason: reason.clone(),
+}),
+            Reducer::RecordOrchestratorSummary{
+                name,
+                text,
+}             => __sats::bsatn::to_vec(&record_orchestrator_summary_reducer::RecordOrchestratorSummaryArgs {
+                name: name.clone(),
+                text: text.clone(),
 }),
             Reducer::RecordPreToolUse{
                 id,
@@ -1363,6 +1510,13 @@ Reducer::RecordBaseBranch{
                 root_id,
 }             => __sats::bsatn::to_vec(&regroup_epic_reducer::RegroupEpicArgs {
                 root_id: root_id.clone(),
+}),
+            Reducer::RemoveEpicNote{
+                name,
+                id,
+}             => __sats::bsatn::to_vec(&remove_epic_note_reducer::RemoveEpicNoteArgs {
+                name: name.clone(),
+                id: id.clone(),
 }),
             Reducer::ReportDispatchFailed{
                 request_id,
@@ -1484,6 +1638,11 @@ Reducer::RecordBaseBranch{
 }             => __sats::bsatn::to_vec(&rescope_epic_learnings_reducer::RescopeEpicLearningsArgs {
                 from: from.clone(),
                 to: to.clone(),
+}),
+            Reducer::ResolveWaitingItem{
+                id,
+}             => __sats::bsatn::to_vec(&resolve_waiting_item_reducer::ResolveWaitingItemArgs {
+                id: id.clone(),
 }),
             Reducer::SaveRepoPath{
                 path,
@@ -1679,9 +1838,11 @@ Reducer::RecordBaseBranch{
             Reducer::StartOrchestratorSession{
                 id,
                 host,
+                resumed,
 }             => __sats::bsatn::to_vec(&start_orchestrator_session_reducer::StartOrchestratorSessionArgs {
                 id: id.clone(),
                 host: host.clone(),
+                resumed: resumed.clone(),
 }),
             Reducer::SubagentClear{
                 task_id,
@@ -1794,6 +1955,13 @@ Reducer::RecordBaseBranch{
                 unlink: unlink.clone(),
                 link: link.clone(),
 }),
+            Reducer::WriteEpicNote{
+                name,
+                text,
+}             => __sats::bsatn::to_vec(&write_epic_note_reducer::WriteEpicNoteArgs {
+                name: name.clone(),
+                text: text.clone(),
+}),
             _ => unreachable!(),
 }
     }
@@ -1821,17 +1989,20 @@ pub struct DbUpdate {
     user_profiles: __sdk::TableUpdate<UserProfile>,
     visible_agents: __sdk::TableUpdate<Agent>,
     visible_dispatch_requests: __sdk::TableUpdate<DispatchRequest>,
+    visible_epic_notes: __sdk::TableUpdate<EpicNote>,
     visible_epic_orchestrations: __sdk::TableUpdate<EpicOrchestration>,
     visible_feed_requests: __sdk::TableUpdate<FeedRequest>,
     visible_learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableUpdate<LearningVerdict>,
     visible_learnings: __sdk::TableUpdate<Learning>,
+    visible_orchestrator_log: __sdk::TableUpdate<OrchestratorLogEntry>,
     visible_orchestrators: __sdk::TableUpdate<Orchestrator>,
     visible_poll_owners: __sdk::TableUpdate<PollOwner>,
     visible_ready_marks: __sdk::TableUpdate<ReadyMark>,
     visible_session_requests: __sdk::TableUpdate<SessionRequest>,
     visible_task_subagents: __sdk::TableUpdate<TaskSubagent>,
     visible_task_watchers: __sdk::TableUpdate<TaskWatcher>,
+    visible_waiting_items: __sdk::TableUpdate<WaitingItem>,
     visible_work_package_links: __sdk::TableUpdate<WorkPackageLink>,
 }
 
@@ -1895,6 +2066,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_dispatch_requests" => db_update.visible_dispatch_requests.append(
                     visible_dispatch_requests_table::parse_table_update(table_update)?,
                 ),
+                "visible_epic_notes" => db_update
+                    .visible_epic_notes
+                    .append(visible_epic_notes_table::parse_table_update(table_update)?),
                 "visible_epic_orchestrations" => db_update.visible_epic_orchestrations.append(
                     visible_epic_orchestrations_table::parse_table_update(table_update)?,
                 ),
@@ -1910,6 +2084,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "visible_learnings" => db_update
                     .visible_learnings
                     .append(visible_learnings_table::parse_table_update(table_update)?),
+                "visible_orchestrator_log" => db_update.visible_orchestrator_log.append(
+                    visible_orchestrator_log_table::parse_table_update(table_update)?,
+                ),
                 "visible_orchestrators" => db_update.visible_orchestrators.append(
                     visible_orchestrators_table::parse_table_update(table_update)?,
                 ),
@@ -1927,6 +2104,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 ),
                 "visible_task_watchers" => db_update.visible_task_watchers.append(
                     visible_task_watchers_table::parse_table_update(table_update)?,
+                ),
+                "visible_waiting_items" => db_update.visible_waiting_items.append(
+                    visible_waiting_items_table::parse_table_update(table_update)?,
                 ),
                 "visible_work_package_links" => db_update.visible_work_package_links.append(
                     visible_work_package_links_table::parse_table_update(table_update)?,
@@ -2003,6 +2183,8 @@ impl __sdk::DbUpdate for DbUpdate {
             "visible_dispatch_requests",
             &self.visible_dispatch_requests,
         );
+        diff.visible_epic_notes =
+            cache.apply_diff_to_table::<EpicNote>("visible_epic_notes", &self.visible_epic_notes);
         diff.visible_epic_orchestrations = cache.apply_diff_to_table::<EpicOrchestration>(
             "visible_epic_orchestrations",
             &self.visible_epic_orchestrations,
@@ -2021,6 +2203,10 @@ impl __sdk::DbUpdate for DbUpdate {
         );
         diff.visible_learnings =
             cache.apply_diff_to_table::<Learning>("visible_learnings", &self.visible_learnings);
+        diff.visible_orchestrator_log = cache.apply_diff_to_table::<OrchestratorLogEntry>(
+            "visible_orchestrator_log",
+            &self.visible_orchestrator_log,
+        );
         diff.visible_orchestrators = cache.apply_diff_to_table::<Orchestrator>(
             "visible_orchestrators",
             &self.visible_orchestrators,
@@ -2040,6 +2226,10 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.visible_task_watchers = cache.apply_diff_to_table::<TaskWatcher>(
             "visible_task_watchers",
             &self.visible_task_watchers,
+        );
+        diff.visible_waiting_items = cache.apply_diff_to_table::<WaitingItem>(
+            "visible_waiting_items",
+            &self.visible_waiting_items,
         );
         diff.visible_work_package_links = cache.apply_diff_to_table::<WorkPackageLink>(
             "visible_work_package_links",
@@ -2106,6 +2296,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_dispatch_requests" => db_update
                     .visible_dispatch_requests
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_epic_notes" => db_update
+                    .visible_epic_notes
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_epic_orchestrations" => db_update
                     .visible_epic_orchestrations
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -2120,6 +2313,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_learnings" => db_update
                     .visible_learnings
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_orchestrator_log" => db_update
+                    .visible_orchestrator_log
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_orchestrators" => db_update
                     .visible_orchestrators
@@ -2138,6 +2334,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_task_watchers" => db_update
                     .visible_task_watchers
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "visible_waiting_items" => db_update
+                    .visible_waiting_items
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "visible_work_package_links" => db_update
                     .visible_work_package_links
@@ -2209,6 +2408,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "visible_dispatch_requests" => db_update
                     .visible_dispatch_requests
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_epic_notes" => db_update
+                    .visible_epic_notes
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_epic_orchestrations" => db_update
                     .visible_epic_orchestrations
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -2223,6 +2425,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_learnings" => db_update
                     .visible_learnings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_orchestrator_log" => db_update
+                    .visible_orchestrator_log
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_orchestrators" => db_update
                     .visible_orchestrators
@@ -2241,6 +2446,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_task_watchers" => db_update
                     .visible_task_watchers
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "visible_waiting_items" => db_update
+                    .visible_waiting_items
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "visible_work_package_links" => db_update
                     .visible_work_package_links
@@ -2278,17 +2486,20 @@ pub struct AppliedDiff<'r> {
     user_profiles: __sdk::TableAppliedDiff<'r, UserProfile>,
     visible_agents: __sdk::TableAppliedDiff<'r, Agent>,
     visible_dispatch_requests: __sdk::TableAppliedDiff<'r, DispatchRequest>,
+    visible_epic_notes: __sdk::TableAppliedDiff<'r, EpicNote>,
     visible_epic_orchestrations: __sdk::TableAppliedDiff<'r, EpicOrchestration>,
     visible_feed_requests: __sdk::TableAppliedDiff<'r, FeedRequest>,
     visible_learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
     visible_learning_verdicts: __sdk::TableAppliedDiff<'r, LearningVerdict>,
     visible_learnings: __sdk::TableAppliedDiff<'r, Learning>,
+    visible_orchestrator_log: __sdk::TableAppliedDiff<'r, OrchestratorLogEntry>,
     visible_orchestrators: __sdk::TableAppliedDiff<'r, Orchestrator>,
     visible_poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     visible_ready_marks: __sdk::TableAppliedDiff<'r, ReadyMark>,
     visible_session_requests: __sdk::TableAppliedDiff<'r, SessionRequest>,
     visible_task_subagents: __sdk::TableAppliedDiff<'r, TaskSubagent>,
     visible_task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
+    visible_waiting_items: __sdk::TableAppliedDiff<'r, WaitingItem>,
     visible_work_package_links: __sdk::TableAppliedDiff<'r, WorkPackageLink>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
@@ -2365,6 +2576,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.visible_dispatch_requests,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<EpicNote>(
+            "visible_epic_notes",
+            &self.visible_epic_notes,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<EpicOrchestration>(
             "visible_epic_orchestrations",
             &self.visible_epic_orchestrations,
@@ -2388,6 +2604,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<Learning>(
             "visible_learnings",
             &self.visible_learnings,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<OrchestratorLogEntry>(
+            "visible_orchestrator_log",
+            &self.visible_orchestrator_log,
             event,
         );
         callbacks.invoke_table_row_callbacks::<Orchestrator>(
@@ -2418,6 +2639,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks.invoke_table_row_callbacks::<TaskWatcher>(
             "visible_task_watchers",
             &self.visible_task_watchers,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<WaitingItem>(
+            "visible_waiting_items",
+            &self.visible_waiting_items,
             event,
         );
         callbacks.invoke_table_row_callbacks::<WorkPackageLink>(
@@ -3103,17 +3329,20 @@ impl __sdk::SpacetimeModule for RemoteModule {
         user_profiles_table::register_table(client_cache);
         visible_agents_table::register_table(client_cache);
         visible_dispatch_requests_table::register_table(client_cache);
+        visible_epic_notes_table::register_table(client_cache);
         visible_epic_orchestrations_table::register_table(client_cache);
         visible_feed_requests_table::register_table(client_cache);
         visible_learning_retrievals_table::register_table(client_cache);
         visible_learning_verdicts_table::register_table(client_cache);
         visible_learnings_table::register_table(client_cache);
+        visible_orchestrator_log_table::register_table(client_cache);
         visible_orchestrators_table::register_table(client_cache);
         visible_poll_owners_table::register_table(client_cache);
         visible_ready_marks_table::register_table(client_cache);
         visible_session_requests_table::register_table(client_cache);
         visible_task_subagents_table::register_table(client_cache);
         visible_task_watchers_table::register_table(client_cache);
+        visible_waiting_items_table::register_table(client_cache);
         visible_work_package_links_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
@@ -3135,17 +3364,20 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "user_profiles",
         "visible_agents",
         "visible_dispatch_requests",
+        "visible_epic_notes",
         "visible_epic_orchestrations",
         "visible_feed_requests",
         "visible_learning_retrievals",
         "visible_learning_verdicts",
         "visible_learnings",
+        "visible_orchestrator_log",
         "visible_orchestrators",
         "visible_poll_owners",
         "visible_ready_marks",
         "visible_session_requests",
         "visible_task_subagents",
         "visible_task_watchers",
+        "visible_waiting_items",
         "visible_work_package_links",
     ];
 }

@@ -373,16 +373,16 @@ fn memory_caller_runs_orchestrator_sessions_like_the_real_module() {
         let window = format!("orch-{}", epic.0);
 
         // Start, die, the one restart, die again: the budget is spent.
-        assert_eq!(both!(start_orchestrator_session(id, host)), None);
-        let refused = both!(start_orchestrator_session(id, host)).expect("already live");
+        assert_eq!(both!(start_orchestrator_session(id, host, false)), None);
+        let refused = both!(start_orchestrator_session(id, host, false)).expect("already live");
         assert!(refused.contains("already running"), "{refused}");
         assert_eq!(both!(end_orchestrator_session(id, host, true)), None);
-        assert_eq!(both!(start_orchestrator_session(id, host)), None);
+        assert_eq!(both!(start_orchestrator_session(id, host, false)), None);
         let restarted = Some((host.clone(), window.clone(), true, false, false));
         assert_eq!(orchestrator_of(&rows_mem, epic), restarted);
         wait_for!(orchestrator_of(&rows_real, epic) == restarted);
         assert_eq!(both!(end_orchestrator_session(id, host, true)), None);
-        let refused = both!(start_orchestrator_session(id, host)).expect("died twice");
+        let refused = both!(start_orchestrator_session(id, host, false)).expect("died twice");
         assert!(refused.contains("died twice in a row"), "{refused}");
 
         // A turn gives the restart back.
@@ -403,7 +403,7 @@ fn memory_caller_runs_orchestrator_sessions_like_the_real_module() {
         let after_turn = Some((host.clone(), String::new(), false, true, true));
         assert_eq!(orchestrator_of(&rows_mem, epic), after_turn);
         wait_for!(orchestrator_of(&rows_real, epic) == after_turn);
-        assert_eq!(both!(start_orchestrator_session(id, host)), None);
+        assert_eq!(both!(start_orchestrator_session(id, host, false)), None);
         assert_eq!(both!(end_orchestrator_session(id, host, false)), None);
         let refused = both!(end_orchestrator_session(id, host, false)).expect("not running");
         assert!(refused.contains("is not running"), "{refused}");
@@ -562,5 +562,246 @@ fn memory_caller_holds_starts_to_the_limit_like_the_real_module() {
             .dispatch_request(r_req)
             .is_some_and(|r| !r.is_open()));
         both!(request_dispatch(second, host_a, mcp, derive)).expect("the slot is free again");
+    });
+}
+
+/// What both sides keep of an epic's memory: the log as (kind, task, question,
+/// text), the notes as (text, done) and the items as (task, about, open).
+fn memory_of(
+    rows: &SharedRows,
+    epic: EpicId,
+) -> (
+    Vec<(String, i64, String, String)>,
+    Vec<(String, bool)>,
+    Vec<(i64, String, bool)>,
+) {
+    let log = rows
+        .orchestrator_log()
+        .into_iter()
+        .filter(|e| e.epic_id == epic.0)
+        .map(|e| (e.kind, e.task_id, e.question, e.text))
+        .collect();
+    let notes = rows
+        .epic_notes()
+        .into_iter()
+        .filter(|n| n.epic_id == epic.0)
+        .map(|n| (n.text, n.done))
+        .collect();
+    let items = rows
+        .waiting_items()
+        .into_iter()
+        .filter(|i| i.epic_id == epic.0)
+        .map(|i| (i.task_id, i.about, i.resolved_at.is_empty()))
+        .collect();
+    (log, notes, items)
+}
+
+/// `orchestrators.allium`: an orchestrated epic's memory (its log, notes and
+/// waiting items) and the rules that write and end it, on both sides alike:
+/// the orchestrator's start and its entry, answers, items and their resolve,
+/// notes, the summary, the session entries, the down item, a finished task
+/// resolving its items, switch-off resolving the rest, and the epic's delete
+/// removing it all.
+#[test]
+fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+
+    let instance = Instance::start("memory-caller-orchestrator-memory");
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows_real = Arc::new(SharedRows::new());
+    let rows_mem = Arc::new(SharedRows::new());
+    let clock: Arc<dyn Clock> = Arc::new(SystemClock);
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async move {
+        let connector = Arc::new(SpacetimeSdkConnector::new(
+            instance.database(),
+            rows_real.clone(),
+        ));
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        let mem = MemoryReducerCaller::new(rows_mem.clone(), clock)
+            .with_sender(accepted.identity.clone())
+            .with_identity_rules();
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+        let real = SdkReducerCaller::new(connector, Arc::new(SettledIdentity::default()));
+        register_profiles(&real, &mem, &accepted.identity).await;
+        let identity = accepted.identity.clone();
+        for caller in [&real as &dyn ReducerCaller, &mem as &dyn ReducerCaller] {
+            caller
+                .register_host("host-a".into(), String::new(), identity.clone())
+                .await
+                .unwrap()
+                .applied()
+                .unwrap();
+        }
+
+        let mut woken = rows_real.changed();
+        macro_rules! wait_for {
+            ($cond:expr) => {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !$cond {
+                        woken.changed().await.expect("subscription must deliver");
+                    }
+                })
+                .await
+                .unwrap_or_else(|_| panic!("real store never reached the expected state"))
+            };
+        }
+        macro_rules! both {
+            ($call:ident ( $($arg:expr),* )) => {{
+                let r = real.$call($($arg.clone()),*).await.unwrap();
+                let m = mem.$call($($arg.clone()),*).await.unwrap();
+                match (r, m) {
+                    (ReducerOutcome::Applied(r), ReducerOutcome::Applied(m)) => Ok((r, m)),
+                    (ReducerOutcome::Refused(r), ReducerOutcome::Refused(m)) => {
+                        assert_eq!(r, m, "both sides must refuse in the same words");
+                        Err(r)
+                    }
+                    other => panic!("the two sides disagree: {other:?}"),
+                }
+            }};
+        }
+
+        let row = bindings::Epic {
+            title: "E".into(),
+            created_by: identity.clone(),
+            ..blank_epic()
+        };
+        let epic = real.create_epic(row.clone()).await.unwrap();
+        assert_eq!(epic, mem.create_epic(row).await.unwrap());
+        wait_for!(rows_real.epic(epic).is_some());
+        let task_row = bindings::Task {
+            created_by: identity.clone(),
+            ..blank_task_in_epic(epic.0)
+        };
+        let first = create_task_both(&real, &mem, &rows_real, &rows_mem, task_row.clone()).await;
+        let second = create_task_both(&real, &mem, &rows_real, &rows_mem, task_row).await;
+        let host = "host-a".to_string();
+        let none_rule: Option<String> = None;
+        let none_max: Option<i64> = None;
+        both!(switch_orchestrator_on(epic, none_rule, none_max)).expect("switch on");
+        both!(ensure_orchestrator(epic, host)).expect("ensure");
+        wait_for!(!rows_real.orchestrators().is_empty());
+        let (o_real, o_mem) = (
+            rows_real.orchestrators()[0].clone(),
+            rows_mem.orchestrators()[0].clone(),
+        );
+        assert_eq!(o_real.id, o_mem.id);
+        let id = o_real.id;
+
+        // Each side's orchestrator has a name of its own, so a write that
+        // names it is made on each side with its own name.
+        macro_rules! each {
+            ($call:ident ( $($arg:expr),* )) => {{
+                let r = real.$call(o_real.name.clone(), $($arg.clone()),*).await.unwrap();
+                let m = mem.$call(o_mem.name.clone(), $($arg.clone()),*).await.unwrap();
+                match (r, m) {
+                    (ReducerOutcome::Applied(r), ReducerOutcome::Applied(m)) => Ok((r, m)),
+                    (ReducerOutcome::Refused(r), ReducerOutcome::Refused(m)) => {
+                        assert_eq!(r, m, "both sides must refuse in the same words");
+                        Err(r)
+                    }
+                    other => panic!("the two sides disagree: {other:?}"),
+                }
+            }};
+        }
+
+        // The session's start and end write their entries.
+        both!(start_orchestrator_session(id, host, true)).expect("start");
+        both!(end_orchestrator_session(id, host, false)).expect("end");
+
+        // A start writes its reason in the request's transaction; a blank
+        // reason is refused before anything is written.
+        let blank = String::from(" ");
+        let reason = String::from("first step of the plan");
+        let r = real
+            .orchestrator_request_dispatch(first, host.clone(), o_real.name.clone(), blank.clone())
+            .await
+            .unwrap();
+        let m = mem
+            .orchestrator_request_dispatch(first, host.clone(), o_mem.name.clone(), blank)
+            .await
+            .unwrap();
+        assert_eq!(r, m);
+        assert_eq!(
+            r,
+            ReducerOutcome::Refused("the reason must not be empty".into())
+        );
+        let r = real
+            .orchestrator_request_dispatch(first, host.clone(), o_real.name.clone(), reason.clone())
+            .await
+            .unwrap();
+        let m = mem
+            .orchestrator_request_dispatch(first, host.clone(), o_mem.name.clone(), reason)
+            .await
+            .unwrap();
+        assert!(r.won() && m.won(), "{r:?} {m:?}");
+
+        let (question, answer, why) = (
+            "rebase or pr?".to_string(),
+            "rebase".to_string(),
+            "the epic says so".to_string(),
+        );
+        each!(record_orchestrator_answer(first, question, answer, why)).expect("answer");
+        let (about, tried, rec) = (
+            "may I drop the column?".to_string(),
+            "read the migration".to_string(),
+            "keep it".to_string(),
+        );
+        let (r_item, m_item) =
+            each!(raise_waiting_item(second.0, about, tried, rec)).expect("raise");
+        assert_eq!(r_item, m_item, "item ids are assigned alike");
+        each!(raise_waiting_item(0_i64, about, tried, rec)).expect("raise an epic-wide item");
+        let note = "v3 is next".to_string();
+        let (r_note, m_note) = each!(write_epic_note(note)).expect("note");
+        assert_eq!(r_note, m_note, "note ids are assigned alike");
+        let (no_text, done): (Option<String>, Option<bool>) = (None, Some(true));
+        each!(change_epic_note(r_note[0], no_text, done)).expect("tick");
+        let (no_text, no_done): (Option<String>, Option<bool>) = (None, None);
+        let refused = each!(change_epic_note(r_note[0], no_text, no_done)).expect_err("nothing");
+        assert!(refused.contains("needs its text"), "{refused}");
+        let summary = "done".to_string();
+        let refused = each!(record_orchestrator_summary(summary)).expect_err("not done");
+        assert!(refused.contains("is not done"), "{refused}");
+
+        both!(resolve_waiting_item(r_item[0])).expect("resolve");
+        both!(resolve_waiting_item(r_item[0])).expect("resolve again changes nothing");
+
+        // A finished task resolves its items; switch-off resolves the rest.
+        let done_patch = bindings::TaskPatch {
+            status: Some("done".into()),
+            ..blank_task_patch()
+        };
+        both!(patch_task(second, done_patch)).expect("second done");
+
+        let expected = memory_of(&rows_mem, epic);
+        assert_eq!(expected.0.len(), 6, "{:?}", expected.0);
+        wait_for!(memory_of(&rows_real, epic) == expected);
+
+        both!(switch_orchestrator_off(epic)).expect("off");
+        assert!(memory_of(&rows_mem, epic).2.iter().all(|i| !i.2));
+        wait_for!(memory_of(&rows_real, epic) == memory_of(&rows_mem, epic));
+
+        // The memory goes with the epic. Its tasks are finished first.
+        both!(patch_task(first, done_patch)).expect("first done");
+        both!(delete_task(first)).expect("delete first");
+        both!(delete_task(second)).expect("delete second");
+        both!(delete_epic(epic)).expect("delete epic");
+        let gone = (vec![], vec![], vec![]);
+        assert_eq!(memory_of(&rows_mem, epic), gone);
+        wait_for!(memory_of(&rows_real, epic) == gone);
     });
 }

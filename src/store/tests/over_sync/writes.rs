@@ -57,7 +57,7 @@ enum Sent {
     MarkTaskReady(TaskId, String, String),
     ClearReadyMark(TaskId),
     EnsureOrchestrator(EpicId, String),
-    StartOrchestratorSession(i64, String),
+    StartOrchestratorSession(i64, String, bool),
     EndOrchestratorSession(i64, String, bool),
     OrchestratorTurnCompleted(String),
     SetDisplayName(String),
@@ -372,8 +372,83 @@ impl ReducerCaller for RecordingCaller {
         &self,
         id: i64,
         host: String,
+        resumed: bool,
     ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::StartOrchestratorSession(id, host))
+        self.answer(Sent::StartOrchestratorSession(id, host, resumed))
+    }
+
+    async fn orchestrator_request_dispatch(
+        &self,
+        _task: TaskId,
+        _requester: String,
+        _name: String,
+        _reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("orchestrator_request_dispatch"))
+    }
+
+    async fn record_orchestrator_answer(
+        &self,
+        _name: String,
+        _task: TaskId,
+        _question: String,
+        _answer: String,
+        _reason: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("record_orchestrator_answer"))
+    }
+
+    async fn record_orchestrator_summary(
+        &self,
+        _name: String,
+        _text: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("record_orchestrator_summary"))
+    }
+
+    async fn raise_waiting_item(
+        &self,
+        _name: String,
+        _task: i64,
+        _about: String,
+        _tried: String,
+        _recommendation: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("raise_waiting_item"))
+    }
+
+    async fn raise_orchestrator_down_item(
+        &self,
+        _id: i64,
+        _host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("raise_orchestrator_down_item"))
+    }
+
+    async fn resolve_waiting_item(&self, _id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("resolve_waiting_item"))
+    }
+
+    async fn write_epic_note(
+        &self,
+        _name: String,
+        _text: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("write_epic_note"))
+    }
+
+    async fn change_epic_note(
+        &self,
+        _name: String,
+        _id: i64,
+        _text: Option<String>,
+        _done: Option<bool>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("change_epic_note"))
+    }
+
+    async fn remove_epic_note(&self, _name: String, _id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Named("remove_epic_note"))
     }
 
     async fn end_orchestrator_session(

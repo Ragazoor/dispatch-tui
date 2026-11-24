@@ -51,6 +51,12 @@ pub trait StoreReads {
     fn orchestrator(&self, id: i64) -> Option<Orchestrator>;
     fn orchestrator_named(&self, name: &str) -> Option<Orchestrator>;
     fn orchestrators_of_epic(&self, epic_id: i64) -> Vec<Orchestrator>;
+    fn log_of_epic(&self, epic_id: i64) -> Vec<OrchestratorLogEntry>;
+    fn note(&self, id: i64) -> Option<EpicNote>;
+    fn notes_of_epic(&self, epic_id: i64) -> Vec<EpicNote>;
+    fn waiting_item(&self, id: i64) -> Option<WaitingItem>;
+    fn items_of_epic(&self, epic_id: i64) -> Vec<WaitingItem>;
+    fn items_of_task(&self, task_id: i64) -> Vec<WaitingItem>;
     fn agent_named(&self, name: &str) -> bool;
     fn subagents_of(&self, task_id: i64) -> Vec<TaskSubagent>;
     /// Rows naming the task as the watcher or as the target.
@@ -195,6 +201,24 @@ macro_rules! impl_store_reads {
             }
             fn orchestrators_of_epic(&self, epic_id: i64) -> Vec<Orchestrator> {
                 self.db.orchestrators().epic_id().filter(epic_id).collect()
+            }
+            fn log_of_epic(&self, epic_id: i64) -> Vec<OrchestratorLogEntry> {
+                self.db.orchestrator_log().epic_id().filter(epic_id).collect()
+            }
+            fn note(&self, id: i64) -> Option<EpicNote> {
+                self.db.epic_notes().id().find(id)
+            }
+            fn notes_of_epic(&self, epic_id: i64) -> Vec<EpicNote> {
+                self.db.epic_notes().epic_id().filter(epic_id).collect()
+            }
+            fn waiting_item(&self, id: i64) -> Option<WaitingItem> {
+                self.db.waiting_items().id().find(id)
+            }
+            fn items_of_epic(&self, epic_id: i64) -> Vec<WaitingItem> {
+                self.db.waiting_items().epic_id().filter(epic_id).collect()
+            }
+            fn items_of_task(&self, task_id: i64) -> Vec<WaitingItem> {
+                self.db.waiting_items().task_id().filter(task_id).collect()
             }
             fn agent_named(&self, name: &str) -> bool {
                 self.db.agents().name().find(&name.to_string()).is_some()
@@ -773,6 +797,21 @@ fn visible_epic_orchestrations(ctx: &ViewContext) -> Vec<EpicOrchestration> {
 #[spacetimedb::view(accessor = visible_orchestrators, public)]
 fn visible_orchestrators(ctx: &ViewContext) -> Vec<Orchestrator> {
     orchestrators_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_orchestrator_log, public)]
+fn visible_orchestrator_log(ctx: &ViewContext) -> Vec<OrchestratorLogEntry> {
+    orchestrator_log_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_epic_notes, public)]
+fn visible_epic_notes(ctx: &ViewContext) -> Vec<EpicNote> {
+    epic_notes_of_held(ctx, &sender(ctx))
+}
+
+#[spacetimedb::view(accessor = visible_waiting_items, public)]
+fn visible_waiting_items(ctx: &ViewContext) -> Vec<WaitingItem> {
+    waiting_items_of_held(ctx, &sender(ctx))
 }
 
 #[spacetimedb::view(accessor = visible_ready_marks, public)]
