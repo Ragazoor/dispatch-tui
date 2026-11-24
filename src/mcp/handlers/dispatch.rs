@@ -684,9 +684,9 @@ open items are on the epic's read.",
         {
             "type": "object",
             "properties": {
-                "item_id": {"type": "integer", "description": "The item to resolve"}
+                "waiting_item_id": {"type": "integer", "description": "The item to resolve"}
             },
-            "required": ["item_id"]
+            "required": ["waiting_item_id"]
         };
 
     async write "epic-note_create" => orchestrator_memory::handle_note_create,
@@ -709,11 +709,11 @@ it. Pass at least one of text and done.",
         {
             "type": "object",
             "properties": {
-                "note_id": {"type": "integer", "description": "The note to change"},
+                "epic_note_id": {"type": "integer", "description": "The note to change"},
                 "text": {"type": "string", "description": "The new text"},
                 "done": {"type": "boolean", "description": "Tick a to-do done, or take the tick off"}
             },
-            "required": ["note_id"]
+            "required": ["epic_note_id"]
         };
 
     async destructive "epic-note_delete" => orchestrator_memory::handle_note_delete,
@@ -723,9 +723,9 @@ replaces a note rather than sitting beside it.",
         {
             "type": "object",
             "properties": {
-                "note_id": {"type": "integer", "description": "The note to delete"}
+                "epic_note_id": {"type": "integer", "description": "The note to delete"}
             },
-            "required": ["note_id"]
+            "required": ["epic_note_id"]
         };
 
     async write "task_resume" => tasks::handle_resume_task,

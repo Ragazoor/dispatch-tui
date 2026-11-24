@@ -1594,8 +1594,8 @@ rule OrchestratorMemoryViaMcp {
         -- refused while the epic is not done.
         -- waiting-item_create(task_id?, about, tried, recommendation):
         -- orch/WaitingItemRaised, which also writes the passed_on entry.
-        -- epic-note_create(text), epic-note_update(note_id, text?, done?),
-        -- epic-note_delete(note_id): orch/WriteEpicNote, ChangeEpicNote,
+        -- epic-note_create(text), epic-note_update(epic_note_id, text?, done?),
+        -- epic-note_delete(epic_note_id): orch/WriteEpicNote, ChangeEpicNote,
         -- RemoveEpicNote, on its own epic's notes only. An update with
         -- neither text nor done is refused. epic-note_delete is destructive:
         -- nothing brings a note back.
@@ -1610,7 +1610,7 @@ rule ResolveWaitingItemViaMcp {
     ensures: WaitingItemResolved(item)
 
     @guidance
-        -- waiting-item_resolve(item_id), from any caller: the operator's own
+        -- waiting-item_resolve(waiting_item_id), from any caller: the operator's own
         -- session resolves an item as the board's resolve key does, and the
         -- orchestrator resolves one the operator has answered. Resolving an
         -- item that is already resolved changes nothing and says so

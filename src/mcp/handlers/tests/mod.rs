@@ -1413,10 +1413,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
             "waiting-item_create",
             json!({"about": "a", "tried": "t", "recommendation": "r"}),
         ),
-        ("waiting-item_resolve", json!({"item_id": 1})),
+        ("waiting-item_resolve", json!({"waiting_item_id": 1})),
         ("epic-note_create", json!({"text": "t"})),
-        ("epic-note_update", json!({"note_id": 1})),
-        ("epic-note_delete", json!({"note_id": 1})),
+        ("epic-note_update", json!({"epic_note_id": 1})),
+        ("epic-note_delete", json!({"epic_note_id": 1})),
     ];
 
     let covered: std::collections::BTreeSet<&str> = payloads.iter().map(|(n, _)| *n).collect();

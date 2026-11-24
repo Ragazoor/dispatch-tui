@@ -914,7 +914,7 @@ async fn notes_items_and_answers_show_on_the_epics_read() {
         &tool_as(
             &state,
             "epic-note_update",
-            json!({ "note_id": note, "done": true }),
+            json!({ "epic_note_id": note, "done": true }),
             me.clone(),
         )
         .await,
@@ -923,7 +923,7 @@ async fn notes_items_and_answers_show_on_the_epics_read() {
         &tool_as(
             &state,
             "epic-note_delete",
-            json!({ "note_id": other }),
+            json!({ "epic_note_id": other }),
             me.clone(),
         )
         .await,
@@ -960,8 +960,22 @@ async fn notes_items_and_answers_show_on_the_epics_read() {
     assert!(read.contains("yes — the epic says so"), "{read}");
 
     // Anyone resolves an item, and a second resolve changes nothing.
-    ok_text(&tool(&state, "waiting-item_resolve", json!({ "item_id": item })).await);
-    let again = ok_text(&tool(&state, "waiting-item_resolve", json!({ "item_id": item })).await);
+    ok_text(
+        &tool(
+            &state,
+            "waiting-item_resolve",
+            json!({ "waiting_item_id": item }),
+        )
+        .await,
+    );
+    let again = ok_text(
+        &tool(
+            &state,
+            "waiting-item_resolve",
+            json!({ "waiting_item_id": item }),
+        )
+        .await,
+    );
     assert!(again.contains("already resolved"), "{again}");
     assert!(!epic_detail(&state, e)
         .await

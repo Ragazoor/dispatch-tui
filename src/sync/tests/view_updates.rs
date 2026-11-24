@@ -162,6 +162,68 @@ pins_view_updates!(
 );
 
 pins_view_updates!(
+    an_orchestrator_log_entry_update_pair_keeps_the_new_row,
+    upsert_orchestrator_log_entry,
+    retire_orchestrator_log_entry,
+    |tag: &str| bindings::OrchestratorLogEntry {
+        id: 5,
+        epic_id: 3,
+        host: "host-a".into(),
+        at: "2026-01-01 00:00:00.000".into(),
+        kind: "answered".into(),
+        task_id: 7,
+        text: tag.into(),
+        question: String::new(),
+        trouble: String::new(),
+    },
+    |rows: &SharedRows| rows
+        .orchestrator_log()
+        .into_iter()
+        .find(|e| e.id == 5)
+        .map(|e| e.text)
+);
+
+pins_view_updates!(
+    an_epic_note_update_pair_keeps_the_new_row,
+    upsert_epic_note,
+    retire_epic_note,
+    |tag: &str| bindings::EpicNote {
+        id: 6,
+        epic_id: 3,
+        text: tag.into(),
+        done: false,
+        written_at: "2026-01-01 00:00:00.000".into(),
+    },
+    |rows: &SharedRows| rows
+        .epic_notes()
+        .into_iter()
+        .find(|n| n.id == 6)
+        .map(|n| n.text)
+);
+
+pins_view_updates!(
+    a_waiting_item_update_pair_keeps_the_new_row,
+    upsert_waiting_item,
+    retire_waiting_item,
+    |tag: &str| bindings::WaitingItem {
+        id: 8,
+        epic_id: 3,
+        host: "host-a".into(),
+        task_id: 7,
+        about: tag.into(),
+        tried: "t".into(),
+        recommendation: "r".into(),
+        raised_at: "2026-01-01 00:00:00.000".into(),
+        resolved_at: String::new(),
+    },
+    |rows: &SharedRows| rows
+        .waiting_items()
+        .into_iter()
+        .find(|i| i.id == 8)
+        .map(|i| i.about)
+);
+
+pins_view_updates!(
     a_ready_mark_update_pair_keeps_the_new_row,
     upsert_ready_mark,
     retire_ready_mark,
@@ -770,6 +832,9 @@ const DECODES_EVERY_COLUMN: &[(&str, &str)] = &[
     ("epic_orchestration", "stored raw: no decoder"),
     ("ready_mark", "stored raw: no decoder"),
     ("orchestrator", "stored raw: decoded on read"),
+    ("orchestrator_log_entry", "stored raw: decoded on read"),
+    ("epic_note", "stored raw: decoded on read"),
+    ("waiting_item", "stored raw: decoded on read"),
     ("setting", "stored raw: no decoder"),
 ];
 

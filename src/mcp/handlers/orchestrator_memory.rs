@@ -344,7 +344,7 @@ pub(super) async fn handle_item_create(
             text(
                 id,
                 format!(
-                    "Raised waiting item #{item} for the operator in epic {}. Resolve it with waiting-item_resolve(item_id={item}) once the operator has answered.",
+                    "Raised waiting item #{item} for the operator in epic {}. Resolve it with waiting-item_resolve(waiting_item_id={item}) once the operator has answered.",
                     o.epic_id.0
                 ),
             )
@@ -356,7 +356,7 @@ pub(super) async fn handle_item_create(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResolveArgs {
-    item_id: i64,
+    waiting_item_id: i64,
 }
 
 pub(super) async fn handle_item_resolve(
@@ -374,24 +374,24 @@ pub(super) async fn handle_item_resolve(
         .list_waiting_items()
         .await
         .into_iter()
-        .find(|i| i.id == a.item_id);
-    match state.db.resolve_waiting_item(a.item_id).await {
+        .find(|i| i.id == a.waiting_item_id);
+    match state.db.resolve_waiting_item(a.waiting_item_id).await {
         Ok(()) => {
             let reply = match before {
                 Some(item) if !item.is_open() => {
                     format!(
                         "Waiting item #{} was already resolved; nothing changed.",
-                        a.item_id
+                        a.waiting_item_id
                     )
                 }
                 Some(item) => {
                     state.notify_epic_changed(item.epic_id);
                     format!(
                         "Resolved waiting item #{} of epic {}.",
-                        a.item_id, item.epic_id.0
+                        a.waiting_item_id, item.epic_id.0
                     )
                 }
-                None => format!("Resolved waiting item #{}.", a.item_id),
+                None => format!("Resolved waiting item #{}.", a.waiting_item_id),
             };
             text(id, reply)
         }
@@ -428,7 +428,7 @@ pub(super) async fn handle_note_create(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoteUpdateArgs {
-    note_id: i64,
+    epic_note_id: i64,
     #[serde(default)]
     text: Option<String>,
     #[serde(default)]
@@ -448,14 +448,14 @@ pub(super) async fn handle_note_update(
     let o = orchestrator_or_refuse!(state, id, identity, "epic-note_update");
     match state
         .db
-        .change_epic_note(&o.name, a.note_id, a.text.as_deref(), a.done)
+        .change_epic_note(&o.name, a.epic_note_id, a.text.as_deref(), a.done)
         .await
     {
         Ok(()) => {
             state.notify_epic_changed(o.epic_id);
             text(
                 id,
-                format!("Updated note #{} of epic {}.", a.note_id, o.epic_id.0),
+                format!("Updated note #{} of epic {}.", a.epic_note_id, o.epic_id.0),
             )
         }
         Err(e) => write_err(id, e),
@@ -465,7 +465,7 @@ pub(super) async fn handle_note_update(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoteDeleteArgs {
-    note_id: i64,
+    epic_note_id: i64,
 }
 
 pub(super) async fn handle_note_delete(
@@ -479,12 +479,12 @@ pub(super) async fn handle_note_delete(
         Err(resp) => return resp,
     };
     let o = orchestrator_or_refuse!(state, id, identity, "epic-note_delete");
-    match state.db.remove_epic_note(&o.name, a.note_id).await {
+    match state.db.remove_epic_note(&o.name, a.epic_note_id).await {
         Ok(()) => {
             state.notify_epic_changed(o.epic_id);
             text(
                 id,
-                format!("Deleted note #{} of epic {}.", a.note_id, o.epic_id.0),
+                format!("Deleted note #{} of epic {}.", a.epic_note_id, o.epic_id.0),
             )
         }
         Err(e) => write_err(id, e),
