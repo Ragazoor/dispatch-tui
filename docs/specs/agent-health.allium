@@ -1485,7 +1485,10 @@ rule WakeTheOrchestrator {
         --
         -- The events of one tick go as ONE message, typed into the window
         -- as a single line that starts "[dispatch] " and names each event
-        -- with its task id and what to do about it. A trouble event names
+        -- with its task id and what to do about it. It carries no title and
+        -- no free text of an item, which a feed can bring in from outside;
+        -- a failed start's reason is cleaned of control characters, quoted
+        -- and cut short. A trouble event names
         -- orchestrator-trouble_record, and the line says that a refused
         -- record means raising a waiting item (orchestrators.allium:
         -- already_retried, which the store checks). Claude Code queues a

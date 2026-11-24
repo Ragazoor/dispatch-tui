@@ -182,3 +182,31 @@ fn a_task_no_orchestrator_covers_logs_nothing_on_review() {
 
     assert!(log(&store, epic).is_empty());
 }
+
+/// `started_by_orchestrator(request)`: the start's entry carries the
+/// request's own stamp, which is how the board tells the orchestrator's
+/// failed starts from anyone else's.
+#[test]
+fn an_orchestrators_start_entry_carries_its_requests_stamp() {
+    let store = Store::new();
+    let (epic, task, o) = setup(&store);
+
+    store
+        .call("alice", |ctx| {
+            orchestrator_request_dispatch(ctx, task, HOST.into(), o.name.clone(), "go".into())
+        })
+        .expect("start");
+
+    let request = store
+        .db()
+        .dispatch_requests()
+        .task_id()
+        .filter(task)
+        .next()
+        .expect("the request");
+    let entry = log(&store, epic)
+        .into_iter()
+        .find(|e| e.kind == LOG_STARTED_TASK)
+        .expect("the entry");
+    assert_eq!(entry.at, request.requested_at);
+}

@@ -42,7 +42,6 @@ pub(super) struct EpicReads<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SeenTask {
-    title: String,
     status: TaskStatus,
     sub_status: SubStatus,
     host: Option<String>,
@@ -87,7 +86,6 @@ pub(super) fn subtree(host: &str, reads: &EpicReads) -> Subtree {
             (
                 t.id,
                 SeenTask {
-                    title: t.title.clone(),
                     status: t.status,
                     sub_status: t.sub_status,
                     host: t.host.clone(),
@@ -120,8 +118,16 @@ pub(super) fn subtree(host: &str, reads: &EpicReads) -> Subtree {
     }
 }
 
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+/// A store string typed into the window: control characters gone, one
+/// line, cut short, quoted, so it cannot pass for the board's own words.
+fn quoted(s: &str) -> String {
+    let clean: String = s
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let line = clean.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = line.chars().take(120).collect();
+    format!("{:?}", cut)
 }
 
 const RECORD: &str = "record your one retry with orchestrator-trouble_record";
@@ -153,11 +159,7 @@ pub(super) fn changes(host: &str, prev: &Subtree, cur: &Subtree, reads: &EpicRea
     let mut events = Vec::new();
     for (id, now) in &cur.tasks {
         let Some(was) = prev.tasks.get(id) else {
-            events.push(format!(
-                "task #{} ({}) is new in the epic",
-                id.0,
-                one_line(&now.title)
-            ));
+            events.push(format!("task #{} is new in the epic", id.0));
             continue;
         };
         if was.ready != now.ready && now.status == TaskStatus::Backlog {
@@ -189,9 +191,9 @@ pub(super) fn changes(host: &str, prev: &Subtree, cur: &Subtree, reads: &EpicRea
         .filter(|r| cur.failed_starts.contains(&r.id.0) && !prev.failed_starts.contains(&r.id.0))
     {
         events.push(format!(
-            "the start of task #{} failed ({}): {RECORD}, mark it ready and start it again",
+            "the start of task #{} failed (reason {}): {RECORD}, mark it ready and start it again",
             request.task_id.0,
-            one_line(request.reason.as_deref().unwrap_or("no reason given"))
+            quoted(request.reason.as_deref().unwrap_or("none given"))
         ));
     }
     for item in reads
@@ -199,11 +201,7 @@ pub(super) fn changes(host: &str, prev: &Subtree, cur: &Subtree, reads: &EpicRea
         .iter()
         .filter(|i| cur.resolved_items.contains(&i.id) && !prev.resolved_items.contains(&i.id))
     {
-        events.push(format!(
-            "waiting item #{} ({}) was resolved",
-            item.id,
-            one_line(&item.about)
-        ));
+        events.push(format!("waiting item #{} was resolved", item.id));
     }
     events
 }
@@ -319,27 +317,37 @@ pub(super) enum SummaryStep {
     End,
 }
 
-/// When the board asked, by its own clock, and the orchestrator's last
-/// completed turn then, by the store's.
+/// When the board asked, by its own clock, and the newest log entry id of
+/// the epic then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SummaryAsk {
     pub at: DateTime<Utc>,
-    pub turn_then: Option<DateTime<Utc>>,
+    pub log_then: i64,
 }
 
-/// A turn completed since the ask is one the store stamped differently from
-/// the turn seen at the ask, so the board's clock is never compared with the
-/// store's.
+/// The newest entry id of `log`, `0` when it is empty.
+pub(super) fn newest_entry(log: &[OrchestratorLogEntry]) -> i64 {
+    log.iter().map(|e| e.id).max().unwrap_or(0)
+}
+
+/// The session ends once a summary entry newer than the ask is in the log,
+/// or the wait has passed. A turn that ends without one, such as a turn
+/// already running when the ask was typed, does not end it.
 pub(super) fn summary_step(
     ask: Option<SummaryAsk>,
-    last_turn_at: Option<DateTime<Utc>>,
+    log: &[OrchestratorLogEntry],
     now: DateTime<Utc>,
 ) -> SummaryStep {
-    match ask {
-        None => SummaryStep::Ask,
-        Some(ask) if last_turn_at != ask.turn_then => SummaryStep::End,
-        Some(ask) if now >= ask.at + ping_wait() => SummaryStep::End,
-        Some(_) => SummaryStep::Wait,
+    let Some(ask) = ask else {
+        return SummaryStep::Ask;
+    };
+    let recorded = log
+        .iter()
+        .any(|e| e.kind == LogEntryKind::Summary && e.id > ask.log_then);
+    if recorded || now >= ask.at + ping_wait() {
+        SummaryStep::End
+    } else {
+        SummaryStep::Wait
     }
 }
 
@@ -469,10 +477,7 @@ mod tests {
         );
         assert_eq!(
             events,
-            vec![
-                "task #10 was marked ready",
-                "task #11 (t11) is new in the epic"
-            ]
+            vec!["task #10 was marked ready", "task #11 is new in the epic"]
         );
     }
 
@@ -527,7 +532,7 @@ mod tests {
         );
         assert_eq!(woke.len(), 1, "{woke:?}");
         assert!(
-            woke[0].contains("the start of task #10 failed (worktree exists)"),
+            woke[0].contains("the start of task #10 failed (reason \"worktree exists\")"),
             "{woke:?}"
         );
         assert!(diff(
@@ -551,7 +556,7 @@ mod tests {
             &reads(&tasks, &open, &[], &[], &[]),
             &reads(&tasks, &resolved, &[], &[], &[]),
         );
-        assert_eq!(events, vec!["waiting item #3 (may I?) was resolved"]);
+        assert_eq!(events, vec!["waiting item #3 was resolved"]);
     }
 
     #[test]
@@ -631,6 +636,13 @@ mod tests {
     }
 
     #[test]
+    fn a_reason_is_quoted_cleaned_and_cut() {
+        let typed = quoted("bad\u{1b}[2J\nreason \"x\"");
+        assert_eq!(typed, "\"bad [2J reason \\\"x\\\"\"");
+        assert!(quoted(&"y".repeat(500)).len() < 130);
+    }
+
+    #[test]
     fn the_wake_line_is_one_line_and_says_what_a_refused_record_means() {
         let line = wake_line(
             EpicId(4),
@@ -650,27 +662,19 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_ask_waits_for_a_turn_or_the_ping_wait() {
-        let asked = |turn_then| {
-            Some(SummaryAsk {
-                at: at(0),
-                turn_then,
-            })
-        };
-        assert_eq!(summary_step(None, None, at(0)), SummaryStep::Ask);
-        assert_eq!(summary_step(asked(None), None, at(5)), SummaryStep::Wait);
-        assert_eq!(
-            summary_step(asked(Some(at(-1))), Some(at(-1)), at(5)),
-            SummaryStep::Wait
-        );
-        assert_eq!(
-            summary_step(asked(Some(at(-1))), Some(at(-30)), at(5)),
-            SummaryStep::End
-        );
-        assert_eq!(
-            summary_step(asked(None), Some(at(2)), at(5)),
-            SummaryStep::End
-        );
-        assert_eq!(summary_step(asked(None), None, at(10)), SummaryStep::End);
+    fn the_summary_ask_waits_for_the_summary_or_the_ping_wait() {
+        let earlier = [entry(4, LogEntryKind::Summary, 0, None, at(-60))];
+        let recorded = [
+            entry(4, LogEntryKind::Summary, 0, None, at(-60)),
+            entry(9, LogEntryKind::Summary, 0, None, at(2)),
+        ];
+        let asked = Some(SummaryAsk {
+            at: at(0),
+            log_then: 4,
+        });
+        assert_eq!(summary_step(None, &[], at(0)), SummaryStep::Ask);
+        assert_eq!(summary_step(asked, &earlier, at(5)), SummaryStep::Wait);
+        assert_eq!(summary_step(asked, &recorded, at(5)), SummaryStep::End);
+        assert_eq!(summary_step(asked, &earlier, at(10)), SummaryStep::End);
     }
 }

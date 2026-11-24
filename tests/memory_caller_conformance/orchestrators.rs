@@ -791,6 +791,31 @@ fn memory_caller_keeps_an_orchestrators_memory_like_the_real_module() {
             .await
             .unwrap();
         assert!(r.won() && m.won(), "{r:?} {m:?}");
+        // The start's entry carries its request's stamp on both sides
+        // (`started_by_orchestrator`).
+        let stamps = |rows: &SharedRows| {
+            let entry = rows
+                .orchestrator_log()
+                .into_iter()
+                .find(|e| e.kind == "started_task" && e.task_id == first.0)
+                .map(|e| e.at);
+            let request = rows
+                .dispatch_requests()
+                .into_iter()
+                .find(|q| q.task_id == first)
+                .map(|q| q.requested_at.format("%Y-%m-%d %H:%M:%S%.3f").to_string());
+            (entry, request)
+        };
+        let (entry, request) = stamps(&rows_mem);
+        assert!(entry.is_some() && request.is_some());
+        wait_for!({
+            let (entry, request) = stamps(&rows_real);
+            entry.is_some() && request.is_some()
+        });
+        for (entry, request) in [stamps(&rows_mem), stamps(&rows_real)] {
+            let (entry, request) = (entry.unwrap(), request.unwrap());
+            assert_eq!(entry, request, "the entry carries the request's stamp");
+        }
 
         let (question, answer, why) = (
             "rebase or pr?".to_string(),

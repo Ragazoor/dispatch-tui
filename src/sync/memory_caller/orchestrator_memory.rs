@@ -28,7 +28,18 @@ impl MemoryReducerCaller {
         let outcome = self.apply_request_dispatch(task, requester, "mcp".into(), String::new())?;
         if let ReducerOutcome::Applied(_) = &outcome {
             let mut tables = self.lock();
-            self.insert_log_entry(&mut tables, entry);
+            // The module writes both rows in one transaction, so the entry
+            // carries the request's own stamp (`started_by_orchestrator`).
+            let requested_at = tables
+                .dispatch_requests
+                .values()
+                .filter(|r| r.task_id == task.0)
+                .max_by_key(|r| r.id)
+                .map(|r| r.requested_at.clone());
+            match requested_at {
+                Some(at) => self.insert_log_entry_at(&mut tables, entry, at),
+                None => self.insert_log_entry(&mut tables, entry),
+            }
         }
         Ok(outcome)
     }
@@ -217,12 +228,18 @@ impl MemoryReducerCaller {
         tables: &mut Tables,
         entry: module::OrchestratorLogEntry,
     ) {
+        let at = self.now();
+        self.insert_log_entry_at(tables, entry, at);
+    }
+
+    fn insert_log_entry_at(
+        &self,
+        tables: &mut Tables,
+        entry: module::OrchestratorLogEntry,
+        at: String,
+    ) {
         let id = Self::assign_id(0, &mut tables.next_log_entry_id);
-        let row = module::OrchestratorLogEntry {
-            id,
-            at: self.now(),
-            ..entry
-        };
+        let row = module::OrchestratorLogEntry { id, at, ..entry };
         tables.orchestrator_log.insert(id, row.clone());
         self.rows.upsert_orchestrator_log_entry(&row.into());
     }

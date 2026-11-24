@@ -553,9 +553,9 @@ rule BoardWaitsForTheSummary {
         -- HOST-SIDE. The ask is a wake message (agent-health.allium:
         -- WakeTheOrchestrator): "the epic is done: record your closing
         -- summary with orchestrator-summary_record". The board keeps the
-        -- window until the orchestrator's next completed turn (a
-        -- last_turn_at other than the one it held at the ask) or until config.orchestrator_ping_wait
-        -- has passed since the ask, whichever is first, and then ends the
+        -- window until a summary entry newer than the ask is in the log, or
+        -- until config.orchestrator_ping_wait has passed since the ask,
+        -- whichever is first, and then ends the
         -- session as EndOrchestratorSession says. The ask is the board's own
         -- memory: a board that restarts while it waits asks again. When no
         -- session is live as the epic finishes there is no ask and no

@@ -273,7 +273,8 @@ impl OrchestratorHost {
             .wake_states()
             .get(&o.epic_id)
             .and_then(|s| s.summary_ask);
-        match wake::summary_step(asked, o.last_turn_at, now) {
+        let log = self.database.orchestrator_log_of_epic(o.epic_id).await;
+        match wake::summary_step(asked, &log, now) {
             SummaryStep::End => true,
             SummaryStep::Wait => false,
             SummaryStep::Ask => {
@@ -284,7 +285,7 @@ impl OrchestratorHost {
                 }
                 self.wake_states().entry(o.epic_id).or_default().summary_ask = Some(SummaryAsk {
                     at: now,
-                    turn_then: o.last_turn_at,
+                    log_then: wake::newest_entry(&log),
                 });
                 false
             }
@@ -860,7 +861,9 @@ mod tests {
             runner.flattened_calls()
         );
 
-        db.orchestrator_turn_completed(&row.name).await.unwrap();
+        db.record_orchestrator_summary(&row.name, "delivered the step")
+            .await
+            .unwrap();
         host.tick().await;
         let row = db.list_orchestrators().await.remove(0);
         assert!(!row.is_live());
