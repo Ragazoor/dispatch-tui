@@ -839,6 +839,7 @@ mod event_loop;
 mod keep_awake;
 mod learnings;
 mod orchestrator_host;
+mod orchestrator_wake;
 mod people;
 mod pr;
 mod session_host;

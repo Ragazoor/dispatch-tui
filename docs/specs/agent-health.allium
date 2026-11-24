@@ -1485,9 +1485,11 @@ rule WakeTheOrchestrator {
         --
         -- The events of one tick go as ONE message, typed into the window
         -- as a single line that starts "[dispatch] " and names each event
-        -- with its task id, and for trouble whether the one retry is still
-        -- there (orchestrators.allium: already_retried). Claude Code queues
-        -- a message typed while a turn runs.
+        -- with its task id and what to do about it. A trouble event names
+        -- orchestrator-trouble_record, and the line says that a refused
+        -- record means raising a waiting item (orchestrators.allium:
+        -- already_retried, which the store checks). Claude Code queues a
+        -- message typed while a turn runs.
         --
         -- The comparison lives in the board's memory. Events while no board
         -- runs are not replayed. The first tick that finds a live window it

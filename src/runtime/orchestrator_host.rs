@@ -12,8 +12,22 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use super::orchestrator_wake::{self as wake, SummaryAsk, SummaryStep};
 use super::*;
 use crate::models::{Epic, EpicId, EpicOrchestration, Orchestrator, Task, TaskStatus, TmuxWindow};
+
+/// What this board remembers of one live orchestrator between ticks
+/// (`agent-health.allium: WakeTheOrchestrator`).
+#[derive(Default)]
+struct WakeState {
+    /// The subtree at the last tick; `None` until the first one.
+    seen: Option<wake::Subtree>,
+    woken: wake::Woken,
+    /// This board started the session, so its prompt shows the board.
+    started_here: bool,
+    /// This board's ask for the closing summary.
+    summary_ask: Option<SummaryAsk>,
+}
 
 /// What one tick does for this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,6 +140,7 @@ pub(super) struct OrchestratorHost {
     /// The epics of the rows on this host at the last tick
     /// (`plan_orchestrators`' `seen_here`).
     seen_here: Arc<std::sync::Mutex<BTreeSet<EpicId>>>,
+    wakes: Arc<std::sync::Mutex<std::collections::HashMap<EpicId, WakeState>>>,
 }
 
 impl OrchestratorHost {
@@ -143,6 +158,7 @@ impl OrchestratorHost {
             claude_json,
             emb_svc,
             seen_here: Arc::new(std::sync::Mutex::new(BTreeSet::new())),
+            wakes: Arc::default(),
         }
     }
 
@@ -193,10 +209,154 @@ impl OrchestratorHost {
             windows.as_ref(),
             &seen_here,
         );
+        let now = chrono::Utc::now();
+        let mut acted_on = HashSet::new();
         for action in actions {
+            match &action {
+                OrchestratorAction::Start(o) => {
+                    acted_on.insert(o.epic_id);
+                    self.wake_states().insert(
+                        o.epic_id,
+                        WakeState {
+                            started_here: true,
+                            ..WakeState::default()
+                        },
+                    );
+                }
+                OrchestratorAction::WindowLost(o) | OrchestratorAction::GiveUp(o) => {
+                    acted_on.insert(o.epic_id);
+                    self.wake_states().remove(&o.epic_id);
+                }
+                OrchestratorAction::End(o) => {
+                    acted_on.insert(o.epic_id);
+                    if !self.summary_lets_it_end(o, &epics, now).await {
+                        continue;
+                    }
+                    self.wake_states().remove(&o.epic_id);
+                }
+                OrchestratorAction::Ensure(_) | OrchestratorAction::CloseGone(_) => {}
+            }
             self.apply(&host, action, &epics, &orchestrations, &tasks)
                 .await;
         }
+        let live: Vec<&Orchestrator> = orchestrators
+            .iter()
+            .filter(|o| o.host == host && o.is_live() && !acted_on.contains(&o.epic_id))
+            .collect();
+        if !live.is_empty() {
+            self.wake_live(&host, &live, &epics, &tasks, now).await;
+        }
+    }
+
+    fn wake_states(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::HashMap<EpicId, WakeState>> {
+        self.wakes.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// `BoardWaitsForTheSummary`: on a finished epic, ask for the closing
+    /// summary and keep the window until a turn completes or the wait passes.
+    /// `true` when the session may end now.
+    async fn summary_lets_it_end(
+        &self,
+        o: &Orchestrator,
+        epics: &[Epic],
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        let done = epics
+            .iter()
+            .any(|e| e.id == o.epic_id && e.status == TaskStatus::Done);
+        let Some(window) = o.tmux_window.clone().filter(|_| done) else {
+            return true;
+        };
+        let asked = self
+            .wake_states()
+            .get(&o.epic_id)
+            .and_then(|s| s.summary_ask);
+        match wake::summary_step(asked, o.last_turn_at, now) {
+            SummaryStep::End => true,
+            SummaryStep::Wait => false,
+            SummaryStep::Ask => {
+                let line = wake::wake_line(o.epic_id, &[wake::summary_event(o.epic_id)]);
+                if !self.type_into(window, line).await {
+                    tracing::warn!(orchestrator = %o.name, "could not ask for the closing summary");
+                    return true;
+                }
+                self.wake_states().entry(o.epic_id).or_default().summary_ask = Some(SummaryAsk {
+                    at: now,
+                    turn_then: o.last_turn_at,
+                });
+                false
+            }
+        }
+    }
+
+    /// `WakeTheOrchestrator` for this machine's live orchestrators.
+    async fn wake_live(
+        &self,
+        host: &str,
+        live: &[&Orchestrator],
+        epics: &[Epic],
+        tasks: &[Task],
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        let db = &self.database;
+        let (items, requests) = tokio::join!(db.list_waiting_items(), db.dispatch_requests());
+        for o in live {
+            let ids = crate::models::epics::descendant_epic_ids(o.epic_id, epics);
+            let mine: Vec<&Task> = tasks
+                .iter()
+                .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
+                .collect();
+            let mut ready = BTreeSet::new();
+            for t in mine.iter().filter(|t| t.status == TaskStatus::Backlog) {
+                if db.ready_mark(t.id).await.is_some() {
+                    ready.insert(t.id);
+                }
+            }
+            let log = db.orchestrator_log_of_epic(o.epic_id).await;
+            let reads = wake::EpicReads {
+                tasks: mine,
+                ready,
+                items: items.iter().filter(|i| i.epic_id == o.epic_id).collect(),
+                log: &log,
+                requests: &requests,
+            };
+            let current = wake::subtree(host, &reads);
+            let events = {
+                let mut states = self.wake_states();
+                let state = states.entry(o.epic_id).or_default();
+                let mut events = match &state.seen {
+                    Some(prev) => wake::changes(host, prev, &current, &reads),
+                    None if state.started_here => Vec::new(),
+                    None => vec![wake::restart_event()],
+                };
+                events.extend(wake::due(host, &reads, now, &mut state.woken));
+                state.seen = Some(current);
+                events
+            };
+            if events.is_empty() {
+                continue;
+            }
+            let Some(window) = o.tmux_window.clone() else {
+                continue;
+            };
+            if !self
+                .type_into(window, wake::wake_line(o.epic_id, &events))
+                .await
+            {
+                tracing::warn!(orchestrator = %o.name, "could not wake the orchestrator");
+            }
+        }
+    }
+
+    /// Type one line into an orchestrator's window off the async runtime;
+    /// `true` when it was sent.
+    async fn type_into(&self, window: TmuxWindow, line: String) -> bool {
+        let runner = self.runner.clone();
+        let sent =
+            tokio::task::spawn_blocking(move || tmux::send_keys(&window, &line, &*runner)).await;
+        matches!(sent, Ok(Ok(())))
     }
 
     async fn apply(
@@ -643,7 +803,12 @@ mod tests {
                 listing(""),
                 listing(""),
                 MockProcessRunner::ok(),
-                // Tick 3: the plan's listing, the end's window check, the kill.
+                // Tick 3: the plan's listing; the epic is done, so the summary
+                // ask's two send-keys.
+                listing(&shown),
+                MockProcessRunner::ok(),
+                MockProcessRunner::ok(),
+                // Tick 4: the plan's listing, the end's window check, the kill.
                 listing(&shown),
                 listing(&shown),
                 MockProcessRunner::ok(),
@@ -685,12 +850,100 @@ mod tests {
         .unwrap();
         host.tick().await;
         let row = db.list_orchestrators().await.remove(0);
+        assert!(row.is_live(), "it waits for the closing summary");
+        assert!(
+            runner
+                .flattened_calls()
+                .iter()
+                .any(|c| c.contains("record your closing summary")),
+            "{:?}",
+            runner.flattened_calls()
+        );
+
+        db.orchestrator_turn_completed(&row.name).await.unwrap();
+        host.tick().await;
+        let row = db.list_orchestrators().await.remove(0);
         assert!(!row.is_live());
         assert!(!row.session_died, "the board ended it");
         assert!(runner
             .flattened_calls()
             .iter()
             .any(|c| c.contains("kill-window")));
+    }
+
+    /// agent-health.allium: WakeTheOrchestrator. A live window the board did
+    /// not start is told the board restarted; after that, what changed.
+    #[tokio::test]
+    async fn an_adopted_session_is_told_of_the_restart_then_of_what_changed() {
+        let db = crate::runtime::tests::test_db().await;
+        let epic = db.create_epic("E", "", None).await.unwrap();
+        db.switch_orchestrator_on(epic.id, None, None)
+            .await
+            .unwrap();
+        let task = db
+            .create_task(crate::models::CreateTaskRequest {
+                epic_id: Some(epic.id),
+                ..crate::models::CreateTaskRequest::fixture("t", "/repo")
+            })
+            .await
+            .unwrap();
+        let host_id = crate::store::HostStore::host_id(&*db).to_string();
+        db.ensure_orchestrator(epic.id, &host_id).await.unwrap();
+        let id = db.list_orchestrators().await[0].id;
+        db.start_orchestrator_session(id, &host_id, false)
+            .await
+            .unwrap();
+        let window = TmuxWindow::for_orchestrator(epic.id);
+        let shown = format!("{}\n", window.as_str());
+        let runner = Arc::new(
+            MockProcessRunner::new(vec![
+                // Tick 1: the plan's listing, then the wake's two send-keys.
+                listing(&shown),
+                MockProcessRunner::ok(),
+                MockProcessRunner::ok(),
+                // Tick 2: the same.
+                listing(&shown),
+                MockProcessRunner::ok(),
+                MockProcessRunner::ok(),
+                // Tick 3: the plan's listing only: nothing changed.
+                listing(&shown),
+            ])
+            .with_windows(&[window.as_str()]),
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        let host = OrchestratorHost::new(
+            db.clone(),
+            runner.clone(),
+            tmp.path().join("data"),
+            tmp.path().join(".claude.json"),
+            crate::embeddings::EmbeddingService::new_noop(),
+        );
+        let typed = |runner: &MockProcessRunner| -> Vec<String> {
+            runner
+                .flattened_calls()
+                .into_iter()
+                .filter(|c| c.contains("[dispatch]"))
+                .collect()
+        };
+
+        host.tick().await;
+        let lines = typed(&runner);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("the board restarted"), "{lines:?}");
+
+        db.mark_task_ready(task, crate::models::ReadyMarker::Operator, None)
+            .await
+            .unwrap();
+        host.tick().await;
+        let lines = typed(&runner);
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[1].contains(&format!("task #{} was marked ready", task.0)),
+            "{lines:?}"
+        );
+
+        host.tick().await;
+        assert_eq!(typed(&runner).len(), 2, "a quiet tick types nothing");
     }
 
     /// orchestrators.allium: OrchestratorThatKeepsDyingWaitsForTheOperator.

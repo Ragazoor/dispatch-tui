@@ -212,10 +212,16 @@ pub fn build_orchestrator_prompt(
         limit = orchestration.limit(),
     ));
     p.push_str(
-        "\nWhen a task agent is in trouble (stale, crashed, failed to start, or hit a conflict in \
-         its wrap-up), act once: ask it for status, resume it, start it again, or tell it to \
-         resolve the conflict. If the same trouble comes back, pass it to the operator with what \
-         you tried and what you recommend.\n",
+        "\nThe board wakes you with messages that start \"[dispatch] \": what changed in the epic \
+         and what came due. When a task agent is in trouble (stale, crashed, failed to start, or \
+         hit a conflict in its wrap-up), record your one retry with orchestrator-trouble_record \
+         before you act, then act once: ask it for status, resume it with task_resume, mark it \
+         ready and start it again, or tell it to resolve the conflict and wrap up again. If the \
+         record is refused, the retry is spent: raise a waiting item with what you tried and what \
+         you recommend. Before you ask a stale agent for status, check whether it waits for your \
+         answer or for an open item of its task; then answer it or leave it, and ask nothing. A \
+         status ask it did not answer, and a review that has waited too long, each raise a \
+         waiting item. When the board says the epic is done, record your closing summary.\n",
     );
     p.push_str("\nThe epic's tasks (id, title, status, sub-status, ready, agent):\n");
     if tasks.is_empty() {
@@ -431,6 +437,31 @@ mod tests {
             // the guidance: a passed-on question and the operator's answer
             "waiting-item_create",
             "either way the answer must reach the agent before you resolve the item",
+        ] {
+            assert!(flat.contains(needle), "missing {needle:?} in:\n{p}");
+        }
+    }
+
+    /// dispatch-prompt.allium: ThePromptsParts, the trouble rules
+    /// (orchestrators.allium: OrchestratorRecordsATroubleAction, AgentIsStale).
+    #[test]
+    fn the_prompt_carries_the_trouble_rules_and_the_wake() {
+        let epic = EpicBuilder::new(7).title("E").build();
+        let p = build_orchestrator_prompt(
+            "zlata",
+            &epic,
+            &switch(StartRule::MarkedOnly, None),
+            &[],
+            &OrchestratorMemory::default(),
+        );
+        let flat = p.split_whitespace().collect::<Vec<_>>().join(" ");
+        for needle in [
+            "messages that start \"[dispatch] \"",
+            "record your one retry with orchestrator-trouble_record before you act",
+            "If the record is refused, the retry is spent: raise a waiting item",
+            "check whether it waits for your answer or for an open item of its task",
+            "mark it ready and start it again",
+            "When the board says the epic is done, record your closing summary",
         ] {
             assert!(flat.contains(needle), "missing {needle:?} in:\n{p}");
         }
