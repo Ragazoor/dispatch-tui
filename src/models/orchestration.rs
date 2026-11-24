@@ -244,9 +244,7 @@ pub fn orchestrator_state(o: &Orchestrator, subtree_tasks: &[&super::Task]) -> &
     let open = subtree_tasks
         .iter()
         .any(|t| t.status != super::TaskStatus::Done);
-    let running_here = subtree_tasks.iter().any(|t| {
-        t.status == super::TaskStatus::Running && t.host.as_deref() == Some(o.host.as_str())
-    });
+    let running_here = subtree_tasks.iter().any(|t| runs_here(t, &o.host));
     match (o.is_live(), open, running_here) {
         (true, _, true) => "working",
         (true, _, false) => "idle",

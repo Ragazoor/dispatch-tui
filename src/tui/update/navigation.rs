@@ -54,6 +54,18 @@ impl App {
             None => return vec![],
         };
         let count = self.view().column_item_count(status);
+        // The orchestrator view has no select-all row (`board-layout.allium`,
+        // "Orchestrator View").
+        if self.view().orchestrator_view() {
+            self.selection_mut().on_select_all = false;
+            if count > 0 {
+                let current = self.selection().row(col) as isize;
+                let new_row = (current + delta).clamp(0, count as isize - 1) as usize;
+                self.selection_mut().set_row(col, new_row);
+            }
+            self.update_anchor_from_current();
+            return vec![];
+        }
 
         if self.selection().on_select_all {
             // On the toggle row
@@ -318,10 +330,10 @@ fn reorder_target(
         ColumnItem::Epic(e) => {
             let key = if in_done {
                 // An epic's Done key is `done_sort_key`, not its bare
-                // `completed_at`: a still-running epic has none of its own and
-                // is rendered at its newest done subtask's time, so that is the
-                // value the swap must reason about — otherwise the write and
-                // the next render disagree.
+                // `completed_at`: an epic with no stamp of its own is rendered
+                // at its newest done subtask's time, so that is the value the
+                // swap must reason about — otherwise the write and the next
+                // render disagree.
                 ReorderKey::Completed(placements.get(&e.id)?.done_completion(e)?)
             } else {
                 ReorderKey::Generic(e.sort_key())

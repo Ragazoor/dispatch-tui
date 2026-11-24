@@ -55,8 +55,8 @@ impl App {
             // A folded section names its own; every card is asked.
             ColumnItem::FoldedSection(header) => Some(header.at.section),
             _ => {
-                // An epic card's section is per column, so the column the
-                // cursor is in is part of the question.
+                // An epic card's section is read off its column, so the
+                // column the cursor is in is part of the question.
                 let status = TaskStatus::from_column_index(self.selection().column() - 1)?;
                 let cached = self.view().cached_placements();
                 self.item_section(&item, status, cached.as_deref())

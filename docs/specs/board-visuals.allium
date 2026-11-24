@@ -774,8 +774,8 @@ use "./work-packages.allium" as wp
 -- The waiting count is the loudest thing on the card: YELLOW and bold, as
 -- in the epic view's header. Working is CYAN, idle and resting MUTED. Down
 -- is an alarm, like crashed: RED and bold, and the stripe draws in RED.
--- Decided by the epic's acting orchestrator while the operator was away;
--- open to the operator's review.
+-- Chosen by the step's builder and approved by the epic's acting
+-- orchestrator while the operator was away; open to the operator's review.
 
 -- == Phoenix marker ==
 --

@@ -664,10 +664,11 @@ surface PackageViewCards {
         -- Visible is the same predicate the main board applies.
         -- Flattened columns (board-layout.allium: BoardView.flattens) apply in a
         -- package view exactly as on the main board, per column. A flattened
-        -- column draws no epic card: it holds the linked tasks plus every
-        -- task in the subtree of a linked epic, each once, grouped under
-        -- the header of the task's own epic as on the main board. Backlog is
-        -- never flattened, so the linked epic cards stay there. The
+        -- column draws no epic card, save a finished linked epic's in Done:
+        -- it holds the linked tasks plus every task in the subtree of a
+        -- linked epic, each once, grouped under the header of the task's own
+        -- epic as on the main board. Backlog is never flattened, so the
+        -- linked epic cards stay there. The
         -- only-active half of the lens applies through `visible`.
         -- Enter on a flattened card jumps to its epic (epics.allium:
         -- JumpToTaskEpic) with the trail starting at the outermost linked

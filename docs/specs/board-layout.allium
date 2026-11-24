@@ -300,8 +300,9 @@ given {
 -- A finished epic's card sits in Done too, and sorts by
 -- BoardView.done_sort_key: its own completed_at when it has one, else the
 -- freshest completion among its visible done tasks. It goes ahead of the
--- first task group whose key is older than its own, so it sits beside the
--- work that finished it.
+-- first task group whose key is not newer than its own, so it sits just
+-- ahead of the work that finished it. Chosen by the step's builder and
+-- approved by zlata2 while the operator was away.
 --
 -- Scope, deliberately narrow:
 --   - Done only. Backlog, Running and Review keep the generic
@@ -892,6 +893,14 @@ given {
 -- nothing there: a card cannot be selected, moved, reordered, reparented,
 -- linked, folded or deleted from this view. Decided by zlata2 while the
 -- operator was away; open to the operator's review.
+--
+-- No selection acts here. The view draws no select-all row, and the keys
+-- that act on selected cards (x, H/L, m, w, J/K, v, a, Esc's
+-- clear_selection and the like) do nothing, even while a selection made
+-- under another lens exists: a destructive key must not act on cards the
+-- view does not show. The selection itself is kept, so it is back when the
+-- operator steps to flat. Decided by zlata2 while the operator was away;
+-- open to the operator's review.
 --
 -- The cards are a rendered answer like every other card: they follow the
 -- orchestrator rows, the open items and the tasks on every board reload, and
@@ -1797,3 +1806,6 @@ surface TextInputField {
 -- Raised by zlata2, the orchestrators epic's acting orchestrator, while the
 -- operator was away ("Epic Card Placement").
 open question "An epic with tasks only in Running or Review has no card, so the epic-card keys (x, H/L, m, w) have no board path for it until a task returns to backlog or the epic finishes. Is MCP enough, or should the epic view's keys fall back to the viewed epic as e does?"
+
+-- Raised by zlata2 while the operator was away ("Orchestrator View").
+open question "A selection made under flat survives a step to flat_active, where the keys that act on a selection (x, H/L, m) then act on selected cards the only-active filter hides. Should they, or should flat_active ignore a selection of hidden cards as the orchestrator view does?"

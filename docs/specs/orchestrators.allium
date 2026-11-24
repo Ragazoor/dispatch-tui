@@ -245,7 +245,8 @@ config {
 -- operator has given their verdict (core.allium, "Derived review sections":
 -- changes requested by me, approved by me).
 -- orchestrator_state(orchestrator), what the operator sees of it:
---   working: its session is live and a task of the epic runs here.
+--   working: its session is live and a task of the epic runs here, as
+--            running_here counts it: a detached agent does not count.
 --   idle:    its session is live and none does.
 --   resting: the epic has no open work, so no session is wanted.
 --   down:    a session is wanted and none is live.

@@ -351,6 +351,39 @@ fn the_card_follows_a_refresh_to_its_new_column() {
     ));
 }
 
+#[test]
+fn the_cursor_keys_move_between_orchestrator_cards() {
+    let board = OrchestrationBoard {
+        orchestrations: vec![switch(10), switch(20), switch(30)],
+        orchestrators: vec![orchestrator(30, true)],
+        ..OrchestrationBoard::default()
+    };
+    let mut app = orchestrator_app(
+        vec![running_here(1, 30)],
+        vec![make_epic(10), make_epic(20), make_epic(30)],
+        board,
+    );
+    assert_eq!(cards(&app), vec![vec![10, 20], vec![30], vec![], vec![]]);
+    app.selection_mut().set_column(nav(TaskStatus::Backlog));
+    app.selection_mut().set_row(nav(TaskStatus::Backlog), 0);
+    let on = |app: &App| match app.selected_column_item() {
+        Some(ColumnItem::Orchestrator(e)) => Some(e.id.0),
+        _ => None,
+    };
+    assert_eq!(on(&app), Some(10));
+    key(&mut app, KeyCode::Char('j'));
+    assert_eq!(on(&app), Some(20));
+    key(&mut app, KeyCode::Char('j'));
+    assert_eq!(on(&app), Some(20), "the last card holds the cursor");
+    key(&mut app, KeyCode::Char('l'));
+    assert_eq!(on(&app), Some(30));
+    key(&mut app, KeyCode::Char('h'));
+    assert_eq!(on(&app), Some(10), "a new column starts at its first card");
+    key(&mut app, KeyCode::Char('j'));
+    key(&mut app, KeyCode::Char('k'));
+    assert_eq!(on(&app), Some(10));
+}
+
 // ---- CardAnswersDoINeedToLook ----
 
 #[test]
@@ -481,6 +514,59 @@ fn the_hint_bar_names_the_cards_keys() {
 }
 
 #[test]
+fn a_selection_from_flat_is_kept_but_not_acted_on_in_the_orchestrator_view() {
+    let mut app = App::new(vec![epic_task(1, 10, TaskStatus::Running)]);
+    app.board.epics = vec![make_epic(10)];
+    app.set_local_host_id(HERE.to_string());
+    refresh(&mut app, on_ten());
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    assert!(app.selected_tasks().contains(&TaskId(1)));
+    cycle_lens_to(&mut app, Lens::Orchestrators);
+    on_first_card(&mut app);
+    for c in ['x', 'H', 'L', 'm'] {
+        let cmds = key(&mut app, KeyCode::Char(c));
+        assert!(cmds.is_empty(), "{c} sent {cmds:?}");
+        assert!(matches!(app.input.mode, InputMode::Normal), "{c}");
+    }
+    key(&mut app, KeyCode::Esc);
+    assert_eq!(app.board.tasks[0].status, TaskStatus::Running);
+    cycle_lens_to(&mut app, Lens::Flat);
+    assert!(
+        app.selected_tasks().contains(&TaskId(1)),
+        "the selection is back in flat"
+    );
+}
+
+#[test]
+fn the_orchestrator_view_has_no_select_all_row() {
+    let mut app = orchestrator_app(vec![], vec![make_epic(10)], on_ten());
+    on_first_card(&mut app);
+    key(&mut app, KeyCode::Char('k'));
+    assert!(!app.selection().on_select_all);
+    assert!(matches!(
+        app.selected_column_item(),
+        Some(ColumnItem::Orchestrator(_))
+    ));
+    let buf = render_to_buffer(&mut app, 160, 40);
+    assert!(!buffer_contains(&buf, "[ ]"), "no select-all checkbox");
+}
+
+#[test]
+fn a_detached_running_task_takes_no_slot_and_keeps_the_card_idle_in_backlog() {
+    let mut detached = epic_task(1, 10, TaskStatus::Running);
+    detached.host = Some(HERE.to_string());
+    detached.worktree = Some("/wt/1".to_string());
+    detached.tmux_window = None;
+    let mut app = orchestrator_app(vec![detached], vec![make_epic(10)], on_ten());
+    assert_eq!(cards(&app), vec![vec![10], vec![], vec![], vec![]]);
+    let buf = render_to_buffer(&mut app, 160, 40);
+    assert!(buffer_contains(&buf, "idle"));
+    assert!(buffer_contains(&buf, "0/3"));
+}
+
+#[test]
 fn every_other_card_key_does_nothing() {
     let mut app = orchestrator_app(
         vec![epic_task(1, 10, TaskStatus::Backlog)],
@@ -598,6 +684,35 @@ fn a_finished_epic_has_its_card_in_done_and_nowhere_else() {
         })
         .collect();
     assert_eq!(epic_columns, vec![TaskStatus::Done]);
+}
+
+#[test]
+fn the_cursor_keys_reach_a_finished_epics_card_between_done_tasks() {
+    let done_at = |id, epic: Option<i64>, secs: i64| {
+        let mut t = make_task(id, TaskStatus::Done);
+        t.epic_id = epic.map(EpicId);
+        t.completed_at = chrono::DateTime::from_timestamp(1_700_000_000 + secs, 0);
+        t
+    };
+    let mut app = App::new(vec![
+        done_at(1, None, 300),
+        done_at(2, Some(10), 200),
+        done_at(3, None, 100),
+    ]);
+    app.board.epics = vec![make_epic(10)];
+    let done = nav(TaskStatus::Done);
+    app.selection_mut().set_column(done);
+    app.selection_mut().set_row(done, 0);
+    let mut seen = vec![];
+    for _ in 0..4 {
+        seen.push(match app.selected_column_item() {
+            Some(ColumnItem::Task(t)) => format!("t{}", t.id.0),
+            Some(ColumnItem::Epic(e)) => format!("e{}", e.id.0),
+            other => format!("{other:?}"),
+        });
+        key(&mut app, KeyCode::Char('j'));
+    }
+    assert_eq!(seen, vec!["t1", "e10", "t2", "t3"]);
 }
 
 #[test]

@@ -431,7 +431,7 @@ fn task_column_segment(
     // emphasis (board-visuals.allium: "Column header bar").
     let label = format!("{}{}", prefix, status.as_str().to_uppercase());
 
-    let checkbox = if is_focused {
+    let checkbox = if is_focused && !app.view().orchestrator_view() {
         // The checkbox is about the cards select-all acts on, so anything that
         // is not a card is skipped rather than counted — a folded section's
         // header included, even though it is selectable.

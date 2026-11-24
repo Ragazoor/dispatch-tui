@@ -6,6 +6,27 @@ use crate::keybindings::KeyBinding;
 
 use super::key_event;
 
+/// The board.normal actions that act on the selection, or on a task or epic
+/// card, and so do nothing in the orchestrator view.
+const ACTS_ON_CARDS_OR_SELECTION: &[&str] = &[
+    "delete_task",
+    "move_task_forward",
+    "move_task_backward",
+    "move_task_to_epic",
+    "reparent_epic",
+    "link_work_package",
+    "reorder_task_down",
+    "reorder_task_up",
+    "toggle_select",
+    "select_all",
+    "clear_selection",
+    "toggle_ready",
+    "toggle_bookmark",
+    "copy_task",
+    "dispatch_task",
+    "detach_tmux",
+];
+
 impl App {
     /// Run the action of the board.normal row a key resolved to
     /// (`KeypressRunsItsRowsAction`). The row says which action; this says
@@ -27,6 +48,12 @@ impl App {
         b: &KeyBinding,
         label: &str,
     ) -> Option<Vec<Command>> {
+        if self.view().orchestrator_view() && ACTS_ON_CARDS_OR_SELECTION.contains(&b.action) {
+            // A destructive key must not act on cards this view does not
+            // show; the selection is kept for the other lenses
+            // (`board-layout.allium`, "Orchestrator View").
+            return Some(vec![]);
+        }
         self.run_normal_board(b, label)
             .or_else(|| self.run_normal_epic(b, label))
             .or_else(|| self.run_normal_task(b, label))

@@ -154,21 +154,18 @@ impl<'a> BoardView<'a> {
                 .collect(),
             BoardViewMode::Epic { epic_id, .. } => {
                 let current = epic_id;
-                // Only a flattened column reaches past the epic's own tasks, so
-                // the subtree is worth walking only when some column will use
-                // it. With flattening off, every column takes the else arm and
-                // this stays `None`.
-                let subtree = Some(crate::models::descendant_task_ids(
+                // A flattened column reaches past the epic's own tasks.
+                let subtree = crate::models::descendant_task_ids(
                     current,
                     &self.board.epics,
                     &self.board.tasks,
-                ));
+                );
                 self.board
                     .tasks
                     .iter()
                     .filter(|t| {
                         if self.is_flattened_for_status(t.status) {
-                            subtree.as_ref().is_some_and(|s| s.contains(&t.id))
+                            subtree.contains(&t.id)
                         } else {
                             t.epic_id == Some(current)
                         }
@@ -181,18 +178,16 @@ impl<'a> BoardView<'a> {
                 // in a flattened column every task under a linked epic too
                 // (`work-packages.allium: PackageViewCards`).
                 let (linked, linked_epics) = self.package_item_ids(package_id);
-                // As in the Epic arm, only a flattened column reaches past
-                // the linked items, so the subtree is walked only then.
-                let subtree = Some(self.package_subtree_epics(linked_epics));
+                // As in the Epic arm, a flattened column reaches past the
+                // linked items.
+                let subtree = self.package_subtree_epics(linked_epics);
                 self.board
                     .tasks
                     .iter()
                     .filter(|t| {
                         linked.contains(&t.id)
                             || (self.is_flattened_for_status(t.status)
-                                && t.epic_id
-                                    .zip(subtree.as_ref())
-                                    .is_some_and(|(e, s)| s.contains(&e)))
+                                && t.epic_id.is_some_and(|e| subtree.contains(&e)))
                     })
                     .filter(|t| filters.admits(t))
                     .collect()
@@ -202,9 +197,9 @@ impl<'a> BoardView<'a> {
 
     /// Where every epic's card is drawn, keyed by epic id.
     ///
-    /// An epic card appears in every column where the epic's subtree holds a
-    /// *visible* task of that status, so one epic can hold four cards at once
-    /// (`board-layout.allium`, "Epic Card Placement"). Visible means the task
+    /// An epic card sits in Backlog when its subtree holds a *visible* backlog
+    /// task or no visible task at all, and in Done when every visible task is
+    /// done (`board-layout.allium`, "Epic Card Placement"). Visible means the task
     /// survives the same four predicates `tasks_for_current_view` applies —
     /// the repo filter, the epic hide-list, the only-active filter and the
     /// search query. A task
@@ -430,9 +425,9 @@ impl<'a> BoardView<'a> {
     ///
     /// This is the board's only column builder. A *task* card's column is its
     /// `TaskStatus` and nothing else (see `board-layout.allium`, "Board
-    /// Columns"); an *epic* card is drawn in every column its subtree has
-    /// visible work in, which is what the placement map answers ("Epic Card
-    /// Placement"). Sub-status groups cards into sections *within* the column,
+    /// Columns"); an *epic* card's column comes from its subtree's visible
+    /// work, which is what the placement map answers ("Epic Card Placement").
+    /// The orchestrator view's cards come from [`Self::orchestrator_cards`]. Sub-status groups cards into sections *within* the column,
     /// which [`Self::column_items_for_status_with_view_tasks`] emits as headers.
     pub fn column_items_for_status_with_placements(
         self,
@@ -741,9 +736,8 @@ impl<'a> BoardView<'a> {
             })
             .collect();
 
-        // An epic card is not placed by epic.status and is not placed once: it
-        // is drawn in every column its subtree has visible work in
-        // (board-layout.allium, "Epic Card Placement").
+        // An epic card is not placed by epic.status but by its subtree's
+        // visible work (board-layout.allium, "Epic Card Placement").
         let placements = &self.placements_or_compute(placements);
         for epic in self.visible_epics_for_effective_view(pass) {
             let Some(placement) = placements.get(&epic.id) else {
@@ -835,10 +829,10 @@ impl<'a> BoardView<'a> {
     /// The section an epic card renders under in the `status` column. `None`
     /// in a column with no sections.
     ///
-    /// An epic card can sit in all four columns at once, so the answer is per
-    /// column: it comes off that column's own slice of the subtree, not the
-    /// epic's board-wide substatus (board-layout.allium, "Epic Card
-    /// Placement"). Every caller of this question must go through here.
+    /// The answer is per column: it comes off that column's own slice of the
+    /// subtree, not the epic's board-wide substatus (board-layout.allium,
+    /// "Epic Card Placement"). Every caller of this question must go through
+    /// here.
     ///
     /// `placements` is the per-frame map when the caller has it; without one
     /// this recomputes, because a caller that answered `None` instead would
@@ -911,6 +905,13 @@ impl<'a> BoardView<'a> {
         pass: &EpicSearchPass<'a>,
         placements: &EpicPlacementMap,
     ) -> usize {
+        if self.orchestrator_view() {
+            return self
+                .orchestrator_cards()
+                .iter()
+                .filter(|(_, column)| *column == status)
+                .count();
+        }
         if self.column_has_rendered_fold(status) {
             return self
                 .column_items_for_status_with_view_tasks(status, Some(placements), view_tasks, pass)
@@ -924,11 +925,13 @@ impl<'a> BoardView<'a> {
                 .values()
                 .filter(|p| p.appears_in(status))
                 .count();
-        if self.is_flattened_for_status(status) {
+        // A flattened column draws no epic card, save a finished epic's in
+        // Done (`BoardView.renders_epics`).
+        if self.is_flattened_for_status(status) && status != TaskStatus::Done {
             return task_count;
         }
-        // Epic cards are placed per column, so this counts the ones this column
-        // draws rather than the ones whose recorded status matches it.
+        // Epic cards are placed by their visible work, so this counts the ones
+        // this column draws rather than the ones whose recorded status matches it.
         let epic_count = self
             .visible_epics_for_effective_view(pass)
             .filter(|e| placements.get(&e.id).is_some_and(|p| p.appears_in(status)))
@@ -1123,8 +1126,7 @@ impl<'a> BoardView<'a> {
     /// in one place instead of two.
     ///
     /// This answers *which* epics have a card at all. *Where* each one's cards
-    /// land is a separate question, answered by `compute_epic_placements`: an
-    /// epic visible here can hold a card in all four columns at once.
+    /// land is a separate question, answered by `compute_epic_placements`.
     ///
     /// `pass` carries the search index for the whole pass (see
     /// [`Self::epic_search_pass`]), shared across every column in it — which is

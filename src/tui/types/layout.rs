@@ -382,10 +382,9 @@ impl EpicPlacement {
             .unwrap_or(false)
     }
 
-    /// The substatus the copy in `status` carries — both the section it lands
-    /// in and the label it renders. Derived from that column's own tasks, so a
-    /// blocked task in Running has no say over the Review copy. The table is
-    /// shared with `epic_substatus`; only the inputs narrow.
+    /// The substatus the card in `status` carries — both the section it lands
+    /// in and the label it renders. Derived from that column's own tasks. The
+    /// table is shared with `epic_substatus`; only the inputs narrow.
     pub fn substatus_in(&self, epic: &Epic, status: TaskStatus) -> EpicSubstatus {
         crate::models::epic_substatus_for(status, epic.plan_path.is_some(), self.blocked_running)
     }
@@ -399,13 +398,12 @@ impl EpicPlacement {
     ///
     /// The own-first precedence is what makes a manual reorder of an epic card
     /// in Done mean something: the reorder writes `epic.completed_at`, and this
-    /// prefers it over the derived subtask key. The derived branch is the one a
-    /// still-RUNNING epic takes — its card lands in Done because part of its
-    /// subtree finished, not because the epic did — and it is what keeps such a
-    /// card next to the work that put it there.
+    /// prefers it over the derived subtask key. The derived branch is the one
+    /// a finished epic with no stamp of its own takes, and it keeps the card
+    /// next to the work that finished it.
     ///
-    /// Only the hierarchical path calls this; a flattened column keys its
-    /// groups on a task's direct epic instead.
+    /// A flattened column keys its task groups on a task's direct epic
+    /// instead.
     pub fn sort_key(&self, epic: &Epic, status: TaskStatus) -> CardOrderKey {
         if status != TaskStatus::Done {
             return CardOrderKey::Generic(epic.sort_key());
