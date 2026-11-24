@@ -302,19 +302,23 @@ impl OrchestratorHost {
         now: chrono::DateTime<chrono::Utc>,
     ) {
         let db = &self.database;
-        let (items, requests) = tokio::join!(db.list_waiting_items(), db.dispatch_requests());
+        let (items, requests, ready_ids) = tokio::join!(
+            db.list_waiting_items(),
+            db.dispatch_requests(),
+            db.ready_task_ids()
+        );
+        let ready_ids: HashSet<_> = ready_ids.into_iter().collect();
         for o in live {
             let ids = crate::models::epics::descendant_epic_ids(o.epic_id, epics);
             let mine: Vec<&Task> = tasks
                 .iter()
                 .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
                 .collect();
-            let mut ready = BTreeSet::new();
-            for t in mine.iter().filter(|t| t.status == TaskStatus::Backlog) {
-                if db.ready_mark(t.id).await.is_some() {
-                    ready.insert(t.id);
-                }
-            }
+            let ready = mine
+                .iter()
+                .map(|t| t.id)
+                .filter(|id| ready_ids.contains(id))
+                .collect();
             let log = db.orchestrator_log_of_epic(o.epic_id).await;
             let reads = wake::EpicReads {
                 tasks: mine,

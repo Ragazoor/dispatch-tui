@@ -58,10 +58,7 @@ pub(super) struct Subtree {
 
 /// The timers already woken for, so each wakes once per entry.
 #[derive(Debug, Clone, Default)]
-pub(super) struct Woken {
-    pings: BTreeSet<i64>,
-    reviews: BTreeSet<i64>,
-}
+pub(super) struct Woken(BTreeSet<i64>);
 
 /// This machine's task, or one no machine holds (`live_orchestrator_for`).
 fn is_mine(host: &str, task_host: Option<&str>) -> bool {
@@ -244,13 +241,17 @@ pub(super) fn due(
 ) -> Vec<String> {
     let mut events = Vec::new();
     let task = |id: TaskId| reads.tasks.iter().find(|t| t.id == id);
-    for (id, entry) in newest_per_task(reads.log, LogEntryKind::ActedOnTrouble, Some("stale")) {
+    for (id, entry) in newest_per_task(
+        reads.log,
+        LogEntryKind::ActedOnTrouble,
+        Some(SubStatus::Stale.as_str()),
+    ) {
         let Some(t) = task(id) else { continue };
         if t.sub_status != SubStatus::Stale
             || !is_mine(host, t.host.as_deref())
             || entry.at + ping_wait() > now
             || has_open_item(reads, id)
-            || !woken.pings.insert(entry.id)
+            || !woken.0.insert(entry.id)
         {
             continue;
         }
@@ -270,7 +271,7 @@ pub(super) fn due(
             || entry.at + review_reminder_after() > now
             || raised_since
             || has_open_item(reads, id)
-            || !woken.reviews.insert(entry.id)
+            || !woken.0.insert(entry.id)
         {
             continue;
         }

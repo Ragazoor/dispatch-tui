@@ -56,10 +56,14 @@ pub fn orchestrator_writing(r: &impl StoreReads, name: &str) -> Result<Orchestra
 
 /// A log entry of `o`'s epic and host, its `at` left for the caller.
 pub fn log_entry(o: &Orchestrator, kind: &str, task_id: i64, text: &str) -> OrchestratorLogEntry {
+    entry_of(o.epic_id, &o.host, kind, task_id, text)
+}
+
+fn entry_of(epic_id: i64, host: &str, kind: &str, task_id: i64, text: &str) -> OrchestratorLogEntry {
     OrchestratorLogEntry {
         id: 0,
-        epic_id: o.epic_id,
-        host: o.host.clone(),
+        epic_id,
+        host: host.to_string(),
         at: String::new(),
         kind: kind.to_string(),
         task_id,
@@ -217,17 +221,7 @@ pub fn review_entry(r: &impl StoreReads, prior: &Task, next: &Task) -> Option<Or
         return None;
     }
     let on = covering_orchestration(r, next.epic_id)?;
-    Some(OrchestratorLogEntry {
-        id: 0,
-        epic_id: on.epic_id,
-        host: next.host.clone(),
-        at: String::new(),
-        kind: LOG_REVIEW.to_string(),
-        task_id: next.id,
-        text: REVIEW_ENTERED.to_string(),
-        question: String::new(),
-        trouble: String::new(),
-    })
+    Some(entry_of(on.epic_id, &next.host, LOG_REVIEW, next.id, REVIEW_ENTERED))
 }
 
 /// `OrchestratorPassesOnToTheOperator`: the item and its `passed_on` entry,

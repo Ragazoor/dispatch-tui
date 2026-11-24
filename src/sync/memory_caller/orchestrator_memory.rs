@@ -298,6 +298,18 @@ impl MemoryReducerCaller {
         }
     }
 
+    /// Mirrors the module's `log_entering_review`.
+    pub(super) fn log_entering_review(
+        &self,
+        tables: &mut Tables,
+        prior: &module::Task,
+        next: &module::Task,
+    ) {
+        if let Some(entry) = module::review_entry(&*tables, prior, next) {
+            self.insert_log_entry(tables, entry);
+        }
+    }
+
     /// Mirrors the module's `resolve_items_of_deleted_task`.
     pub(super) fn resolve_items_of_deleted_task(&self, tables: &mut Tables, task_id: i64) {
         let open = module::open_items_of_task(&*tables, task_id);

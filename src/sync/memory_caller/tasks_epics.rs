@@ -42,9 +42,7 @@ impl MemoryReducerCaller {
             self.end_marks_on_finish(tables, prior, &row);
             self.drop_ready_mark_on_leaving_backlog(tables, prior, &row);
             self.resolve_items_on_finish(tables, prior, &row);
-            if let Some(entry) = module::review_entry(&*tables, prior, &row) {
-                self.insert_log_entry(tables, entry);
-            }
+            self.log_entering_review(tables, prior, &row);
         }
         // Mirrors the module's `write_task`: EndAgentWhenWorktreeGoes
         // (agents.allium).
