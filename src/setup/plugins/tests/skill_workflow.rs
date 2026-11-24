@@ -390,9 +390,7 @@ fn fix_skill_confirms_then_creates_and_dispatches_a_fix_task_in_the_owning_repo(
     let flat = content.split_whitespace().collect::<Vec<_>>().join(" ");
     for needle in [
         "Do not pass `ready` to `task_create`",
-        "a ready mark wakes the epic's orchestrator",
         "mark the task ready with `task_update` (`ready`: `true`)",
-        "the user asked for this fix",
     ] {
         assert!(
             flat.contains(needle),

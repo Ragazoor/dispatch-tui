@@ -68,7 +68,8 @@ If `task_create` errors, for example on a closed epic, report the error and
 stop. Otherwise call `task_dispatch` with the returned id. If that errors,
 leave the task in backlog, but mark the task ready with `task_update`
 (`ready`: `true`): the user asked for this fix, so an orchestrator of its epic
-may start it. Then report the task id and the error.
+may start it. If the mark is refused because the task is no longer in backlog,
+someone else started it; say so. Then report the task id and the error.
 
 ## Step 6: Report
 
