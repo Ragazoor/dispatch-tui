@@ -233,3 +233,5 @@ Order: only 1 (and 4, if kept) change store rules and must run one at a time. Th
 Still open from the trial and not in this list: the covered prompt is fixed at dispatch, and the learning tools need a task id.
 
 Also dispatched on 2026-11-24, standalone: #99414 (guido), errors from the renamed pr-learnings hook.
+
+Note: `main` already moved on parts of 6 and 7 while this list was written (6c2c68ea and ed8b4136 on the outcome report, 15c34c2f and 5b25263a on task-creating skills and the ready mark). Check them before creating those two tasks.
