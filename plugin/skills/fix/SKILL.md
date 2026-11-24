@@ -60,10 +60,15 @@ the version that gets created.
 Call the `dispatch` MCP tool `task_create` with `tag`: `"fix"`, the board
 label that says a person asked for this fix. For `epic_id`, pass your own epic
 only if the fix belongs to it; otherwise pass `null` for a standalone task.
+Do not pass `ready` to `task_create`: a ready mark wakes the epic's
+orchestrator, which could start the task before your own dispatch does, and
+yours would then fail.
 
 If `task_create` errors, for example on a closed epic, report the error and
 stop. Otherwise call `task_dispatch` with the returned id. If that errors,
-report the task id and the error, and leave the task in backlog.
+leave the task in backlog, but mark the task ready with `task_update`
+(`ready`: `true`): the user asked for this fix, so an orchestrator of its epic
+may start it. Then report the task id and the error.
 
 ## Step 6: Report
 

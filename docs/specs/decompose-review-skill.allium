@@ -160,6 +160,7 @@ config {
     -- A core/WrapUpMode value.
     task_wrap_up_mode: String = "rebase"
     task_auto_run_plan: Boolean = true
+    task_ready: Boolean = true
 }
 
 ------------------------------------------------------------
@@ -426,7 +427,8 @@ rule WritePlanAndCreateTask {
         tag: config.task_tag,
         sort_order: package.position,
         auto_run_plan: config.task_auto_run_plan,
-        wrap_up_mode: config.task_wrap_up_mode
+        wrap_up_mode: config.task_wrap_up_mode,
+        ready: config.task_ready
     )
     ensures: package.status = created
 
@@ -445,7 +447,9 @@ rule WritePlanAndCreateTask {
         -- question whether to start, not the Decisions section
         -- (AutoRunPlanSkipsStartNotDecisions). wrap_up_mode is rebase, the
         -- tag is chore and sort_order is the package's position
-        -- (SubtasksRebaseAndKeepSeverityOrder).
+        -- (SubtasksRebaseAndKeepSeverityOrder). ready is true because the user
+        -- asked for the work when they confirmed the packages
+        -- (SubtasksAreMarkedReady).
 }
 
 rule CreationDone {
@@ -608,6 +612,12 @@ surface DecomposeReviewSession {
         -- Each subtask has wrap_up_mode rebase, so the agent lands on
         -- base_branch without asking and opens no PR of its own, the tag
         -- chore, and a sort_order that keeps severity order.
+
+    @guarantee SubtasksAreMarkedReady
+        -- Each subtask is created ready: the user asked for the work when
+        -- they confirmed the packages, so an orchestrator of the epic may
+        -- start it without anyone marking it first
+        -- (orchestrators.allium: MarksReadyOnlyWhatIsWanted).
 
     @guarantee ReportNamesEpicAndTasks
         -- The skill ends by naming the created epic and every task id with

@@ -377,6 +377,10 @@ fn retro_text_holds_each_session_guarantee() {
             "`references/filing.md` has the tags, the duplicate check and the call details.",
         ),
         (
+            "FiledTasksAreNotMarkedReady",
+            "Do not mark the task ready: a retro finding is a side finding",
+        ),
+        (
             "DetailLivesInTheFilingReference",
             "read `references/filing.md` before you act",
         ),
@@ -412,6 +416,14 @@ fn retro_text_holds_each_session_guarantee() {
         (
             "RootCauseOutsideTheRepoIsNotClosedByAWorkaround",
             "say plainly that the root cause is still open",
+        ),
+        (
+            "FiledTasksAreNotMarkedReady",
+            "Leave `ready` out of `task_create`",
+        ),
+        (
+            "FiledTasksAreNotMarkedReady",
+            "the operator decides whether it is wanted",
         ),
     ];
     for (guarantee, needle) in in_filing {

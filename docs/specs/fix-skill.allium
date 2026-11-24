@@ -287,6 +287,7 @@ rule DispatchFixTask {
 
     ensures:
         if dispatched.failed:
+            FixMarkedReady(task: request.task_id)
             DispatchFailureReported(task_id: request.task_id, error: dispatched.error)
             request.stage = stopped
         else:
@@ -294,8 +295,9 @@ rule DispatchFixTask {
 
     @guidance
         -- task_dispatch is called with the returned id, after task_create
-        -- (DispatchFollowsCreate). If it errors, the skill reports the task
-        -- id and the error and leaves the task in backlog.
+        -- (DispatchFollowsCreate). If it errors, the skill marks the task
+        -- ready with task_update (ready: true), then reports the task id and the error and
+        -- leaves the task in backlog (AFixLeftInBacklogIsReady).
 }
 
 -- == Step 6: report ==
@@ -404,6 +406,15 @@ surface FixSession {
         -- the creation succeeded. A create error is reported and the skill
         -- stops; a dispatch error is reported with the task id and the task
         -- stays in backlog (CreateFixTask, DispatchFixTask).
+
+    @guarantee AFixLeftInBacklogIsReady
+        -- The user asked for the fix when they confirmed it, so a fix task
+        -- left in backlog by a failed dispatch is marked ready, and an
+        -- orchestrator of its epic may start it. The task is created without
+        -- the mark: a mark wakes the orchestrator, which could start the task
+        -- before the skill's own task_dispatch, and that dispatch would then
+        -- be refused (DispatchFixTask; orchestrators.allium:
+        -- MarksReadyOnlyWhatIsWanted).
 
     @guarantee NeverEditsTheOwningRepo
         -- The skill edits no code in any repo and does not switch the branch

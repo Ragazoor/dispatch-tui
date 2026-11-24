@@ -26,6 +26,6 @@ Only two tags:
 - **One task per finding, not per file.** The same wrong statement in three documents is one task that lists all three.
 - **Write it so a cold agent can act.** The `title` names the change. The `description` references this task's ID and says what the next agent will hit if it stays unfixed.
 
-`repo_path` and `epic_id` are required and not inherited. A finding usually belongs in the epic of the task that found it, so pass your own epic id, or `null` if it stands alone.
+`repo_path` and `epic_id` are required and not inherited. A finding usually belongs in the epic of the task that found it, so pass your own epic id, or `null` if it stands alone. Leave `ready` out of `task_create`: a retro finding is a side finding, and the operator decides whether it is wanted before an orchestrator starts it.
 
 **Zero tasks is the normal outcome.** Filing several means you are recording nits. Drop the ones that cost this session nothing.

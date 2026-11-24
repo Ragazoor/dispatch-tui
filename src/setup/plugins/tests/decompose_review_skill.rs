@@ -130,6 +130,11 @@ fn decompose_review_skill_text_holds_each_session_guarantee() {
             "SubtasksRebaseAndKeepSeverityOrder",
             "`wrap_up_mode`: `\"rebase\"`",
         ),
+        ("SubtasksAreMarkedReady", "`ready`: `true`"),
+        (
+            "SubtasksAreMarkedReady",
+            "the user asked for this work when they confirmed the packages in Step 3",
+        ),
         (
             "ReportNamesEpicAndTasks",
             "Display the created epic and all task IDs",

@@ -62,7 +62,8 @@ File a task with `task_create` instead when the fix needs a design judgement,
 is not small, concerns a pre-existing inaccuracy whose history you do not know,
 or would make a spec describe behaviour the code lacks — that is a
 spec → tests → code loop with its own dispatch. Also file a `bug` for a
-concrete defect you could not fix in scope.
+concrete defect you could not fix in scope. Do not mark the task ready: a retro
+finding is a side finding, so it waits until the operator wants it.
 
 On a `done` wrap-up always file instead of fixing: nothing rebases or pushes,
 so an edit is stranded in the worktree and a task is not. Wrap-up settles the

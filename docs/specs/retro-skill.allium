@@ -332,7 +332,9 @@ rule FileInsteadOfFixing {
         -- says what the next agent will hit if it stays unfixed. repo_path
         -- and epic_id are required and not inherited: the finding goes in
         -- the epic of the task that found it, or null when it stands alone
-        -- (FilingIsDuplicateCheckedAndWrittenForAColdAgent).
+        -- (FilingIsDuplicateCheckedAndWrittenForAColdAgent). The task is not
+        -- marked ready: a retro finding is a side finding
+        -- (FiledTasksAreNotMarkedReady).
 }
 
 rule FlagForeignRootCause {
@@ -542,6 +544,13 @@ surface RetroSession {
         -- and says what the next agent will hit if it stays unfixed, and
         -- repo_path and epic_id are passed explicitly: the task's own epic, or
         -- null when it stands alone (FileInsteadOfFixing).
+
+    @guarantee FiledTasksAreNotMarkedReady
+        -- A filed task is created without the ready mark. A retro finding is
+        -- a side finding, not work anyone asked for, so the operator decides
+        -- whether it is wanted before an orchestrator starts it
+        -- (FileInsteadOfFixing; orchestrators.allium:
+        -- MarksReadyOnlyWhatIsWanted).
 
     @guarantee ZeroTasksIsTheNormalOutcome
         -- Filing several tasks means the agent is recording nits. Zero tasks

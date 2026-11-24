@@ -66,7 +66,10 @@
 -- question and outcome report (wrap-up-skill.allium:
 -- PathIsTheOperatorsChoice, ReportsTheOutcomeToItsOrchestrator);
 -- MarksReadyOnlyWhatIsWanted is the ready argument's description
--- (mcp-task-tools.allium: CreateTaskViaMcp). OrchestratorAnswerLine is a part of the
+-- (mcp-task-tools.allium: CreateTaskViaMcp) and the task-creating skills'
+-- text (decompose-review-skill.allium: SubtasksAreMarkedReady;
+-- fix-skill.allium: AFixLeftInBacklogIsReady; retro-skill.allium:
+-- FiledTasksAreNotMarkedReady). OrchestratorAnswerLine is a part of the
 -- orchestrator's prompt (dispatch-prompt.allium: OrchestratorSessionPrompt).
 -- Built (step 7): the wake events and the trouble reactions. The wake is
 -- agent-health.allium's (OrchestratorWakeEvents, WakeTheOrchestrator); the

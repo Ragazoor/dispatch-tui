@@ -99,6 +99,9 @@ Call the `dispatch` MCP tool `task_create` with:
   implements those findings
 - `wrap_up_mode`: `"rebase"` — so the agent rebases onto `base_branch` at
   wrap-up without asking which path to take.
+- `ready`: `true` — the user asked for this work when they confirmed the
+  packages in Step 3, so an orchestrator of the epic may start each subtask
+  without anyone marking it first.
 
 ## Step 7: Report Results
 
