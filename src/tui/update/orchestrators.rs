@@ -2,8 +2,6 @@
 //! notifications (`orchestrators.allium: OrchestratorInEpicView`,
 //! `OrchestratorNotifications`).
 
-use std::collections::HashSet;
-
 use crate::models::{descendant_epic_ids, EpicId, OrchestrationBoard, TaskStatus};
 
 use super::super::commands::{EpicCommand, SystemCommand, TaskCommand};
@@ -75,18 +73,13 @@ impl App {
     pub(in crate::tui) fn covering_epic(&self, epic: Option<EpicId>) -> Option<EpicId> {
         self.board
             .orchestration
-            .covering(epic, |id| {
-                self.board.find_epic(id).and_then(|e| e.parent_epic_id)
-            })
+            .covering(epic, &self.board.epics)
             .map(|o| o.epic_id)
     }
 
     /// Whether a task of `epic`'s subtree is not done (`has_open_work`).
     pub(in crate::tui) fn has_open_work(&self, epic: EpicId) -> bool {
-        let ids = descendant_epic_ids(epic, &self.board.epics);
-        self.board.tasks.iter().any(|t| {
-            t.status != TaskStatus::Done && t.epic_id.is_some_and(|e| e == epic || ids.contains(&e))
-        })
+        !self.board.epic_subtree_all_done(epic)
     }
 
     /// The ready key (`ReadyShowsOnTheCard`): set or clear the operator's
@@ -178,10 +171,8 @@ impl App {
 
     /// The switched-on epics strictly below `epic`, by id.
     fn orchestrated_below(&self, epic: EpicId) -> Vec<EpicId> {
-        let ids: HashSet<EpicId> = descendant_epic_ids(epic, &self.board.epics)
-            .into_iter()
-            .filter(|e| *e != epic)
-            .collect();
+        let mut ids = descendant_epic_ids(epic, &self.board.epics);
+        ids.remove(&epic);
         let mut below: Vec<EpicId> = self
             .board
             .orchestration
@@ -230,7 +221,7 @@ impl App {
             ));
             return vec![];
         };
-        let prompt = resolve_item_prompt(self.key_table, item);
+        let prompt = resolve_item_prompt(self.key_table, item.id, Some(&item.about));
         self.input.mode = InputMode::ConfirmResolveItem(item.id);
         self.status.set(prompt);
         vec![]
@@ -262,14 +253,19 @@ pub(in crate::tui) fn start_orchestrator_prompt(
     format!("Start an orchestrator for this epic? {keys}")
 }
 
-/// "Resolve item #N: <about>? [y/n]".
+/// "Resolve item #N: <about>? [y/n]", or without the about once the item
+/// has left the board.
 pub(in crate::tui) fn resolve_item_prompt(
     table: &'static [crate::keybindings::KeyBinding],
-    item: &crate::models::WaitingItem,
+    id: i64,
+    about: Option<&str>,
 ) -> String {
     let keys = crate::keybindings::yes_no_hint(
         table,
         crate::keybindings::KeyNamespace::BoardConfirmResolveItem,
     );
-    format!("Resolve item #{}: {}? {keys}", item.id, item.about)
+    match about {
+        Some(about) => format!("Resolve item #{id}: {about}? {keys}"),
+        None => format!("Resolve item #{id}? {keys}"),
+    }
 }

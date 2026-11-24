@@ -28,6 +28,16 @@ use crate::sync::writes::DrainReadBack;
 
 use super::Store;
 
+/// Every row that decodes; a row that does not is logged and left out.
+fn decoded<R, T, E: std::fmt::Display>(
+    rows: Vec<R>,
+    decode: impl Fn(&R) -> std::result::Result<T, E>,
+) -> Vec<T> {
+    rows.iter()
+        .filter_map(|row| decode(row).map_err(|e| tracing::warn!("{e}")).ok())
+        .collect()
+}
+
 impl Store {
     /// This board's clock, in the store's timestamp format.
     ///

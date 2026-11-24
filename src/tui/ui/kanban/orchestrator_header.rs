@@ -18,14 +18,10 @@ pub(in crate::tui) fn orchestrator_header_lines(
 ) -> Vec<Line<'static>> {
     // The epic view under an open task detail keeps its band, so the
     // columns do not jump behind the panel.
-    let mut mode = app.view_mode();
-    while let crate::tui::ViewMode::TaskDetail { previous, .. } = mode {
-        mode = previous;
-    }
-    let crate::tui::ViewMode::Epic { epic_id: view, .. } = mode else {
+    let crate::tui::BoardViewMode::Epic { epic_id: view, .. } = app.view().effective_view_mode()
+    else {
         return vec![];
     };
-    let view = *view;
     let Some(epic) = app.covering_epic(Some(view)) else {
         return vec![];
     };
@@ -40,7 +36,7 @@ pub(in crate::tui) fn orchestrator_header_lines(
         .board
         .tasks
         .iter()
-        .filter(|t| t.epic_id.is_some_and(|e| e == epic || ids.contains(&e)))
+        .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
         .collect();
     let items = board.open_items_of(epic);
 

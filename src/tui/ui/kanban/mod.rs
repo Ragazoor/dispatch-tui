@@ -279,14 +279,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Constraint::Length(1),        // status bar
         ])
         .split(area);
-    let vertical = [
-        vertical[0],
-        vertical[1],
-        vertical[3],
-        vertical[4],
-        vertical[5],
-        vertical[2],
-    ];
 
     let epic_stats = app.cached_epic_stats();
     // Build the ColumnLayout once per frame (4 sorts total) so both
@@ -294,16 +286,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let layout = ColumnLayout::build(app);
     render_top_indicators(frame, app, vertical[0]);
     render_summary(frame, app, &layout, vertical[1]);
+    frame.render_widget(Paragraph::new(header), vertical[2]);
     // Immutable phase: compute all column rendering data while `layout` is alive.
     // Both `app` (&App reborrow) and `layout` (&ColumnLayout, which holds &App)
     // are immutable borrows — Rust allows multiple simultaneous immutable borrows.
-    let cols_data = compute_columns_data(app, &layout, &epic_stats, vertical[2], now);
+    let cols_data = compute_columns_data(app, &layout, &epic_stats, vertical[3], now);
     // `layout` is last used above; its borrow on `app` ends here (NLL),
     // allowing the mutable list-state updates in render_columns.
     render_columns(frame, app, cols_data);
-    render_input_form_panel(frame, app, vertical[3]);
-    render_status_bar(frame, app, vertical[4]);
-    frame.render_widget(Paragraph::new(header), vertical[5]);
+    render_input_form_panel(frame, app, vertical[4]);
+    render_status_bar(frame, app, vertical[5]);
 
     render_help_overlay(frame, app, area);
     render_board_filter_overlay(frame, app, area);

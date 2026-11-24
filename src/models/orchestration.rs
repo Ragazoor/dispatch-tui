@@ -171,22 +171,16 @@ impl OrchestrationBoard {
         self.orchestrations.iter().find(|o| o.epic_id == epic)
     }
 
-    /// `covering(epic)`: the switch on `epic` or on its nearest ancestor,
-    /// with `parent_of` answering an epic's parent.
+    /// `covering(epic)`: the switch on `epic` or on its nearest ancestor.
     pub fn covering(
         &self,
         epic: Option<EpicId>,
-        parent_of: impl Fn(EpicId) -> Option<EpicId>,
+        epics: &[super::Epic],
     ) -> Option<&EpicOrchestration> {
-        let mut next = epic;
-        for _ in 0..64 {
-            let id = next?;
-            if let Some(on) = self.orchestration_of(id) {
-                return Some(on);
-            }
-            next = parent_of(id);
-        }
-        None
+        super::epic_path(epic?, epics)
+            .iter()
+            .rev()
+            .find_map(|id| self.orchestration_of(*id))
     }
 
     /// `host`'s orchestrator of `epic`.
@@ -203,6 +197,10 @@ impl OrchestrationBoard {
     /// The open items of `epic`, oldest first.
     pub fn open_items_of(&self, epic: EpicId) -> Vec<&WaitingItem> {
         open_items(&self.open_items, epic)
+    }
+
+    pub fn has_open_items(&self, epic: EpicId) -> bool {
+        self.open_items.iter().any(|i| i.epic_id == epic)
     }
 
     /// The log entries of `epic` this board read, newest first.

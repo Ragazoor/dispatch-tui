@@ -324,16 +324,14 @@ pub(in crate::tui) fn status_line(app: &App) -> (Line<'static>, Style) {
             YELLOW,
         ),
         InputMode::ConfirmResolveItem(id) => {
-            let fallback = app
+            let about = app
                 .board
                 .orchestration
                 .open_items
                 .iter()
                 .find(|i| i.id == *id)
-                .map_or_else(
-                    || format!("Resolve item #{id}? {}", yes_no(N::BoardConfirmResolveItem)),
-                    |item| crate::tui::update::resolve_item_prompt(t, item),
-                );
+                .map(|i| i.about.as_str());
+            let fallback = crate::tui::update::resolve_item_prompt(t, *id, about);
             hint_text(app, &fallback, YELLOW)
         }
     }
@@ -396,7 +394,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             orch.push(None, "open_orchestrator", "O", "orchestrator");
         }
         if let Some(epic) = view.and(covered) {
-            if !app.board.orchestration.open_items_of(epic).is_empty() {
+            if app.board.orchestration.has_open_items(epic) {
                 orch.push(
                     Some(crate::keybindings::KeyContext::InsideEpicView),
                     "resolve_waiting_item",

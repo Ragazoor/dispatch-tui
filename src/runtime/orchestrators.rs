@@ -21,8 +21,9 @@ impl TuiRuntime {
             app.update(Message::System(SystemMessage::Error(format!(
                 "Could not change the ready mark: {e}"
             ))));
+            // Puts back the board's own flip of the mark.
+            drop(self.spawn_refresh_from_db());
         }
-        drop(self.spawn_refresh_from_db());
     }
 
     /// "Start an orchestrator for this epic?" answered y.
@@ -60,7 +61,8 @@ impl TuiRuntime {
             app.update(Message::System(SystemMessage::Error(format!(
                 "Could not resolve item #{item}: {e:#}"
             ))));
+            // Puts the item the board dropped back.
+            drop(self.spawn_refresh_from_db());
         }
-        drop(self.spawn_refresh_from_db());
     }
 }

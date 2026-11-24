@@ -5,16 +5,7 @@ use anyhow::Result;
 use crate::models::{EpicId, EpicNote, Orchestrator, OrchestratorLogEntry, TaskId, WaitingItem};
 
 use super::super::Store;
-
-/// Every row that decodes; a row that does not is logged and left out.
-fn decoded<R, T, E: std::fmt::Display>(
-    rows: Vec<R>,
-    decode: impl Fn(&R) -> Result<T, E>,
-) -> Vec<T> {
-    rows.iter()
-        .filter_map(|row| decode(row).map_err(|e| tracing::warn!("{e}")).ok())
-        .collect()
-}
+use super::decoded;
 
 /// The one id an applied create read back.
 fn one_id(ids: &[i64], what: &str) -> Result<i64> {

@@ -31,38 +31,34 @@ impl crate::store::BoardReads for Store {
     }
 
     async fn orchestration_board(&self) -> crate::models::OrchestrationBoard {
+        use super::decoded;
         use crate::sync::decode;
-        fn kept<R, T, E: std::fmt::Display>(
-            rows: Vec<R>,
-            decode: impl Fn(&R) -> Result<T, E>,
-        ) -> Vec<T> {
-            rows.iter()
-                .filter_map(|row| decode(row).map_err(|e| tracing::warn!("{e}")).ok())
-                .collect()
-        }
-        let orchestrations = kept(self.rows.epic_orchestrations(), decode::epic_orchestration);
-        let mut open_items: Vec<crate::models::WaitingItem> =
-            kept(self.rows.waiting_items(), decode::waiting_item)
-                .into_iter()
-                .filter(crate::models::WaitingItem::is_open)
-                .collect();
-        open_items.sort_by_key(|i| i.id);
-        let mut log: Vec<crate::models::OrchestratorLogEntry> =
-            kept(self.rows.orchestrator_log(), decode::orchestrator_log_entry);
-        log.sort_by_key(|e| std::cmp::Reverse(e.id));
-        let mut shown: std::collections::HashMap<crate::models::EpicId, usize> =
-            std::collections::HashMap::new();
-        log.retain(|e| {
-            let n = shown.entry(e.epic_id).or_default();
-            *n += 1;
-            *n <= crate::models::ORCHESTRATOR_LOG_SHOWN
-        });
+        let open = self
+            .rows
+            .waiting_items()
+            .into_iter()
+            .filter(|i| i.resolved_at.is_empty())
+            .collect();
+        // Newest first, cut per epic before anything is decoded: the log
+        // only grows, the board shows the newest few.
+        let mut shown: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+        let newest = self
+            .rows
+            .orchestrator_log()
+            .into_iter()
+            .rev()
+            .filter(|e| {
+                let n = shown.entry(e.epic_id).or_default();
+                *n += 1;
+                *n <= crate::models::ORCHESTRATOR_LOG_SHOWN
+            })
+            .collect();
         crate::models::OrchestrationBoard {
-            orchestrations,
-            orchestrators: kept(self.rows.orchestrators(), decode::orchestrator),
-            open_items,
-            log,
-            ready_marks: kept(self.rows.ready_marks(), decode::ready_mark),
+            orchestrations: decoded(self.rows.epic_orchestrations(), decode::epic_orchestration),
+            orchestrators: decoded(self.rows.orchestrators(), decode::orchestrator),
+            open_items: decoded(open, decode::waiting_item),
+            log: decoded(newest, decode::orchestrator_log_entry),
+            ready_marks: decoded(self.rows.ready_marks(), decode::ready_mark),
         }
     }
 }
