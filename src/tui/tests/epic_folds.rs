@@ -408,31 +408,6 @@ fn running(id: i64) -> Task {
     t
 }
 
-/// Only meaningful where the flattened epic-header row renders at all. An
-/// unflattened board draws real epic cards instead, which this feature does
-/// not touch.
-#[test]
-fn an_epic_fold_does_nothing_in_an_unflattened_column() {
-    let mut app = App::new(vec![owned(1, SubStatus::Active, 10)]);
-    app.board.epics = vec![make_epic(10)];
-    app.filter.lens = crate::tui::types::Lens::Everything;
-    app.epic_folds.toggle(crate::tui::types::EpicFoldRef::new(
-        TaskStatus::Running,
-        ColumnSection::Active,
-        EpicId(10),
-    ));
-
-    let items = app
-        .view()
-        .column_items_for_status_with_placements(TaskStatus::Running, None);
-    assert!(
-        !items.iter().any(|i| matches!(i, ColumnItem::FoldedEpic(_))),
-        "hierarchical mode never renders a folded epic header: {items:?}"
-    );
-}
-
-// --- selectability and anchoring ---
-
 #[test]
 fn only_a_folded_epic_is_selectable() {
     let epic = make_epic(10);
@@ -597,20 +572,6 @@ fn shift_z_is_a_no_op_on_a_card_with_no_epic() {
     let mut app = App::new(vec![running(1)]);
     app.filter.lens = crate::tui::types::Lens::Flat;
     app.selection_mut().set_column(2);
-    app.handle_key(make_shift_key(KeyCode::Char('Z')));
-    assert!(!app
-        .epic_folds
-        .is_folded(crate::tui::types::EpicFoldRef::new(
-            TaskStatus::Running,
-            ColumnSection::Active,
-            EpicId(10)
-        )));
-}
-
-#[test]
-fn shift_z_is_a_no_op_in_an_unflattened_column() {
-    let mut app = folding_app();
-    app.filter.lens = crate::tui::types::Lens::Everything;
     app.handle_key(make_shift_key(KeyCode::Char('Z')));
     assert!(!app
         .epic_folds

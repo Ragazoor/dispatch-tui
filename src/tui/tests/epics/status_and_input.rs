@@ -63,6 +63,7 @@ fn shift_h_on_done_epic_moves_to_review() {
     let mut app = App::new(vec![{
         let mut t = make_task(1, TaskStatus::Done);
         t.epic_id = Some(EpicId(10));
+        t.completed_at = Some(chrono::Utc::now());
         t
     }]);
     let mut epic = make_epic(10);

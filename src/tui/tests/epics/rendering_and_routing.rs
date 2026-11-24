@@ -371,25 +371,6 @@ fn handle_key_normal_shift_l_on_epic_moves_status() {
     )));
 }
 
-#[test]
-fn handle_key_normal_shift_h_on_epic_moves_backward() {
-    // The epic needs a running subtask to hold a card in the Running column:
-    // placement is per column and driven by the tasks, not by epic.status.
-    let mut subtask = make_task(1, TaskStatus::Running);
-    subtask.epic_id = Some(EpicId(10));
-    let mut app = App::new(vec![subtask]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.board.epics = vec![epic];
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
-    let cmds = app.handle_key(make_key(KeyCode::Char('H')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Epic(crate::tui::commands::EpicCommand::Persist { .. })
-    )));
-}
-
 /// InputEpicTitle mode routes to the text input handler.
 #[test]
 fn handle_key_input_epic_title_routes_to_text_input() {

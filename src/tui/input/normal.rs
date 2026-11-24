@@ -137,7 +137,10 @@ impl App {
                     None => vec![],
                 }
             }
-            "enter_epic" => match self.selected_epic_id() {
+            "enter_epic" => match self
+                .selected_epic_id()
+                .or_else(|| self.selected_orchestrator_epic_id())
+            {
                 Some(id) => keyed(self, Message::Epic(EpicMessage::Enter(id))),
                 None => vec![],
             },
@@ -269,7 +272,7 @@ impl App {
                     ),
                 )]
             }
-            Some(ColumnItem::Epic(epic)) => {
+            Some(ColumnItem::Epic(epic) | ColumnItem::Orchestrator(epic)) => {
                 let id = epic.id;
                 self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
             }

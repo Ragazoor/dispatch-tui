@@ -189,6 +189,12 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         "Jump to the epic the task belongs to; does nothing for a task with no epic",
     ),
     normal(
+        &["Enter", "Space"],
+        Some(C::OnOrchestratorCard),
+        "enter_epic",
+        "Open the orchestrated epic's view",
+    ),
+    normal(
         &["Enter"],
         Some(C::OnEpicCard),
         "jump_to_deepest_epic",
@@ -417,13 +423,13 @@ pub static KEY_BINDINGS: &[KeyBinding] = &[
         &["Tab"],
         None,
         "cycle_lens_forward",
-        "Step the board lens forward: everything, flat (Running, Review and Done list every task as a plain card instead of grouping subtasks under their epic; Backlog is never flattened), flat + active (only tasks with a live session), and back to everything",
+        "Step the board lens forward: flat (Running, Review and Done list every task as a plain card; Backlog keeps its epic cards), flat + active (only tasks with a live session), orchestrators (one card per orchestrated epic), and back to flat",
     ),
     normal(
         &["BackTab"],
         None,
         "cycle_lens_backward",
-        "Step the board lens back: everything, flat + active, flat, and back to everything",
+        "Step the board lens back: flat, orchestrators, flat + active, and back to flat",
     ),
     normal(
         &["N"],

@@ -45,6 +45,19 @@ fn running_in(id: i64, epic: Option<i64>) -> Task {
     t
 }
 
+/// An epic card sits in Backlog only (`board-layout.allium`, "Epic Card
+/// Placement"), so the epic-card jumps start from a backlog task's work.
+fn backlog_in(id: i64, epic: Option<i64>) -> Task {
+    let mut t = make_task(id, TaskStatus::Backlog);
+    t.epic_id = epic.map(EpicId);
+    t
+}
+
+fn on_backlog_card(app: &mut App) {
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+}
+
 fn on_running_card(app: &mut App) {
     app.selection_mut().set_column(RUNNING_COL);
     app.selection_mut().set_row(RUNNING_COL, 0);
@@ -136,9 +149,9 @@ fn i_opens_detail_on_a_flattened_task() {
 
 #[test]
 fn enter_on_an_epic_card_jumps_to_the_deepest_epic_holding_the_work() {
-    let mut app = App::new(vec![running_in(1, Some(30))]);
+    let mut app = App::new(vec![backlog_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    on_running_card(&mut app);
+    on_backlog_card(&mut app);
 
     enter(&mut app);
 
@@ -147,9 +160,9 @@ fn enter_on_an_epic_card_jumps_to_the_deepest_epic_holding_the_work() {
 
 #[test]
 fn the_jump_stops_where_two_sub_epics_hold_the_work() {
-    let mut app = App::new(vec![running_in(1, Some(30)), running_in(2, Some(40))]);
+    let mut app = App::new(vec![backlog_in(1, Some(30)), backlog_in(2, Some(40))]);
     app.board.epics = tree(&[(40, 10)]);
-    on_running_card(&mut app);
+    on_backlog_card(&mut app);
 
     enter(&mut app);
 
@@ -158,9 +171,9 @@ fn the_jump_stops_where_two_sub_epics_hold_the_work() {
 
 #[test]
 fn the_jump_stops_at_an_epic_with_a_direct_task_in_the_column() {
-    let mut app = App::new(vec![running_in(1, Some(30)), running_in(2, Some(10))]);
+    let mut app = App::new(vec![backlog_in(1, Some(30)), backlog_in(2, Some(10))]);
     app.board.epics = tree(&[]);
-    on_running_card(&mut app);
+    on_backlog_card(&mut app);
 
     enter(&mut app);
 
@@ -169,9 +182,9 @@ fn the_jump_stops_at_an_epic_with_a_direct_task_in_the_column() {
 
 #[test]
 fn space_on_an_epic_card_still_enters_one_level() {
-    let mut app = App::new(vec![running_in(1, Some(30))]);
+    let mut app = App::new(vec![backlog_in(1, Some(30))]);
     app.board.epics = tree(&[]);
-    on_running_card(&mut app);
+    on_backlog_card(&mut app);
 
     press(&mut app, ' ');
 

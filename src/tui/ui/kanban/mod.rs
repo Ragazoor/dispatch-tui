@@ -416,7 +416,7 @@ fn task_column_segment(
     let count: usize = items
         .iter()
         .map(|i| match i {
-            ColumnItem::Task(_) | ColumnItem::Epic(_) => 1,
+            ColumnItem::Task(_) | ColumnItem::Epic(_) | ColumnItem::Orchestrator(_) => 1,
             ColumnItem::FoldedSection(h) => h.hidden,
             ColumnItem::FoldedEpic(h) => h.hidden,
             // A package card is a view onto work counted elsewhere, not work.
@@ -440,6 +440,7 @@ fn task_column_segment(
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
                 ColumnItem::WorkPackage(_)
+                | ColumnItem::Orchestrator(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
@@ -743,6 +744,23 @@ pub(in crate::tui) fn package_action_hints(
     bar.push(None, "delete_task", "x", "delete");
     bar.push(None, "create_task", "n", "new");
     bar.push(None, "create_epic", "E", "epic");
+    bar.push(None, "search_tasks", "/", "search");
+    bar.push(None, "toggle_help", "?", "help");
+    bar.spans
+}
+
+/// Status bar hints for an orchestrator card (`orchestrators.allium:
+/// KeysOnTheCard`): only the keys that act on it.
+pub(in crate::tui) fn orchestrator_action_hints(
+    table: &'static [KeyBinding],
+    key_color: Color,
+) -> Vec<Span<'static>> {
+    let mut bar = HintBar::new(table, KeyNamespace::BoardNormal, key_color);
+    bar.push(Some(C::OnOrchestratorCard), "enter_epic", "Enter", "open");
+    bar.push(None, "edit_task", "e", "edit");
+    bar.push(None, "open_orchestrator", "O", "orchestrator");
+    bar.push(None, "cycle_lens_forward", "Tab", "lens");
+    bar.push(None, "open_board_filter", "f", "filter");
     bar.push(None, "search_tasks", "/", "search");
     bar.push(None, "toggle_help", "?", "help");
     bar.spans

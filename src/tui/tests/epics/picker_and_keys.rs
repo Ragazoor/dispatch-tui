@@ -504,22 +504,21 @@ fn flattened_board_surfaces_done_subtasks() {
 }
 
 #[test]
-fn flattened_board_drops_epic_cards_from_done() {
+fn done_draws_no_card_for_an_unfinished_epic() {
     let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Done;
-    app.board.epics = vec![epic];
+    app.board.epics = vec![make_epic(10)];
     let mut done_subtask = make_task(1, TaskStatus::Done);
     done_subtask.epic_id = Some(EpicId(10));
-    app.board.tasks = vec![done_subtask];
-    app.filter.lens = crate::tui::types::Lens::Flat;
+    let mut running_subtask = make_task(2, TaskStatus::Running);
+    running_subtask.epic_id = Some(EpicId(10));
+    app.board.tasks = vec![done_subtask, running_subtask];
 
     let items = app.view().column_items_for_status(TaskStatus::Done);
     assert!(
         !items
             .iter()
             .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
-        "a flattened column draws no epic card"
+        "an epic with work still running is not finished"
     );
     assert!(
         items

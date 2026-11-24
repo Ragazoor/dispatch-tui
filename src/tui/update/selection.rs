@@ -100,6 +100,7 @@ impl App {
             ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
             ColumnItem::Epic(e) => self.view().epic_column_section(e, status, placements),
             ColumnItem::WorkPackage(_)
+            | ColumnItem::Orchestrator(_)
             | ColumnItem::FoldedSection(_)
             | ColumnItem::FoldedEpic(_)
             | ColumnItem::SubstatusLabel(_)
@@ -314,6 +315,7 @@ impl App {
                 // Not selectable for batch actions: a package is not a card
                 // any batch action applies to.
                 ColumnItem::WorkPackage(_)
+                | ColumnItem::Orchestrator(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)

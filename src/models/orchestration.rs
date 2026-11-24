@@ -209,6 +209,36 @@ impl OrchestrationBoard {
     }
 }
 
+/// Whether `task` holds one of `host`'s slots: running there with an agent
+/// that is not detached (`orchestrators.allium: running_here`, as far as
+/// the board's rows show it).
+pub fn runs_here(task: &super::Task, host: &str) -> bool {
+    task.status == super::TaskStatus::Running
+        && task.host.as_deref() == Some(host)
+        && !task.is_detached()
+}
+
+/// `orchestrators.allium: EpicCardInOrchestratorView`: the column of an
+/// orchestrated epic's card, first match.
+pub fn orchestrator_column(
+    has_open_item: bool,
+    subtree_tasks: &[&super::Task],
+    host: &str,
+) -> super::TaskStatus {
+    use super::TaskStatus;
+    if has_open_item {
+        TaskStatus::Review
+    } else if subtree_tasks.iter().any(|t| runs_here(t, host)) {
+        TaskStatus::Running
+    } else if !subtree_tasks.is_empty()
+        && subtree_tasks.iter().all(|t| t.status == TaskStatus::Done)
+    {
+        TaskStatus::Done
+    } else {
+        TaskStatus::Backlog
+    }
+}
+
 /// `orchestrators.allium: orchestrator_state`.
 pub fn orchestrator_state(o: &Orchestrator, subtree_tasks: &[&super::Task]) -> &'static str {
     let open = subtree_tasks

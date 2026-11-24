@@ -735,7 +735,7 @@ fn tab_reaches_only_active_and_wraps_back_out() {
     cycle_lens_to(&mut app, crate::tui::types::Lens::FlatActive);
     assert!(app.filter.lens.only_active());
 
-    cycle_lens_to(&mut app, crate::tui::types::Lens::Everything);
+    cycle_lens_to(&mut app, crate::tui::types::Lens::Flat);
     assert!(!app.filter.lens.only_active());
 }
 
@@ -948,7 +948,7 @@ fn status_bar_shows_active_badge_when_only_active_enabled() {
 #[test]
 fn status_bar_no_active_badge_when_only_active_disabled() {
     let mut app = make_app();
-    app.filter.lens = crate::tui::types::Lens::Everything;
+    app.filter.lens = crate::tui::types::Lens::Flat;
     app.input.mode = InputMode::Normal;
 
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -1007,7 +1007,7 @@ fn only_active_filter_off_shows_epics_without_active_tasks() {
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Backlog;
     app.board.epics = vec![epic];
-    app.filter.lens = crate::tui::types::Lens::Everything;
+    app.filter.lens = crate::tui::types::Lens::Flat;
 
     let items = app.view().column_items_for_status(TaskStatus::Backlog);
     assert!(
@@ -1108,8 +1108,8 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
             crate::tui::messages::BoardFilterMessage::ToggleMode,
         ));
     });
-    check("CycleLens to flat", |app| {
-        flip_flattened(app);
+    check("CycleLens to orchestrators", |app| {
+        cycle_lens_to(app, crate::tui::types::Lens::Orchestrators);
     });
 }
 

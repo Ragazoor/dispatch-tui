@@ -290,6 +290,7 @@ impl App {
             }
             Some(
                 ColumnItem::WorkPackage(_)
+                | ColumnItem::Orchestrator(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::FoldedSection(_)
@@ -328,6 +329,14 @@ impl App {
     pub(in crate::tui) fn selected_epic_id(&self) -> Option<EpicId> {
         match self.selected_column_item() {
             Some(ColumnItem::Epic(epic)) => Some(epic.id),
+            _ => None,
+        }
+    }
+
+    /// The epic whose orchestrator card the cursor is on, or `None`.
+    pub(in crate::tui) fn selected_orchestrator_epic_id(&self) -> Option<EpicId> {
+        match self.selected_column_item() {
+            Some(ColumnItem::Orchestrator(epic)) => Some(epic.id),
             _ => None,
         }
     }

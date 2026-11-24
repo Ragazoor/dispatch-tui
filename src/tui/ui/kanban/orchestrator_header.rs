@@ -4,10 +4,61 @@
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use crate::models::{descendant_epic_ids, Task, TaskStatus};
+use crate::models::{descendant_epic_ids, EpicId, Orchestrator, Task};
 use crate::palette::{CYAN, MUTED, PURPLE, RED, YELLOW};
 use crate::text::truncate;
 use crate::tui::App;
+
+/// What the epic view's header and the orchestrator view's card both say
+/// about an orchestrated epic's orchestrator on this machine, from one
+/// place so the two cannot disagree.
+pub(super) struct OrchestratorSummary<'a> {
+    /// This machine's orchestrator, `None` before it has a row here.
+    pub(super) orchestrator: Option<&'a Orchestrator>,
+    /// `orchestrators.allium: orchestrator_state`; resting with no row.
+    pub(super) state: &'static str,
+    /// The epic's subtree tasks.
+    pub(super) subtree: Vec<&'a Task>,
+    /// The subtree tasks that hold one of this machine's slots.
+    pub(super) running: usize,
+    /// The open items that wait for the operator.
+    pub(super) waiting: usize,
+}
+
+pub(super) fn orchestrator_summary(app: &App, epic: EpicId) -> OrchestratorSummary<'_> {
+    let host = app.local_host_id.as_deref().unwrap_or_default();
+    let ids = descendant_epic_ids(epic, &app.board.epics);
+    let subtree: Vec<&Task> = app
+        .board
+        .tasks
+        .iter()
+        .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
+        .collect();
+    let orchestrator = app.board.orchestration.orchestrator_on(epic, host);
+    let state = orchestrator.map_or("resting", |o| {
+        crate::models::orchestrator_state(o, &subtree)
+    });
+    let running = subtree
+        .iter()
+        .filter(|t| crate::models::runs_here(t, host))
+        .count();
+    OrchestratorSummary {
+        orchestrator,
+        state,
+        running,
+        waiting: app.board.orchestration.open_items_of(epic).len(),
+        subtree,
+    }
+}
+
+/// The style an orchestrator's state is drawn in: down is an alarm.
+pub(super) fn state_style(state: &str) -> Style {
+    match state {
+        "down" => Style::default().fg(RED).add_modifier(Modifier::BOLD),
+        "working" => Style::default().fg(CYAN),
+        _ => Style::default().fg(MUTED),
+    }
+}
 
 /// The band's rows for the epic view showing, at most `max_rows` of them,
 /// each cut to `width`. Empty outside the view of a covered epic.
@@ -30,29 +81,19 @@ pub(in crate::tui) fn orchestrator_header_lines(
     }
     let width = usize::from(width);
     let board = &app.board.orchestration;
-    let host = app.local_host_id.clone().unwrap_or_default();
-    let ids = descendant_epic_ids(epic, &app.board.epics);
-    let subtree: Vec<&Task> = app
-        .board
-        .tasks
-        .iter()
-        .filter(|t| t.epic_id.is_some_and(|e| ids.contains(&e)))
-        .collect();
+    let summary = orchestrator_summary(app, epic);
     let items = board.open_items_of(epic);
 
     let mut first: Vec<Span<'static>> = Vec::new();
-    match board.orchestrator_on(epic, &host) {
+    match summary.orchestrator {
         Some(o) => {
-            let state = crate::models::orchestrator_state(o, &subtree);
-            let state_style = match state {
-                "down" => Style::default().fg(RED).add_modifier(Modifier::BOLD),
-                "working" => Style::default().fg(CYAN),
-                _ => Style::default().fg(MUTED),
-            };
             first.push(Span::styled("orchestrator ", Style::default().fg(MUTED)));
             first.push(Span::styled(o.name.clone(), Style::default().fg(PURPLE)));
             first.push(Span::styled(" \u{00b7} ", Style::default().fg(MUTED)));
-            first.push(Span::styled(state.to_string(), state_style));
+            first.push(Span::styled(
+                summary.state.to_string(),
+                state_style(summary.state),
+            ));
         }
         None => first.push(Span::styled(
             "orchestrator: resting",
@@ -60,14 +101,7 @@ pub(in crate::tui) fn orchestrator_header_lines(
         )),
     }
     if let Some(on) = board.orchestration_of(epic) {
-        let running = subtree
-            .iter()
-            .filter(|t| {
-                t.status == TaskStatus::Running
-                    && t.host.as_deref() == Some(host.as_str())
-                    && !t.is_detached()
-            })
-            .count();
+        let running = summary.running;
         first.push(Span::styled(
             format!(
                 " \u{00b7} {} \u{00b7} {running}/{} running",

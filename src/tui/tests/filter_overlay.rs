@@ -66,7 +66,7 @@ fn tab_and_back_tab_switch_tabs_and_wrap() {
     assert_eq!(app.filter_overlay.tab, FilterTab::Packages);
     assert_eq!(
         app.filter.lens,
-        crate::tui::types::Lens::Everything,
+        crate::tui::types::Lens::Flat,
         "Tab in the overlay does not touch the lens"
     );
 }

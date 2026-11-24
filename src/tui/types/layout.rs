@@ -20,6 +20,10 @@ pub enum ColumnItem<'a> {
     WorkPackage(&'a crate::models::WorkPackage),
     Task(&'a Task),
     Epic(&'a Epic),
+    /// An orchestrated epic's card in the orchestrator view
+    /// (`board-layout.allium`, "Orchestrator View"). Not an epic card: only
+    /// the keys `orchestrators.allium: KeysOnTheCard` names act on it.
+    Orchestrator(&'a Epic),
     /// Non-selectable group header in flat view. Carries the epic so the renderer
     /// can read its title without an extra lookup, and its depth in the epic
     /// tree so it can indent the header and the cards under it.
@@ -124,6 +128,7 @@ impl ColumnItem<'_> {
             self,
             ColumnItem::Task(_)
                 | ColumnItem::Epic(_)
+                | ColumnItem::Orchestrator(_)
                 | ColumnItem::WorkPackage(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
@@ -139,7 +144,7 @@ impl ColumnItem<'_> {
     pub fn anchor(&self) -> Option<ColumnAnchor> {
         match self {
             ColumnItem::Task(t) => Some(ColumnAnchor::Task(t.id)),
-            ColumnItem::Epic(e) => Some(ColumnAnchor::Epic(e.id)),
+            ColumnItem::Epic(e) | ColumnItem::Orchestrator(e) => Some(ColumnAnchor::Epic(e.id)),
             ColumnItem::WorkPackage(p) => Some(ColumnAnchor::WorkPackage(p.id)),
             ColumnItem::FoldedSection(h) => Some(ColumnAnchor::Section(h.at)),
             ColumnItem::FoldedEpic(h) => Some(ColumnAnchor::EpicFold(h.at)),
@@ -299,13 +304,13 @@ pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 // EpicPlacement — which columns one epic's card is drawn in
 // ---------------------------------------------------------------------------
 
-/// Which columns an epic's card appears in, and what each copy's section needs.
+/// Which columns an epic's card appears in.
 ///
-/// An epic card is not placed once by `epic.status`: it is drawn in every column
-/// where the epic's subtree holds a *visible* task of that status — visible
-/// meaning the task survives the same repo, only-active and search predicates
-/// every other card is held to. See `board-layout.allium`, "Epic Card
-/// Placement".
+/// An epic card is not placed by `epic.status` but by the *visible* tasks of
+/// its subtree — visible meaning the task survives the same repo, only-active
+/// and search predicates every other card is held to: Backlog when one of
+/// them is in backlog or there are none, Done when every one is done. See
+/// `board-layout.allium`, "Epic Card Placement".
 ///
 /// Deliberately not part of [`EpicStatsMap`], which counts the whole subtree
 /// unfiltered and is cached against a fingerprint that does not cover the
@@ -343,18 +348,22 @@ impl EpicPlacement {
             crate::models::fold_newest_completion(self.newest_completion, task);
     }
 
-    /// Draw an epic with no admitted task anywhere in Backlog, so it stays
-    /// reachable. Applied once by `BoardView::compute_epic_placements` after the walk,
-    /// which is what lets every reader below be a plain lookup.
-    ///
-    /// Applied to every epic, with no exception: every epic row that exists is
-    /// one the board can draw (`board-layout.allium`, "Epic Card Placement"),
-    /// so the map carries the invariant "every placement names at least one
-    /// column" unconditionally.
-    pub(in crate::tui) fn apply_empty_fallback(&mut self) {
-        if !self.columns.iter().any(|c| *c) {
-            self.columns[TaskStatus::Backlog.column_index()] = true;
-        }
+    /// Turn the columns the walk credited into the columns the card is drawn
+    /// in: Backlog when a visible task is in backlog, or when there is none
+    /// at all, so the epic stays reachable; Done when every visible task is
+    /// done. Applied once by `BoardView::compute_epic_placements` after the
+    /// walk, which is what lets every reader below be a plain lookup.
+    pub(in crate::tui) fn settle(&mut self) {
+        let has = |s: TaskStatus| self.columns[s.column_index()];
+        let any = self.columns.iter().any(|c| *c);
+        let backlog = has(TaskStatus::Backlog) || !any;
+        let finished = has(TaskStatus::Done)
+            && !has(TaskStatus::Backlog)
+            && !has(TaskStatus::Running)
+            && !has(TaskStatus::Review);
+        self.columns = [false; TaskStatus::COLUMN_COUNT];
+        self.columns[TaskStatus::Backlog.column_index()] = backlog;
+        self.columns[TaskStatus::Done.column_index()] = finished;
     }
 
     /// A placement naming exactly one column. A package card sits in one

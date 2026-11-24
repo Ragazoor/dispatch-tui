@@ -1,5 +1,5 @@
-//! The board lens: Tab / BackTab cycle everything → flat → flat_active
-//! (`board-layout.allium`, "Board Lens").
+//! The board lens (`board-layout.allium`, "Board Lens"). Its order and the
+//! orchestrator view are in `orchestrator_view.rs`.
 
 use super::*;
 use crate::tui::types::Lens;
@@ -9,59 +9,12 @@ fn tab() -> KeyEvent {
     KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)
 }
 
-fn back_tab() -> KeyEvent {
-    KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)
-}
-
-#[test]
-fn the_board_starts_on_the_everything_lens() {
-    let app = App::new(vec![]);
-    assert_eq!(app.filter.lens, Lens::Everything);
-    assert!(!app.filter.lens.only_active());
-    assert!(!app.filter.lens.flattened());
-}
-
-#[test]
-fn tab_cycles_the_lens_forward_and_wraps() {
-    let mut app = App::new(vec![]);
-    let mut seen = vec![];
-    for _ in 0..3 {
-        app.handle_key(tab());
-        seen.push(app.filter.lens);
-    }
-    assert_eq!(seen, vec![Lens::Flat, Lens::FlatActive, Lens::Everything]);
-}
-
-#[test]
-fn back_tab_cycles_the_lens_backward_and_wraps() {
-    let mut app = App::new(vec![]);
-    let mut seen = vec![];
-    for _ in 0..3 {
-        app.handle_key(back_tab());
-        seen.push(app.filter.lens);
-    }
-    assert_eq!(seen, vec![Lens::FlatActive, Lens::Flat, Lens::Everything]);
-}
-
-#[test]
-fn each_lens_derives_both_switches() {
-    let cases = [
-        (Lens::Everything, false, false),
-        (Lens::Flat, false, true),
-        (Lens::FlatActive, true, true),
-    ];
-    for (lens, only_active, flattened) in cases {
-        assert_eq!(lens.only_active(), only_active, "{lens:?}");
-        assert_eq!(lens.flattened(), flattened, "{lens:?}");
-    }
-}
-
 #[test]
 fn shift_a_and_shift_f_no_longer_change_the_lens() {
     let mut app = App::new(vec![]);
     app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
     app.handle_key(KeyEvent::new(KeyCode::Char('F'), KeyModifiers::SHIFT));
-    assert_eq!(app.filter.lens, Lens::Everything);
+    assert_eq!(app.filter.lens, Lens::Flat);
 }
 
 #[test]
@@ -71,7 +24,6 @@ fn tab_cycles_the_lens_inside_an_epic_view_and_the_lens_survives_leaving_it() {
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
         EpicId(10),
     )));
-    app.handle_key(tab());
     app.handle_key(tab());
     assert_eq!(app.filter.lens, Lens::FlatActive);
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Exit));

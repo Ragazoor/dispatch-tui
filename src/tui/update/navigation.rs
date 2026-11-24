@@ -335,7 +335,9 @@ fn reorder_target(
             ReorderCard::Package(p.id),
             ReorderKey::Generic(p.sort_key()),
         )),
-        ColumnItem::EpicHeader(_)
+        // The orchestrator view's order is the epics' card order, read only.
+        ColumnItem::Orchestrator(_)
+        | ColumnItem::EpicHeader(_)
         | ColumnItem::SubstatusLabel(_)
         | ColumnItem::FoldedSection(_)
         | ColumnItem::FoldedEpic(_)

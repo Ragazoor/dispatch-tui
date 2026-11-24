@@ -33,16 +33,16 @@ pub use crate::models::RepoFilterMode;
 // Lens — how the board is read (`board-layout.allium`, "Board Lens")
 // ---------------------------------------------------------------------------
 
-/// The board's reading mode. The only state behind the only-active filter and
-/// flattening: both are derived from it, never set on their own. Only-active
-/// always comes with flattening; there is no grouped only-active lens. Tab
-/// steps it forward, BackTab back. Session-scoped.
+/// The board's reading mode. The only state behind the only-active filter,
+/// flattening and the orchestrator view: each is derived from it, never set
+/// on its own. Tab steps it forward, BackTab back. Session-scoped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Lens {
     #[default]
-    Everything,
     Flat,
     FlatActive,
+    /// The orchestrator view on the main board; flat in a nested view.
+    Orchestrators,
 }
 
 impl Lens {
@@ -51,24 +51,19 @@ impl Lens {
         self == Lens::FlatActive
     }
 
-    /// Whether the Running, Review and Done columns are flattened.
-    pub fn flattened(self) -> bool {
-        matches!(self, Lens::Flat | Lens::FlatActive)
-    }
-
     pub fn next(self) -> Self {
         match self {
-            Lens::Everything => Lens::Flat,
             Lens::Flat => Lens::FlatActive,
-            Lens::FlatActive => Lens::Everything,
+            Lens::FlatActive => Lens::Orchestrators,
+            Lens::Orchestrators => Lens::Flat,
         }
     }
 
     pub fn previous(self) -> Self {
         match self {
-            Lens::Everything => Lens::FlatActive,
-            Lens::Flat => Lens::Everything,
+            Lens::Flat => Lens::Orchestrators,
             Lens::FlatActive => Lens::Flat,
+            Lens::Orchestrators => Lens::FlatActive,
         }
     }
 }

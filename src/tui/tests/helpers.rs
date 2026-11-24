@@ -240,17 +240,6 @@ pub(in crate::tui) fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> 
     None
 }
 
-/// Step the lens forward (the Tab path) to `flat` from an unflattened lens,
-/// or back to `everything` from a flattened one.
-pub(in crate::tui) fn flip_flattened(app: &mut App) {
-    let target = if app.filter.lens.flattened() {
-        crate::tui::types::Lens::Everything
-    } else {
-        crate::tui::types::Lens::Flat
-    };
-    cycle_lens_to(app, target);
-}
-
 /// Step the lens forward (the Tab path) until it is `target`.
 pub(in crate::tui) fn cycle_lens_to(app: &mut App, target: crate::tui::types::Lens) {
     while app.filter.lens != target {

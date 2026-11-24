@@ -209,6 +209,27 @@ fn app_for(binding: &KeyBinding) -> App {
             app
         }
         Some(C::OnEpicCard) => make_app_with_epic_selected(),
+        Some(C::OnOrchestratorCard) => {
+            let mut app = App::new(vec![]);
+            app.board.epics = vec![make_epic(10)];
+            app.update(Message::Epic(
+                crate::tui::messages::EpicMessage::OrchestrationRefreshed(Box::new(
+                    crate::models::OrchestrationBoard {
+                        orchestrations: vec![crate::models::EpicOrchestration {
+                            epic_id: EpicId(10),
+                            start_rule: crate::models::StartRule::MarkedOnly,
+                            max_parallel: None,
+                            switched_on_at: chrono::Utc::now(),
+                        }],
+                        ..Default::default()
+                    },
+                )),
+            ));
+            app.filter.lens = crate::tui::types::Lens::Orchestrators;
+            app.selection_mut().set_column(1);
+            app.selection_mut().set_row(1, 0);
+            app
+        }
         Some(C::OnWorkPackageCard) => app_with_package_selected(),
         Some(C::OnFlattenedTaskCard) => {
             let mut app = app_with_running_task(|t| t.epic_id = Some(EpicId(10)));
@@ -1502,7 +1523,7 @@ fn every_family_namespace_can_be_set_up() {
 
 /// The hint keys inside every `[...]` of `line`, split on `/`: `[q/Esc]`
 /// gives `q` and `Esc`, `[/]` gives `/`. Checkbox and tree marks (`[x]`, `[ ]`,
-/// `[-]`, `[~]`; `[x]` only where x is not a key of the mode) and the board's badges (`[flat]`, `[active]`, `[/query]`,
+/// `[-]`, `[~]`; `[x]` only where x is not a key of the mode) and the board's badges (`[flat]`, `[active]`, `[orch]`, `[/query]`,
 /// `[hidden: …]`, `[2/9 repos]`) are not hints. An empty `[]` is kept as the
 /// key `[]`: a hint built from a row that is not there, which must fail.
 fn bracketed_keys(line: &str, is_key: impl Fn(&str) -> bool) -> Vec<String> {
@@ -1514,7 +1535,7 @@ fn bracketed_keys(line: &str, is_key: impl Fn(&str) -> bool) -> Vec<String> {
         };
         let inner = &rest[open + 1..open + close];
         rest = &rest[open + close + 1..];
-        let badge = matches!(inner, "flat" | "active")
+        let badge = matches!(inner, "flat" | "active" | "orch")
             || inner.starts_with("hidden:")
             || inner.ends_with(" repos")
             || (inner.starts_with('/') && inner.len() > 1);

@@ -289,6 +289,7 @@ pub enum KeyContext {
     OnColumnSelectAll,
     OnFoldedSection,
     OnFoldedEpicGroup,
+    OnOrchestratorCard,
     OnEpicCard,
     OnWorkPackageCard,
     OnTaskCard,
@@ -311,7 +312,7 @@ pub enum KeyContext {
 
 impl KeyContext {
     /// Every context, in the spec's order.
-    pub const ALL: [KeyContext; 27] = [
+    pub const ALL: [KeyContext; 28] = [
         Self::SearchActive,
         Self::InsideEpicView,
         Self::InsideNestedView,
@@ -321,6 +322,7 @@ impl KeyContext {
         Self::OnColumnSelectAll,
         Self::OnFoldedSection,
         Self::OnFoldedEpicGroup,
+        Self::OnOrchestratorCard,
         Self::OnEpicCard,
         Self::OnWorkPackageCard,
         Self::OnTaskCard,
@@ -354,6 +356,7 @@ impl KeyContext {
             Self::OnColumnSelectAll => "on_column_select_all",
             Self::OnFoldedSection => "on_folded_section",
             Self::OnFoldedEpicGroup => "on_folded_epic_group",
+            Self::OnOrchestratorCard => "on_orchestrator_card",
             Self::OnEpicCard => "on_epic_card",
             Self::OnWorkPackageCard => "on_work_package_card",
             Self::OnTaskCard => "on_task_card",
@@ -394,6 +397,7 @@ impl KeyContext {
             Self::OnColumnSelectAll => "on a column's select-all row",
             Self::OnFoldedSection => "on a folded section header",
             Self::OnFoldedEpicGroup => "on a folded epic group",
+            Self::OnOrchestratorCard => "on an orchestrator card",
             Self::OnEpicCard => "on an epic card",
             Self::OnWorkPackageCard => "on a work package card",
             Self::OnTaskCard => "on a task card",
@@ -441,6 +445,7 @@ impl KeyContext {
             OnColumnSelectAll
             | OnFoldedSection
             | OnFoldedEpicGroup
+            | OnOrchestratorCard
             | OnEpicCard
             | OnWorkPackageCard
             | OnTaskCard
@@ -510,6 +515,7 @@ pub fn contexts_overlap(a: KeyContext, b: KeyContext) -> bool {
                 OnFlattenedTaskCard,
                 OnUnflattenedTaskCard,
                 OnWorkPackageCard,
+                OnOrchestratorCard,
             ]
             .iter()
             .any(|c| pair(OffEpicCard, *c))

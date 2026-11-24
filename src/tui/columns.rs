@@ -18,6 +18,8 @@ pub(in crate::tui) struct BoardView<'a> {
     pub(in crate::tui) folds: &'a SectionFoldState,
     pub(in crate::tui) epic_folds: &'a EpicFoldState,
     pub(in crate::tui) layout: &'a LayoutCache,
+    /// This machine's host id, which the orchestrator view's cards are for.
+    pub(in crate::tui) local_host: Option<&'a str>,
 }
 
 impl App {
@@ -30,6 +32,7 @@ impl App {
             folds: &self.folds,
             epic_folds: &self.epic_folds,
             layout: &self.layout,
+            local_host: self.local_host_id.as_deref(),
         }
     }
 }
@@ -39,7 +42,49 @@ impl<'a> BoardView<'a> {
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.
     pub(in crate::tui) fn is_flattened_for_status(self, status: TaskStatus) -> bool {
-        self.filter.lens.flattened() && !status.is_unflattened()
+        !status.is_unflattened()
+    }
+
+    /// The orchestrators lens on the main board (`BoardView.orchestrator_view`).
+    /// Inside an epic or package view that lens reads as flat.
+    pub(in crate::tui) fn orchestrator_view(self) -> bool {
+        self.filter.lens == crate::tui::types::Lens::Orchestrators
+            && matches!(self.effective_view_mode(), BoardViewMode::Board(_))
+    }
+
+    /// The orchestrator view's cards, each with its column, in the epics'
+    /// card order (`BoardView.orchestrator_cards`). Empty outside that view.
+    pub(in crate::tui) fn orchestrator_cards(self) -> Vec<(&'a Epic, TaskStatus)> {
+        if !self.orchestrator_view() {
+            return vec![];
+        }
+        let board = &self.board.orchestration;
+        let host = self.local_host.unwrap_or_default();
+        let pass = self.epic_search_pass();
+        let hidden = pass.hidden_epics(self);
+        let index = (!self.search.query.is_empty()).then(|| self.epic_search_index());
+        let mut cards: Vec<(&'a Epic, TaskStatus)> = self
+            .board
+            .epics
+            .iter()
+            .filter(|e| board.orchestration_of(e.id).is_some())
+            .filter(|e| !hidden.contains(&e.id) && self.epic_repo_matches(e.id))
+            .filter(|e| index.as_ref().is_none_or(|i| i.own_match(e)))
+            .map(|e| {
+                let ids = crate::models::descendant_epic_ids(e.id, &self.board.epics);
+                let subtree: Vec<&Task> = self
+                    .board
+                    .tasks
+                    .iter()
+                    .filter(|t| t.epic_id.is_some_and(|id| ids.contains(&id)))
+                    .collect();
+                let column =
+                    crate::models::orchestrator_column(board.has_open_items(e.id), &subtree, host);
+                (e, column)
+            })
+            .collect();
+        cards.sort_by_key(|(e, _)| (e.sort_key(), e.id.0));
+        cards
     }
 
     /// Whether the main board shows `task` as a card of its own, rather than
@@ -96,6 +141,9 @@ impl<'a> BoardView<'a> {
     pub fn tasks_for_current_view(self) -> Vec<&'a Task> {
         // Built once per call, not per task: this is the render hot path.
         let filters = self.board_filters();
+        if self.orchestrator_view() {
+            return vec![];
+        }
         match self.effective_view_mode() {
             BoardViewMode::Board(_) => self
                 .board
@@ -110,13 +158,11 @@ impl<'a> BoardView<'a> {
                 // the subtree is worth walking only when some column will use
                 // it. With flattening off, every column takes the else arm and
                 // this stays `None`.
-                let subtree = self.filter.lens.flattened().then(|| {
-                    crate::models::descendant_task_ids(
-                        current,
-                        &self.board.epics,
-                        &self.board.tasks,
-                    )
-                });
+                let subtree = Some(crate::models::descendant_task_ids(
+                    current,
+                    &self.board.epics,
+                    &self.board.tasks,
+                ));
                 self.board
                     .tasks
                     .iter()
@@ -137,11 +183,7 @@ impl<'a> BoardView<'a> {
                 let (linked, linked_epics) = self.package_item_ids(package_id);
                 // As in the Epic arm, only a flattened column reaches past
                 // the linked items, so the subtree is walked only then.
-                let subtree = self
-                    .filter
-                    .lens
-                    .flattened()
-                    .then(|| self.package_subtree_epics(linked_epics));
+                let subtree = Some(self.package_subtree_epics(linked_epics));
                 self.board
                     .tasks
                     .iter()
@@ -218,15 +260,13 @@ impl<'a> BoardView<'a> {
         }
 
         // One pass to settle each epic's columns, so every placement names its
-        // own outright rather than each reader re-deriving them.
-        //
-        // An epic with no admitted task anywhere is drawn in Backlog, so it
-        // stays reachable (`board-layout.allium`, "Epic Card Placement").
+        // own outright rather than each reader re-deriving them
+        // (`board-layout.allium`, "Epic Card Placement").
         for epic in &self.board.epics {
             let Some(placement) = placements.get_mut(&epic.id) else {
                 continue;
             };
-            placement.apply_empty_fallback();
+            placement.settle();
         }
 
         placements
@@ -347,6 +387,12 @@ impl<'a> BoardView<'a> {
             hidden ^= fnv_fold(fnv_fold(fnv_seed(), 2), p.0 as u64);
         }
         acc = fnv_fold(acc, hidden);
+        // The orchestrator view's cards are placed by rows this fingerprint
+        // does not otherwise see: the orchestration rows, task hosts and
+        // agent windows.
+        for (epic, column) in self.orchestrator_cards() {
+            acc = fnv_fold(fnv_fold(acc, epic.id.0 as u64), column as u64);
+        }
         fnv_fold(acc, fnv_bytes(self.search.query.as_bytes()))
     }
 
@@ -409,13 +455,24 @@ impl<'a> BoardView<'a> {
         view_tasks: &[&'a Task],
         pass: &EpicSearchPass<'a>,
     ) -> Vec<ColumnItem<'a>> {
+        if self.orchestrator_view() {
+            return self
+                .orchestrator_cards()
+                .into_iter()
+                .filter(|(_, column)| *column == status)
+                .map(|(e, _)| ColumnItem::Orchestrator(e))
+                .collect();
+        }
         let tasks: Vec<&'a Task> = view_tasks
             .iter()
             .filter(|t| t.status == status)
             .copied()
             .collect();
 
-        let items = if self.is_flattened_for_status(status) {
+        let items = if status == TaskStatus::Done {
+            let items = self.flattened_column_items(status, tasks, pass.epic_tree(self));
+            self.with_finished_epic_cards(items, placements, pass)
+        } else if self.is_flattened_for_status(status) {
             self.flattened_column_items(status, tasks, pass.epic_tree(self))
         } else {
             self.hierarchical_column_items(status, tasks, placements, pass)
@@ -430,6 +487,69 @@ impl<'a> BoardView<'a> {
             .map(ColumnItem::WorkPackage)
             .chain(items)
             .collect()
+    }
+
+    /// The Done column's task cards with each finished epic's card merged in
+    /// at its own completion time (`BoardView.done_sort_key`): ahead of the
+    /// first task group that finished before it. Done has no sections and no
+    /// headers, so `items` holds task cards only.
+    fn with_finished_epic_cards(
+        self,
+        items: Vec<ColumnItem<'a>>,
+        placements: Option<&EpicPlacementMap>,
+        pass: &EpicSearchPass<'a>,
+    ) -> Vec<ColumnItem<'a>> {
+        type At = Option<chrono::DateTime<chrono::Utc>>;
+        let placements = self.placements_or_compute(placements);
+        let mut epics: Vec<(At, &'a Epic)> = self
+            .visible_epics_for_effective_view(pass)
+            .filter_map(|e| {
+                let p = placements.get(&e.id)?;
+                p.appears_in(TaskStatus::Done)
+                    .then(|| (p.done_completion(e), e))
+            })
+            .collect();
+        if epics.is_empty() {
+            return items;
+        }
+        epics.sort_by(|(a, ea), (b, eb)| b.cmp(a).then(ea.id.0.cmp(&eb.id.0)));
+        // A task card's group key: the newest completion among the column's
+        // tasks of its direct epic, or its own for a task with no epic.
+        let mut group: HashMap<Option<EpicId>, chrono::DateTime<chrono::Utc>> = HashMap::new();
+        for item in &items {
+            if let ColumnItem::Task(t) = item {
+                if let (Some(_), Some(at)) = (t.epic_id, t.completed_at) {
+                    let slot = group.entry(t.epic_id).or_insert(at);
+                    if at > *slot {
+                        *slot = at;
+                    }
+                }
+            }
+        }
+        let key_of = |item: &ColumnItem<'a>| -> At {
+            match item {
+                ColumnItem::Task(t) if t.epic_id.is_some() => group.get(&t.epic_id).copied(),
+                ColumnItem::Task(t) => t.completed_at,
+                _ => None,
+            }
+        };
+        let mut out = Vec::with_capacity(items.len() + epics.len());
+        let mut pending = epics.into_iter().peekable();
+        for item in items {
+            let key = key_of(&item);
+            // Ahead of its own group on a tie; an undated epic waits for the end.
+            while pending
+                .peek()
+                .is_some_and(|(at, _)| at.is_some() && *at >= key)
+            {
+                if let Some((_, e)) = pending.next() {
+                    out.push(ColumnItem::Epic(e));
+                }
+            }
+            out.push(item);
+        }
+        out.extend(pending.map(|(_, e)| ColumnItem::Epic(e)));
+        out
     }
 
     /// Flattened column: cards sorted by section, then epic group, then card
@@ -643,6 +763,7 @@ impl<'a> BoardView<'a> {
                 ColumnItem::Task(t) => t.id.0,
                 ColumnItem::Epic(e) => e.id.0,
                 ColumnItem::WorkPackage(_)
+                | ColumnItem::Orchestrator(_)
                 | ColumnItem::FoldedSection(_)
                 | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)

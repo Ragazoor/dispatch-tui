@@ -19,7 +19,7 @@ use super::super::shared::{
 };
 use super::cards::{
     build_task_list_item, render_epic_header_item, render_epic_item, render_folded_epic_header,
-    render_package_item, ColRenderCtx,
+    render_orchestrator_item, render_package_item, ColRenderCtx,
 };
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 use crate::palette::{CYAN, EPIC_PANEL_BG, MUTED, PACKAGE_PANEL_BG, PURPLE};
@@ -186,6 +186,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                     &ctx,
                 )
             }
+            ColumnItem::Orchestrator(epic) => render_orchestrator_item(epic, is_cursor, app, &ctx),
             ColumnItem::SubstatusLabel(at) => render_substatus_header(at, first),
             ColumnItem::FoldedSection(header) => {
                 render_folded_section_header(header, first, is_cursor)

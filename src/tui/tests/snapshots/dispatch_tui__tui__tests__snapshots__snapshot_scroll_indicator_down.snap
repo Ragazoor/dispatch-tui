@@ -1,6 +1,5 @@
 ---
 source: src/tui/tests/snapshots.rs
-assertion_line: 638
 expression: rendered
 ---
                                                                                                                   🔕  [N]
@@ -22,4 +21,4 @@ expression: rendered
  │  ▎ Task 4                │ │                           │                              │
  │   ◦ <1h                  │ │                           │                              │
  ╰──────────────────────────╯▼│                           │                              │
-[Space] dispatch  [Y] ready  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quic
+[flat] [Space] dispatch  [Y] ready  [e]dit  [L] move  [x] done  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [

@@ -40,11 +40,15 @@ fn package_columns(app: &App, id: i64) -> Vec<TaskStatus> {
         .collect()
 }
 
-/// Root epic 1 → sub-epic 2; task 10 under 1, task 20 under 2, standalone 30.
+/// Root epic 1 → sub-epic 2; task 10 under 1, task 20 under 2, standalone 30,
+/// all running; backlog tasks 11 under 1 and 21 under 2 give each epic its
+/// Backlog card.
 fn tree_app() -> App {
     let mut app = App::new(vec![
         epic_task(10, 1, TaskStatus::Running),
+        epic_task(11, 1, TaskStatus::Backlog),
         epic_task(20, 2, TaskStatus::Running),
+        epic_task(21, 2, TaskStatus::Backlog),
         make_task(30, TaskStatus::Running),
     ]);
     app.board.epics = vec![make_epic(1), sub_epic(2, 1)];

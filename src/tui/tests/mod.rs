@@ -27,6 +27,7 @@ mod keybindings;
 mod layout_cache;
 mod move_task;
 mod navigation;
+mod orchestrator_view;
 mod orchestrators;
 mod render_dirty;
 mod rendering;

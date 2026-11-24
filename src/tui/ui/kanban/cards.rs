@@ -523,10 +523,10 @@ const CARD_MARGIN: usize = 1;
 /// frame rails. Subtracted from the column width to get the content budget.
 pub(super) const CARD_CHROME_WIDTH: usize = CARD_MARGIN * 2 + 2;
 
-/// Wrap a card's two content lines in a complete rounded frame.
+/// Wrap a card's content lines in a complete rounded frame.
 ///
-/// Returns the four lines of a framed card — top border, the two content lines
-/// each flanked by rails, and the bottom border (`board-visuals.allium`: "Task card
+/// Returns the lines of a framed card — top border, the content lines each
+/// flanked by rails, and the bottom border (`board-visuals.allium`: "Task card
 /// frame"). Every card carries its own full frame; borders are never shared
 /// between neighbours.
 ///
@@ -538,8 +538,7 @@ pub(super) const CARD_CHROME_WIDTH: usize = CARD_MARGIN * 2 + 2;
 /// `frame_color` is the caller's already-resolved state: the column's identity
 /// colour for the selected card, the resting neutral otherwise.
 fn frame_card(
-    line1: Line<'static>,
-    line2: Line<'static>,
+    content: Vec<Line<'static>>,
     col_width: u16,
     frame_color: Color,
     ground: Color,
@@ -594,12 +593,11 @@ fn frame_card(
         Line::from(spans)
     };
 
-    vec![
-        border("\u{256d}", "\u{256e}"),
-        rail(line1),
-        rail(line2),
-        border("\u{2570}", "\u{256f}"),
-    ]
+    let mut lines = Vec::with_capacity(content.len() + 2);
+    lines.push(border("\u{256d}", "\u{256e}"));
+    lines.extend(content.into_iter().map(rail));
+    lines.push(border("\u{2570}", "\u{256f}"));
+    lines
 }
 
 /// The ready marker a backlog card's indicator line carries
@@ -812,8 +810,7 @@ pub(super) fn build_task_list_item<'a>(
         card_surface_color()
     };
     let mut item = ListItem::new(frame_card(
-        line1,
-        line2,
+        vec![line1, line2],
         col_width,
         frame_color,
         ctx.ground,
@@ -943,8 +940,120 @@ pub(super) fn render_epic_item(
     // precedence itself is shared, so the rule lives in one place.
     let frame_color = resolve_frame_color(is_cursor, None);
     ListItem::new(frame_card(
-        line1,
-        line2,
+        vec![line1, line2],
+        col_width,
+        frame_color,
+        ctx.ground,
+        ctx.indent,
+    ))
+    .style(Style::default().bg(card_surface_color()).fg(FG))
+}
+
+/// An orchestrated epic's card in the orchestrator view (`board-visuals.allium`,
+/// "Orchestrator card"): title; state, waiting items and slots; task counts;
+/// the newest log line.
+pub(super) fn render_orchestrator_item(
+    epic: &Epic,
+    is_cursor: bool,
+    app: &App,
+    ctx: &ColRenderCtx,
+) -> ListItem<'static> {
+    use super::orchestrator_header::{orchestrator_summary, state_style};
+    let col_width = ctx.width;
+    let budget = (col_width as usize).saturating_sub(4 + CARD_CHROME_WIDTH);
+    let summary = orchestrator_summary(app, epic.id);
+    let board = &app.board.orchestration;
+    let down = summary.state == "down";
+
+    let stripe = if down { RED } else { PURPLE };
+    let line1 = Line::from(vec![
+        Span::raw("  "),
+        Span::styled("\u{258e}", Style::default().fg(stripe)),
+        Span::raw(" "),
+        Span::styled(
+            truncate(&epic.title, budget),
+            Style::default().fg(PURPLE).add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    let dot = || Span::styled(" \u{00b7} ", Style::default().fg(MUTED));
+    let mut state = vec![
+        Span::raw("    "),
+        Span::styled(summary.state, state_style(summary.state)),
+    ];
+    if summary.waiting > 0 {
+        state.push(dot());
+        state.push(Span::styled(
+            format!("{} waiting", summary.waiting),
+            Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(on) = board.orchestration_of(epic.id) {
+        state.push(dot());
+        state.push(Span::styled(
+            format!("{}/{}", summary.running, on.limit()),
+            Style::default().fg(MUTED),
+        ));
+    }
+
+    let count = |status: TaskStatus| {
+        summary
+            .subtree
+            .iter()
+            .filter(|t| t.status == status)
+            .count()
+    };
+    let ready = summary
+        .subtree
+        .iter()
+        .filter(|t| t.status == TaskStatus::Backlog && board.ready_mark(t.id).is_some())
+        .count();
+    let mut counts = vec![Span::raw("    ")];
+    let indicators = [
+        (
+            "\u{25cf}",
+            count(TaskStatus::Backlog),
+            column_color(TaskStatus::Backlog),
+        ),
+        ("\u{2713}", ready, CYAN),
+        (
+            "\u{25cf}",
+            count(TaskStatus::Running),
+            column_color(TaskStatus::Running),
+        ),
+        (
+            "\u{25cf}",
+            count(TaskStatus::Review),
+            column_color(TaskStatus::Review),
+        ),
+        (
+            "\u{25cf}",
+            count(TaskStatus::Done),
+            column_color(TaskStatus::Done),
+        ),
+    ];
+    for (glyph, n, color) in indicators {
+        if n > 0 {
+            counts.push(Span::styled(
+                format!("{glyph}{n} "),
+                Style::default().fg(color),
+            ));
+        }
+    }
+    if counts.len() == 1 {
+        counts.push(Span::styled("no subtasks", Style::default().fg(MUTED)));
+    }
+
+    let mut content = vec![line1, Line::from(state), Line::from(counts)];
+    if let Some(entry) = board.log_of(epic.id).first() {
+        content.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(truncate(&entry.text, budget), Style::default().fg(MUTED)),
+        ]));
+    }
+    let frame_color = resolve_frame_color(is_cursor, None);
+    ListItem::new(frame_card(
+        content,
         col_width,
         frame_color,
         ctx.ground,
@@ -1005,8 +1114,7 @@ pub(super) fn render_package_item(
     ]);
     let frame_color = resolve_frame_color(is_cursor, None);
     ListItem::new(frame_card(
-        line1,
-        line2,
+        vec![line1, line2],
         col_width,
         frame_color,
         ctx.ground,

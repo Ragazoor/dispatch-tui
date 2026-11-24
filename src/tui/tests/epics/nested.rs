@@ -334,41 +334,6 @@ fn epic_view_navigation_stays_within_projects_and_done() {
 }
 
 #[test]
-fn test_selection_survives_flatten_toggle() {
-    // Use task IDs > 1 so they sort after Epic(1) in the column.
-    // Column order: [Task(1), Epic(1), Task(2)] — tasks inserted before epics,
-    // stable sort keeps Task(1) before Epic(1) when both have key (5,1,1).
-    // Navigate +2 to reach Task(2) at row 2.
-    let tasks = vec![
-        make_task(1, TaskStatus::Backlog),
-        make_task(2, TaskStatus::Backlog),
-    ];
-    let epics = vec![make_epic(1)];
-    let mut app = App::new(tasks.clone());
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
-        epics.clone(),
-    )));
-
-    app.update(Message::NavigateRow(1)); // row 1 — Epic(1)
-    app.update(Message::NavigateRow(1)); // row 2 — Task(2)
-    let items = app.view().column_items_for_status(TaskStatus::Backlog);
-    let pre_id: TaskId = match &items[app.selection().row(0)] {
-        ColumnItem::Task(t) => t.id,
-        _ => panic!("expected task at cursor"),
-    };
-
-    flip_flattened(&mut app);
-    flip_flattened(&mut app);
-
-    let items = app.view().column_items_for_status(TaskStatus::Backlog);
-    let post_id: TaskId = match &items[app.selection().row(0)] {
-        ColumnItem::Task(t) => t.id,
-        _ => panic!("expected task at cursor"),
-    };
-    assert_eq!(pre_id, post_id);
-}
-
-#[test]
 fn reparent_epic_message_and_command_variants_compile() {
     use crate::tui::commands::EpicCommand;
     use crate::tui::messages::EpicMessage;

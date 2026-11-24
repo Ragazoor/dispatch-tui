@@ -164,6 +164,7 @@ impl App {
             C::OnColumnSelectAll => self.selection().on_select_all,
             C::OnFoldedSection => self.cursor_is_on_folded_header(),
             C::OnFoldedEpicGroup => self.cursor_is_on_folded_epic_header(),
+            C::OnOrchestratorCard => self.selected_orchestrator_epic_id().is_some(),
             C::OnEpicCard => self.selected_epic_id().is_some(),
             C::OnWorkPackageCard => self.selected_work_package_id().is_some(),
             C::OnTaskCard => matches!(self.selected_column_item(), Some(ColumnItem::Task(_))),

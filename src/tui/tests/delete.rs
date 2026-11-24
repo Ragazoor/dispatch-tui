@@ -302,11 +302,16 @@ fn x_on_a_mixed_task_selection_deletes_nothing() {
 
 /// Epic 10 holds a Done task directly and a sub-epic 20 holding another Done
 /// task. `extra` is added under the sub-epic, for the refusal cases.
+/// Epic 10 with sub-epic 20, each holding one done task. Finished, so epic
+/// 10's card leads the Done column (`board-layout.allium`, "Epic Card
+/// Placement").
 fn app_with_nested_epic(extra: Option<Task>) -> App {
-    let mut tasks = vec![
-        task_in(1, TaskStatus::Done, 10),
-        task_in(2, TaskStatus::Done, 20),
-    ];
+    let done = |id, epic| {
+        let mut t = task_in(id, TaskStatus::Done, epic);
+        t.completed_at = Some(chrono::Utc::now());
+        t
+    };
+    let mut tasks = vec![done(1, 10), done(2, 20)];
     tasks.extend(extra);
     let mut app = App::new(tasks);
     let mut parent = make_epic(10);
@@ -359,14 +364,14 @@ fn confirming_an_epic_delete_removes_its_whole_subtree() {
     );
 }
 
-/// ConfirmDeleteEpic's guard is the WHOLE subtree, at any depth: a running
-/// task two levels down refuses the delete even though the epic's direct
-/// task is done.
+/// ConfirmDeleteEpic's guard is the WHOLE subtree, at any depth: an
+/// unfinished task two levels down refuses the delete even though the epic's
+/// direct task is done. A backlog task, so the epic's card is in Backlog.
 #[test]
 fn x_on_an_epic_with_an_unfinished_task_deep_in_its_subtree_refuses() {
-    let mut app = app_with_nested_epic(Some(task_in(3, TaskStatus::Running, 20)));
-    app.selection_mut().set_column(4);
-    app.selection_mut().set_row(4, 0);
+    let mut app = app_with_nested_epic(Some(task_in(3, TaskStatus::Backlog, 20)));
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
     assert_selected_epic(&app, 10);
 
     let cmds = without_usage(press(&mut app, 'x'));

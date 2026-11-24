@@ -371,12 +371,11 @@ fn space_and_enter_unfold_a_folded_header() {
     }
 }
 
-/// Space and Enter keep their card meanings — the header routing must not
-/// swallow them.
+/// A card keeps its own keys — the header routing must not swallow them.
 #[test]
-fn enter_on_a_card_still_opens_the_detail_panel() {
+fn i_on_a_card_still_opens_the_detail_panel() {
     let mut app = folding_app();
-    app.handle_key(make_key(KeyCode::Enter));
+    app.handle_key(make_key(KeyCode::Char('i')));
     assert!(matches!(app.view_mode(), ViewMode::TaskDetail { .. }));
 }
 
@@ -784,40 +783,5 @@ fn folding_works_in_split_view() {
     assert!(
         buffer_contains(&buf, "needs input (2) \u{22ef}"),
         "the folded header should render inside the split border"
-    );
-}
-
-/// An epic card sits in a section, so `z` on one folds that section — and it
-/// must work off a cold layout cache too, since nothing guarantees the cache
-/// is warm when a key arrives.
-#[test]
-fn z_on_an_epic_card_folds_its_section_with_a_cold_cache() {
-    // The task belongs to the epic, which is what puts the epic's card in the
-    // Running column: placement follows the tasks, not epic.status.
-    let mut task = running(1, SubStatus::Active);
-    task.epic_id = Some(EpicId(10));
-    let mut app = App::new(vec![task]);
-    app.board.epics = vec![make_epic(10)];
-    app.board.epics[0].status = TaskStatus::Running;
-    app.selection_mut().set_column(2);
-    app.invalidate_layout_cache();
-
-    // Put the cursor on the epic card rather than the task.
-    let items = app
-        .view()
-        .column_items_for_status_with_placements(TaskStatus::Running, None);
-    let epic_row = items
-        .iter()
-        .filter(|i| i.is_selectable())
-        .position(|i| matches!(i, ColumnItem::Epic(_)))
-        .expect("the epic card should be selectable");
-    app.selection_mut().set_row(2, epic_row);
-    app.invalidate_layout_cache();
-
-    app.handle_key(make_key(KeyCode::Char('z')));
-    assert!(
-        app.folds
-            .is_collapsed(TaskStatus::Running, ColumnSection::Active),
-        "z on an epic card should fold the section it renders under"
     );
 }

@@ -67,11 +67,11 @@ fn cursor_on(app: &mut App, status: TaskStatus, pred: impl Fn(&ColumnItem) -> bo
     app.selection_mut().set_row(col, row);
 }
 
-/// Board: epic #1 (task #1 Running, task #2 Review), a standalone Backlog task
+/// Board: epic #1 (task #1 Backlog, task #2 Review), a standalone Backlog task
 /// #3, and package #7 linking task #3 and epic #1.
 fn board_with_package() -> App {
     let mut app = App::new(vec![
-        epic_task(1, 1, TaskStatus::Running),
+        epic_task(1, 1, TaskStatus::Backlog),
         epic_task(2, 1, TaskStatus::Review),
         make_task(3, TaskStatus::Backlog),
     ]);
@@ -453,29 +453,30 @@ fn the_package_view_holds_the_linked_items_and_nothing_else() {
     assert_eq!(task_ids, vec![TaskId(3)]);
 
     // The linked epic is an epic card, placed by its subtree.
-    let running = app.view().column_items_for_status(TaskStatus::Running);
-    assert!(running
+    assert!(backlog
         .iter()
         .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1))));
-    // Its tasks are not cards of their own.
-    assert!(!running.iter().any(|i| matches!(i, ColumnItem::Task(_))));
+    // Its backlog task stays inside it.
+    assert!(!backlog
+        .iter()
+        .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1))));
     // No package card inside a package view.
     assert!(package_columns(&app, 7).is_empty());
 }
 
 #[test]
 fn a_linked_task_inside_an_epic_is_its_own_card() {
-    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Running)]);
+    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Backlog)]);
     app.board.epics.push(make_epic(1));
     app.board.work_packages = vec![make_package(7, "W")];
     app.board.work_package_links = vec![link(7, task_item(1)), link(7, epic_item(1))];
     enter_package(&mut app, 7);
 
-    let running = app.view().column_items_for_status(TaskStatus::Running);
-    assert!(running
+    let backlog = app.view().column_items_for_status(TaskStatus::Backlog);
+    assert!(backlog
         .iter()
         .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1))));
-    assert!(running
+    assert!(backlog
         .iter()
         .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1))));
 }
@@ -627,7 +628,7 @@ fn an_epic_entered_from_a_package_returns_to_the_package_on_q() {
     enter_package(&mut app, 7);
     cursor_on(
         &mut app,
-        TaskStatus::Running,
+        TaskStatus::Backlog,
         |i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1)),
     );
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -730,7 +731,7 @@ fn a_new_task_in_an_epic_entered_from_a_package_goes_into_the_epic_unlinked() {
     enter_package(&mut app, 7);
     cursor_on(
         &mut app,
-        TaskStatus::Running,
+        TaskStatus::Backlog,
         |i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1)),
     );
     app.handle_key(make_key(KeyCode::Char(' ')));
@@ -852,7 +853,7 @@ fn w_on_an_epic_card_opens_the_link_picker_for_it() {
     let mut app = board_with_package();
     cursor_on(
         &mut app,
-        TaskStatus::Running,
+        TaskStatus::Backlog,
         |i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(1)),
     );
     app.handle_key(make_key(KeyCode::Char('w')));

@@ -1,6 +1,5 @@
 ---
 source: src/tui/tests/snapshots.rs
-assertion_line: 386
 expression: rendered
 ---
                                                                               manual dispatch [U]  group:off [R]  🔕  [N]
@@ -42,4 +41,4 @@ expression: rendered
 │                              │                          │                              │                             │
 │                              │                          │                              │                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-[O]rchestrator  [a] select all  [n]ew  [E]pic  [D] quick  [s]plit  [Tab] lens  [f]ilter  [/] search  [?] help
+[flat] [O]rchestrator  [a] select all  [n]ew  [E]pic  [D] quick  [s]plit  [Tab] lens  [f]ilter  [/] search  [?] help

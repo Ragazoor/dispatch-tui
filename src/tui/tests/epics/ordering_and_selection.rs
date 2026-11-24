@@ -3,18 +3,16 @@ use super::*;
 #[test]
 fn space_key_on_epic_enters_epic_view() {
     let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Review;
-    app.board.epics = vec![epic];
+    app.board.epics = vec![make_epic(10)];
 
     // Even with subtasks that have tmux windows, space enters epic view
-    let mut subtask = make_task(1, TaskStatus::Review);
+    let mut subtask = make_task(1, TaskStatus::Backlog);
     subtask.epic_id = Some(EpicId(10));
     subtask.tmux_window = Some(test_tmux_window("win-1"));
     app.board.tasks = vec![subtask];
 
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));

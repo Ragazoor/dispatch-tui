@@ -53,6 +53,8 @@ impl App {
         if board != self.board.orchestration {
             self.board.orchestration = board;
             self.dirty = true;
+            // The orchestrator view's cards move with these rows.
+            self.sync_board_selection();
         }
         cmds
     }
@@ -113,9 +115,10 @@ impl App {
 
     /// The orchestrator key (`OrchestratorKey`).
     pub(in crate::tui) fn handle_open_orchestrator(&mut self) -> Vec<Command> {
-        let from_task = self
-            .selected_task()
-            .and_then(|t| self.covering_epic(t.epic_id));
+        let from_task = self.selected_orchestrator_epic_id().or_else(|| {
+            self.selected_task()
+                .and_then(|t| self.covering_epic(t.epic_id))
+        });
         let target = match (from_task, self.current_epic_id()) {
             (Some(epic), _) => epic,
             (None, None) => {

@@ -363,6 +363,7 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
         // of it.
         match app.selected_column_item() {
             Some(ColumnItem::Epic(epic)) => epic_action_hints(t, epic, key_color),
+            Some(ColumnItem::Orchestrator(_)) => super::orchestrator_action_hints(t, key_color),
             Some(ColumnItem::WorkPackage(_)) => super::package_action_hints(t, key_color),
             item => {
                 let task = match item {
@@ -426,11 +427,15 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
             )],
         );
     }
-    if app.filter.lens.flattened() {
+    {
+        let badge = match app.filter.lens {
+            crate::tui::types::Lens::Orchestrators => "[orch] ",
+            crate::tui::types::Lens::Flat | crate::tui::types::Lens::FlatActive => "[flat] ",
+        };
         prepend(
             &mut spans,
             vec![Span::styled(
-                "[flat] ",
+                badge,
                 Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
             )],
         );
