@@ -49,6 +49,7 @@ fn epic_section_names_no_mcp_tool() {
         epic_id: EpicId(7),
         epic_title: "My Epic".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     };
     let text = epic.prompt_section();
     assert!(

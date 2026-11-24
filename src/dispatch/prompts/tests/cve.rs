@@ -12,6 +12,7 @@ fn cve_epic() -> EpicContext {
         epic_id: EpicId(9),
         epic_title: "CVE".to_string(),
         under_cve_feed: true,
+        orchestrator: None,
     }
 }
 
@@ -21,6 +22,7 @@ fn plain_epic() -> EpicContext {
         epic_id: EpicId(9),
         epic_title: "Dispatch".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     }
 }
 

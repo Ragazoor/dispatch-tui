@@ -612,6 +612,10 @@ surface AgentPrompt {
         --                                    instructions' to say. Names no
         --                                    MCP tool; see
         --                                    ThePromptNamesNoToolMerelyToSayItExists)
+        --   {orchestrator section}         (only when an orchestrator covers
+        --                                    the task and this machine has its
+        --                                    row; see
+        --                                    CoveredTaskAsksItsOrchestrator)
         --   <blank>
         --   {validated_knowledge}          (tiered learnings; see
         --                                    AugmentDispatchPromptWithLearnings)
@@ -648,6 +652,21 @@ surface AgentPrompt {
         --                                   so the no-plan states drop it; see
         --                                   NoLineRestatesTheDesignStep)
         --   {wrap_up_instruction}          (shared verbatim, universal)
+
+    @guarantee CoveredTaskAsksItsOrchestrator
+        -- orchestrators.allium: TaskAgentUnderAnOrchestrator. When
+        -- covering(task) is set and this machine has an orchestrator row for
+        -- that epic, the prompt names it and says: send it your questions,
+        -- plan confirmations included, instead of asking the user or the
+        -- operator, also where this prompt or a skill says to ask the user;
+        -- write each as what you plan, the question, the options, the one you
+        -- recommend and where in the code or the spec the evidence is; tell
+        -- it what later tasks of the epic need to know; send it a short
+        -- outcome report when the task finishes; and when it is missing from
+        -- the agent list or a message to it comes back undelivered, ask the
+        -- operator as without one. It names no MCP tool. Without a covering
+        -- orchestrator row on this machine the part is absent and nothing
+        -- else in the prompt mentions an orchestrator.
 
     @guarantee ThePromptCarriesNoVerifyCommand
         -- The prompt deliberately carries no verify command. Even when
@@ -1625,6 +1644,13 @@ surface OrchestratorSessionPrompt {
         --     epic is finished; it edits no file, has no worktree, and never
         --     merges, rebases, approves, closes or deletes;
         --   the epic's description, and its plan path when it has one;
+        --   the answer line (orchestrators.allium: OrchestratorAnswerLine):
+        --     what it may answer for the operator and what it must pass on,
+        --     that an answer is a decision with a one-line reason, that a
+        --     question passed on is raised with waiting-item_create (the
+        --     question, what it tried, what it recommends), and that the
+        --     operator's answer, given to it or to the task agent, must reach
+        --     the agent before the item is resolved;
         --   the start rule, said in words ("only backlog tasks marked ready"
         --     or "every backlog task"), and the limit;
         --   the trouble rules with their one retry (O10);

@@ -8,6 +8,7 @@ fn fixture_epic() -> EpicContext {
         epic_id: EpicId(7),
         epic_title: "Auth overhaul".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     }
 }
 
@@ -65,6 +66,7 @@ fn cve_prompt(fix_pr_linked: bool) -> String {
         epic_id: EpicId(9),
         epic_title: "CVE".to_string(),
         under_cve_feed: true,
+        orchestrator: None,
     };
     let ctx = PromptContext {
         tag: Some(TaskTag::Fix),

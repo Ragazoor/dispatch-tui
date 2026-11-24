@@ -59,9 +59,16 @@
 -- The tools are mcp-task-tools.allium's (OrchestratorMemoryViaMcp,
 -- DispatchTaskViaMcp's reason); the reads epics.allium's GetEpicViaMcp and
 -- mcp-task-tools.allium's GetTaskViaMcp; the prompt's notes, items, log and
--- learnings dispatch-prompt.allium's OrchestratorSessionPrompt.
+-- learnings dispatch-prompt.allium's OrchestratorSessionPrompt. Built (step
+-- 6): the task agent's side. TaskAgentUnderAnOrchestrator is the covered
+-- task's prompt (dispatch-prompt.allium: AgentPrompt's orchestrator
+-- section, CoveredTaskAsksItsOrchestrator) and the wrap-up skill's path
+-- question and outcome report (wrap-up-skill.allium:
+-- PathIsTheOperatorsChoice, ReportsTheOutcomeToItsOrchestrator);
+-- MarksReadyOnlyWhatIsWanted is the ready argument's description
+-- (mcp-task-tools.allium, step 2). OrchestratorAnswerLine is a part of the
+-- orchestrator's prompt (dispatch-prompt.allium: OrchestratorSessionPrompt).
 -- Left for the steps that own them, so none is missed:
---   - step 6: the answer line in the prompt (OrchestratorAnswerLine).
 --   - step 7: the board asking the orchestrator for its closing summary
 --     before it closes the window of a finished epic (EndOrchestratorSession);
 --     it needs the wake mechanism. Until then the summary is written only
@@ -1046,6 +1053,17 @@ surface TaskAgentUnderAnOrchestrator {
         -- operator; tell it what you learn that later tasks of the epic
         -- need. A prompt for a task no orchestrator covers says none of
         -- this.
+        -- The orchestrator named is this machine's orchestrator of
+        -- covering(task), read when the prompt is composed. The board keeps
+        -- that row while the epic has open work, so it is nearly always
+        -- there; when it is not, the prompt has no orchestrator part and the
+        -- agent asks the operator. The skills an agent runs say "ask the
+        -- user" for themselves, so the prompt says once that where it or a
+        -- skill says so, the agent asks the orchestrator instead; only the
+        -- wrap-up skill names the orchestrator itself (wrap-up-skill.allium:
+        -- PathIsTheOperatorsChoice). Decided by the epic's acting
+        -- orchestrator while the operator was away; open to the operator's
+        -- review.
 
     @guarantee QuestionsHaveOneShape
         -- The prompt gives the shape of a question to the orchestrator: what
@@ -1056,6 +1074,11 @@ surface TaskAgentUnderAnOrchestrator {
     @guarantee FallsBackToTheOperator
         -- When no orchestrator is live for the task on this machine, the
         -- agent asks the operator, as an agent without one does.
+        -- The prompt is fixed when the session starts, so the agent checks
+        -- when it asks: an orchestrator missing from the agent list, or a
+        -- message that comes back undelivered, is not live. Decided by the
+        -- epic's acting orchestrator while the operator was away; open to the
+        -- operator's review.
 
     @guarantee MarksReadyOnlyWhatIsWanted
         -- O5. Task-creating guidance says: create a task as ready only when
@@ -1229,8 +1252,6 @@ surface OrchestratorNotifications {
 --   - store-split.allium: the chain's request origin goes (RequestDispatch
 --     has the limit already). schedules.allium and
 --     mcp-task-tools.allium lose their mentions of the chain.
---   - dispatch-prompt.allium: the line a covered task's prompt gains (the
---     orchestrator's own prompt is there already).
 --   - agent-health.allium: the orchestrator's wake events (its hooks are
 --     there already).
 --   - board-layout.allium, board-visuals.allium, agent-tree.allium and

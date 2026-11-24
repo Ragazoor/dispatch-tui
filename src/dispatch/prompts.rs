@@ -62,6 +62,10 @@ pub struct EpicContext {
     /// reading `task.epic_id`'s row alone answers `false` for every task on a
     /// grouped CVE board.
     pub under_cve_feed: bool,
+    /// The name of this machine's orchestrator of the epic that covers the
+    /// task, when there is one (`dispatch-prompt.allium:
+    /// CoveredTaskAsksItsOrchestrator`).
+    pub orchestrator: Option<String>,
 }
 
 impl EpicContext {
@@ -80,11 +84,42 @@ impl EpicContext {
     /// such a call site did before this existed.
     pub async fn from_epic(epic: crate::models::Epic, db: &dyn store::TaskReadStore) -> Self {
         let under_cve_feed = Self::walk_to_cve_root(&epic, db).await;
+        let orchestrator = Self::covering_orchestrator(&epic, db).await;
         EpicContext {
             epic_id: epic.id,
             epic_title: epic.title,
             under_cve_feed,
+            orchestrator,
         }
+    }
+
+    /// `orchestrators.allium`'s covering(epic), then that epic's orchestrator
+    /// row on this machine. A read failure mid-walk answers `None`: the agent
+    /// then asks the operator, as it would without an orchestrator.
+    async fn covering_orchestrator(
+        epic: &crate::models::Epic,
+        db: &dyn store::TaskReadStore,
+    ) -> Option<String> {
+        let mut seen: HashSet<EpicId> = HashSet::new();
+        let mut cursor = epic.id;
+        let mut parent = epic.parent_epic_id;
+        let covering = loop {
+            if !seen.insert(cursor) {
+                return None;
+            }
+            if db.epic_orchestration(cursor).await.is_some() {
+                break cursor;
+            }
+            let row = db.get_epic(parent?).await?;
+            cursor = row.id;
+            parent = row.parent_epic_id;
+        };
+        let host = db.host_id();
+        db.list_orchestrators()
+            .await
+            .into_iter()
+            .find(|o| o.epic_id == covering && o.host == host)
+            .map(|o| o.name)
     }
 
     /// True when `epic` or any ancestor of it carries `FeedRole::Cve`.
@@ -123,12 +158,25 @@ impl EpicContext {
     }
 
     pub(super) fn prompt_section(&self) -> String {
-        format!(
+        let mut section = format!(
             "\n\nThis task is part of epic #{}: {}\n\
             If you need help, or a sibling task's agent is working on a similar problem, ask \
             that agent.",
             self.epic_id, self.epic_title
-        )
+        );
+        if let Some(name) = &self.orchestrator {
+            section.push_str(&format!(
+                "\n\nAn orchestrator covers this epic: {name}. Send your questions to {name}, plan \
+                confirmations included, instead of the user or the operator; where this prompt or a \
+                skill says to ask the user, ask {name}. Write each question as what you plan, the \
+                question, the options, the one you recommend, and where in the code or the spec the \
+                evidence is. Tell {name} what you learn that later tasks of the epic need, and send \
+                it a short outcome report when your task finishes. If {name} is not in the agent \
+                list, or your message to it comes back undelivered, ask the operator as you would \
+                without an orchestrator."
+            ));
+        }
+        section
     }
 }
 
@@ -1338,3 +1386,6 @@ mod rag_dispatch_tests;
 /// See `TheCveAnswerIsStructuralNotTextual` in `docs/specs/dispatch-prompt.allium`.
 #[cfg(test)]
 mod cve_epic_context_tests;
+
+#[cfg(test)]
+mod orchestrator_context_tests;

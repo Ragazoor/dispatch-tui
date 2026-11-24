@@ -368,6 +368,7 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
         epic_id: EpicId(7),
         epic_title: "My Epic".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     };
     let prompt = build_quick_dispatch_prompt(
         TaskId(42),
@@ -571,6 +572,7 @@ fn epic_preamble_returns_id_line_and_section_for_some() {
         epic_id: EpicId(5),
         epic_title: "Auth Rework".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     };
     let (id_line, section) = epic_preamble(Some(&ctx));
     assert!(id_line.contains("EpicId: 5"));

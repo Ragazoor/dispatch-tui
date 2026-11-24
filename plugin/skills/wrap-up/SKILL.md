@@ -38,11 +38,11 @@ Count the source lines added plus removed, committed and not (`git diff {base_br
 
 Under **100** changed lines, skip (task #4973's retrospective: review sub-agents rarely find anything on a diff that small). At 100 or more, run `Skill({ skill: "simplify" })`; its changes are committed in Step 6. Its summary is not a stopping point: go straight on to Step 4.
 
-## Step 4: Ask the user to choose
+## Step 4: Ask which path
 
 Skip this step if an argument or `Wrap-up mode` already gave the action.
 
-Otherwise use `AskUserQuestion` and wait. Rebase fast-forwards a shared branch, the PR path opens a PR under the user's identity, and done integrates nothing; even work that looks like a PR may want a rebase. Ask:
+Otherwise ask and wait. When your task's prompt names an orchestrator, send it this question as a message and wait for its answer; it answers only when the task or the epic states a preferred path, and passes the question on to the operator otherwise. Without one, or when it is not running, use `AskUserQuestion`. Rebase fast-forwards a shared branch, the PR path opens a PR under the user's identity, and done integrates nothing; even work that looks like a PR may want a rebase. Ask:
 
 > Wrap up task #{id} (`{title}`):
 > **(r)** rebase onto `{base_branch}` — dispatch fast-forwards `{base_branch}` and kills this tmux window
@@ -61,6 +61,8 @@ Run `Skill({ skill: "retro" })` and tell it which action you are wrapping up wit
 If `task_search` printed a `Verify command:` line, then on the rebase and pr paths, run it in your worktree now and fix any failure before you go on (on the pr path this is also what keeps a red build out of the push). On the done path, run no verify command: nothing from it lands on `{base_branch}`. Run the command exactly as printed, with no arguments added; it decides for itself how much your change needs checked. If it prints what it ran or skipped, report that and no more. Run it once: do not run it again after `session_wrap-up`, even when the rebase moved your branch. Dispatch does not run it for you and does not check that you did. If it fails for a reason your change did not cause, do not wrap up past it alone: coordinate with other agents and the board, as `CLAUDE.md` says.
 
 Run `git status --porcelain`. If it is not clean, `git add` the relevant files by name, review `git diff --cached`, and `git commit -m "..."` with a short message. `session_wrap-up` refuses a dirty worktree.
+
+If your task's prompt names an orchestrator, send it a short outcome report now, as a message: what you delivered, on which path, and what is left open.
 
 ## Step 7: The closing sequence
 

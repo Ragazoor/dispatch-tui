@@ -312,7 +312,9 @@ rule AskForPath {
     )
 
     @guidance
-        -- Asked with AskUserQuestion; the skill waits. The question names the
+        -- Asked with AskUserQuestion, or, when the task's prompt names an
+        -- orchestrator, sent to it as a message; the skill waits for the
+        -- answer either way. The question names the
         -- task and its title and says what each path does: rebase has
         -- dispatch fast-forward the base branch and kill this tmux window;
         -- pr has the agent draft the title and body, run `gh pr create` and
@@ -787,6 +789,12 @@ surface WrapUpSession {
         -- skill asks and waits for. The skill never chooses for itself, even
         -- when the work looks like a PR. Any argument other than the three
         -- paths is ignored (UsePresetPath, AskForPath, OperatorChoseAPath).
+        -- When the task's prompt names an orchestrator
+        -- (orchestrators.allium: TaskAgentUnderAnOrchestrator), the question
+        -- goes to it rather than the operator; it answers only when the task
+        -- or the epic states a preferred path and otherwise passes the
+        -- question on (OrchestratorAnswerLine). With an argument or a preset
+        -- mode nobody is asked.
 
     @guarantee RefusedTaskStopsEarly
         -- When task_search prints a "Wrap-up: refused" line the skill shows it and
@@ -851,6 +859,13 @@ surface WrapUpSession {
         -- (mcp-task-tools.allium: WrapUpRefusesUnfinishedWork), which is what
         -- makes this step the tool's to enforce and the skill's to run
         -- (CommitRemainingChanges).
+
+    @guarantee ReportsTheOutcomeToItsOrchestrator
+        -- When the task's prompt names an orchestrator, the agent sends it a
+        -- short outcome report after the commit and before the closing
+        -- sequence: what it delivered, on which path, and what is left open
+        -- (orchestrators.allium: QuestionsHaveOneShape). Without one it sends
+        -- nothing. The report is a message and changes nothing in the store.
 
     @guarantee RateBeforeClosing
         -- Before session_wrap-up is called, the agent rates knowledge it acted

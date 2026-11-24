@@ -48,6 +48,7 @@ fn task_block_includes_epic_section_when_present() {
         epic_id: EpicId(3),
         epic_title: "Big Epic".to_string(),
         under_cve_feed: false,
+        orchestrator: None,
     };
     let block = task_block(TaskId(1), "atlas", "T", "D", Some(&ctx));
     assert!(block.contains("EpicId: 3"));

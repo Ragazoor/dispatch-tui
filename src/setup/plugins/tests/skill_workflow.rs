@@ -105,7 +105,7 @@ fn wrap_up_skill_runs_retro_between_the_action_choice_and_the_commit() {
     //    commit sits on a branch nobody merges, and the PR path has pushed.
     let content = skill_body("wrap-up");
     let choice_at = content
-        .find("## Step 4: Ask the user to choose")
+        .find("## Step 4: Ask which path")
         .expect("wrap-up skill must have an action-choice step to anchor retro after");
     let retro_at = content
         .find("Skill({ skill: \"retro\" })")

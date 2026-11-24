@@ -186,6 +186,23 @@ pub fn build_orchestrator_prompt(
     if let Some(plan) = epic.plan_path.as_deref().filter(|s| !s.trim().is_empty()) {
         p.push_str(&format!("\nIts plan: {plan}\n"));
     }
+    p.push_str(
+        "\nWhat you may answer for the operator: questions about the work (scope, approach, how \
+         to read the task or the plan); a plan confirmation, when the plan fits the task and the \
+         epic's goal; the wrap-up path, when the task or the epic already states a preferred one; \
+         \"may I approve or merge this PR?\" from a review task, when its review found nothing \
+         blocking and the checks pass; and coordination between agents: who owns a file, who \
+         waits for whom.\n\
+         What you must pass on to the operator: anything destructive or hard to undo outside the \
+         task's own worktree; a change to what the epic is for, or work its description does not \
+         cover; new credentials, new external services or spending; anything you are not \
+         confident about; and any question where you and the agent still disagree after one \
+         round.\n\
+         Answer with a decision and a one-line reason, not a menu. Pass a question on with \
+         waiting-item_create: the question, what you tried and what you recommend. The operator \
+         may answer you or the task agent; either way the answer must reach the agent before you \
+         resolve the item.\n",
+    );
     let rule = match orchestration.start_rule {
         StartRule::MarkedOnly => "only backlog tasks marked ready",
         StartRule::Everything => "every backlog task",
@@ -364,6 +381,7 @@ mod tests {
             "you edit no file, have no worktree, and never merge",
             "Build the orchestrator.",
             "Its plan: docs/plans/p.md",
+            "What you may answer for the operator",
             "You start only backlog tasks marked ready. At most 2 task agents",
             "act once",
             "- #1 T1 — backlog/none, ready, agent ada",
@@ -377,6 +395,44 @@ mod tests {
                 .find(part)
                 .unwrap_or_else(|| panic!("{part:?} missing or out of order in:\n{p}"));
             from += at + part.len();
+        }
+    }
+
+    /// dispatch-prompt.allium: ThePromptsParts, the answer line
+    /// (orchestrators.allium: OrchestratorAnswerLine).
+    #[test]
+    fn the_prompt_carries_the_answer_line() {
+        let epic = EpicBuilder::new(7).title("E").build();
+        let p = build_orchestrator_prompt(
+            "zlata",
+            &epic,
+            &switch(StartRule::MarkedOnly, None),
+            &[],
+            &OrchestratorMemory::default(),
+        );
+        let flat = p.split_whitespace().collect::<Vec<_>>().join(" ");
+        for needle in [
+            // MayAnswer
+            "What you may answer for the operator",
+            "scope, approach, how to read the task or the plan",
+            "a plan confirmation, when the plan fits the task and the epic's goal",
+            "the wrap-up path, when the task or the epic already states a preferred one",
+            "from a review task, when its review found nothing blocking and the checks pass",
+            "who owns a file, who waits for whom",
+            // MustPassOn
+            "What you must pass on to the operator",
+            "destructive or hard to undo outside the task's own worktree",
+            "work its description does not cover",
+            "new credentials, new external services or spending",
+            "anything you are not confident about",
+            "still disagree after one round",
+            // LeadsWithADecision
+            "a decision and a one-line reason, not a menu",
+            // the guidance: a passed-on question and the operator's answer
+            "waiting-item_create",
+            "either way the answer must reach the agent before you resolve the item",
+        ] {
+            assert!(flat.contains(needle), "missing {needle:?} in:\n{p}");
         }
     }
 

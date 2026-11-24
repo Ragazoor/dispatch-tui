@@ -317,7 +317,19 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
             "doesn't follow the dispatch naming convention",
         ),
         ("PathIsTheOperatorsChoice", "Ignore any other argument"),
-        ("PathIsTheOperatorsChoice", "use `AskUserQuestion` and wait"),
+        ("PathIsTheOperatorsChoice", "Otherwise ask and wait"),
+        (
+            "PathIsTheOperatorsChoice",
+            "When your task's prompt names an orchestrator, send it this question as a message",
+        ),
+        (
+            "PathIsTheOperatorsChoice",
+            "Without one, or when it is not running, use `AskUserQuestion`",
+        ),
+        (
+            "ReportsTheOutcomeToItsOrchestrator",
+            "If your task's prompt names an orchestrator, send it a short outcome report",
+        ),
         (
             "PathIsTheOperatorsChoice",
             "even work that looks like a PR may want a rebase",
@@ -423,7 +435,7 @@ fn wrap_up_skill_text_holds_each_session_guarantee() {
         "## Step 1: Get the task ID",
         "## Step 2: Get task details",
         "## Step 3: Simplify",
-        "## Step 4: Ask the user to choose",
+        "## Step 4: Ask which path",
         "## Step 5: Run the retro",
         "## Step 6: Verify, then commit",
         "## Step 7: The closing sequence",
