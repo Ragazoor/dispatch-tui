@@ -414,7 +414,7 @@ pub(super) async fn task_detail_text(state: &McpState, task: &Task) -> String {
         state.db.ready_mark(task.id),
         super::orchestration::covering(state, task.epic_id),
         state.db.list_orchestrators(),
-        state.db.list_orchestrator_log()
+        state.db.orchestrator_log_of_task(task.id)
     );
     let covering_orchestrators: Vec<_> = covered_by
         .as_ref()

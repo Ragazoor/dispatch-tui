@@ -65,11 +65,16 @@ impl super::super::OrchestratorStore for Store {
             .applied()
     }
 
-    async fn list_orchestrator_log(&self) -> Vec<OrchestratorLogEntry> {
-        decoded(
-            self.rows.orchestrator_log(),
-            crate::sync::decode::orchestrator_log_entry,
-        )
+    async fn orchestrator_log_of_epic(&self, epic: EpicId) -> Vec<OrchestratorLogEntry> {
+        let rows = self.rows.orchestrator_log();
+        let mine = rows.into_iter().filter(|e| e.epic_id == epic.0).collect();
+        decoded(mine, crate::sync::decode::orchestrator_log_entry)
+    }
+
+    async fn orchestrator_log_of_task(&self, task: TaskId) -> Vec<OrchestratorLogEntry> {
+        let rows = self.rows.orchestrator_log();
+        let mine = rows.into_iter().filter(|e| e.task_id == task.0).collect();
+        decoded(mine, crate::sync::decode::orchestrator_log_entry)
     }
 
     async fn list_epic_notes(&self) -> Vec<EpicNote> {

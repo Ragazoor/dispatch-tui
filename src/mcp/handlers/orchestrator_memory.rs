@@ -10,17 +10,15 @@ use serde_json::{json, Value};
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
-    Epic, EpicNote, Orchestrator, OrchestratorLogEntry, Task, TaskId, TaskStatus, WaitingItem,
+    item_line, log_line, newest_first, note_line, notes_in_order, open_items, Epic, Orchestrator,
+    OrchestratorLogEntry, Task, TaskId, TaskStatus, ORCHESTRATOR_LOG_SHOWN as LOG_SHOWN,
 };
-use crate::sync::writes::StoreRefusal;
 
 use super::types::{
-    deserialize_flexible_id, parse_args, JsonRpcResponse, INTERNAL_ERROR, INVALID_PARAMS,
+    deserialize_flexible_i64, deserialize_flexible_id, deserialize_optional_flexible_i64,
+    deserialize_optional_limit, parse_args, service_err_to_response, JsonRpcResponse,
+    INVALID_PARAMS,
 };
-
-/// `orchestrators.allium: config.orchestrator_log_shown`: how many log
-/// entries a read and the prompt show, newest first.
-pub(crate) const LOG_SHOWN: usize = 10;
 
 /// `orchestrator-log_search`'s default page.
 const LOG_PAGE: usize = 50;
@@ -29,13 +27,8 @@ fn text(id: Option<Value>, text: String) -> JsonRpcResponse {
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-/// The store's refusal as invalid params, in its own words; anything else
-/// as an internal error.
 fn write_err(id: Option<Value>, e: anyhow::Error) -> JsonRpcResponse {
-    match e.downcast_ref::<StoreRefusal>() {
-        Some(refusal) => JsonRpcResponse::err(id, INVALID_PARAMS, refusal.0.clone()),
-        None => JsonRpcResponse::err(id, INTERNAL_ERROR, format!("{e:#}")),
-    }
+    service_err_to_response(id, e.into())
 }
 
 /// The calling orchestrator, or the refusal for any other caller.
@@ -63,77 +56,6 @@ macro_rules! orchestrator_or_refuse {
             Err(why) => return JsonRpcResponse::err($id, INVALID_PARAMS, why),
         }
     };
-}
-
-/// One log entry as every read renders it.
-pub(crate) fn log_line(e: &OrchestratorLogEntry) -> String {
-    let mut line = format!(
-        "#{} {} {} {}",
-        e.id,
-        e.at.format("%Y-%m-%dT%H:%M:%SZ"),
-        e.host,
-        e.kind
-    );
-    if let Some(task) = e.task_id {
-        line.push_str(&format!(" task #{}", task.0));
-    }
-    if let Some(trouble) = &e.trouble {
-        line.push_str(&format!(" ({trouble})"));
-    }
-    if let Some(q) = &e.question {
-        line.push_str(&format!(" — asked: {q}"));
-    }
-    line.push_str(&format!(" — {}", e.text));
-    line
-}
-
-/// One open item as the epic read and the prompt render it.
-pub(crate) fn item_line(i: &WaitingItem) -> String {
-    let about = match i.task_id {
-        Some(task) => format!("task #{}: {}", task.0, i.about),
-        None => format!("the epic: {}", i.about),
-    };
-    format!(
-        "#{} {about} — tried: {} — recommends: {} (raised {}, {})",
-        i.id,
-        i.tried,
-        i.recommendation,
-        i.raised_at.format("%Y-%m-%dT%H:%M:%SZ"),
-        i.host
-    )
-}
-
-/// One note as the epic read and the prompt render it.
-pub(crate) fn note_line(n: &EpicNote) -> String {
-    let done = if n.done { " [done]" } else { "" };
-    format!("#{}{done} {}", n.id, n.text)
-}
-
-/// The notes of `epic`, open ones first, each group by id.
-pub(crate) fn notes_in_order(notes: &[EpicNote], epic: crate::models::EpicId) -> Vec<&EpicNote> {
-    let mut mine: Vec<&EpicNote> = notes.iter().filter(|n| n.epic_id == epic).collect();
-    mine.sort_by_key(|n| (n.done, n.id));
-    mine
-}
-
-/// The open items of `epic`, oldest first.
-pub(crate) fn open_items(items: &[WaitingItem], epic: crate::models::EpicId) -> Vec<&WaitingItem> {
-    let mut open: Vec<&WaitingItem> = items
-        .iter()
-        .filter(|i| i.epic_id == epic && i.is_open())
-        .collect();
-    open.sort_by_key(|i| i.id);
-    open
-}
-
-/// The log entries that pass `keep`, newest first.
-pub(crate) fn newest_first(
-    log: &[OrchestratorLogEntry],
-    keep: impl Fn(&OrchestratorLogEntry) -> bool,
-) -> Vec<&OrchestratorLogEntry> {
-    let mut kept: Vec<&OrchestratorLogEntry> = log.iter().filter(|e| keep(e)).collect();
-    kept.sort_by_key(|e| std::cmp::Reverse(e.id));
-    kept
 }
 
 /// `orchestrators.allium: orchestrator_state`.
@@ -171,7 +93,7 @@ fn more_line(
 pub(crate) async fn epic_memory_lines(state: &McpState, epic: &Epic) -> String {
     let (orchestrators, log, notes, items, epics, tasks) = tokio::join!(
         state.db.list_orchestrators(),
-        state.db.list_orchestrator_log(),
+        state.db.orchestrator_log_of_epic(epic.id),
         state.db.list_epic_notes(),
         state.db.list_waiting_items(),
         state.db.list_epics(),
@@ -208,7 +130,7 @@ pub(crate) async fn epic_memory_lines(state: &McpState, epic: &Epic) -> String {
             out.push_str(&format!("\n  {}", note_line(n)));
         }
     }
-    let entries = newest_first(&log, |e| e.epic_id == epic.id);
+    let entries = newest_first(&log, |_| true);
     if !entries.is_empty() {
         out.push_str("\nLog:");
         for e in entries.iter().take(LOG_SHOWN) {
@@ -356,6 +278,7 @@ pub(super) async fn handle_item_create(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ResolveArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
     waiting_item_id: i64,
 }
 
@@ -428,6 +351,7 @@ pub(super) async fn handle_note_create(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoteUpdateArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
     epic_note_id: i64,
     #[serde(default)]
     text: Option<String>,
@@ -465,6 +389,7 @@ pub(super) async fn handle_note_update(
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoteDeleteArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
     epic_note_id: i64,
 }
 
@@ -498,10 +423,10 @@ struct LogSearchArgs {
     epic_id: crate::models::EpicId,
     #[serde(default)]
     task_id: Option<super::types::FlexibleId<TaskId>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     before: Option<i64>,
-    #[serde(default)]
-    limit: Option<usize>,
+    #[serde(default, deserialize_with = "deserialize_optional_limit")]
+    limit: Option<std::num::NonZeroUsize>,
 }
 
 pub(super) async fn handle_log_search(
@@ -514,15 +439,10 @@ pub(super) async fn handle_log_search(
         Ok(a) => a,
         Err(resp) => return resp,
     };
-    if a.limit == Some(0) {
-        return JsonRpcResponse::err(id, INVALID_PARAMS, "limit must be at least 1".to_string());
-    }
     let task = a.task_id.map(|t| t.0);
-    let log = state.db.list_orchestrator_log().await;
+    let log = state.db.orchestrator_log_of_epic(a.epic_id).await;
     let entries = newest_first(&log, |e| {
-        e.epic_id == a.epic_id
-            && task.is_none_or(|t| e.task_id == Some(t))
-            && a.before.is_none_or(|b| e.id < b)
+        task.is_none_or(|t| e.task_id == Some(t)) && a.before.is_none_or(|b| e.id < b)
     });
     if entries.is_empty() {
         return text(
@@ -533,7 +453,7 @@ pub(super) async fn handle_log_search(
             ),
         );
     }
-    let limit = a.limit.unwrap_or(LOG_PAGE);
+    let limit = a.limit.map_or(LOG_PAGE, std::num::NonZeroUsize::get);
     let mut out: Vec<String> = entries.iter().take(limit).map(|e| log_line(e)).collect();
     if entries.len() > limit {
         let last = entries[limit - 1].id;

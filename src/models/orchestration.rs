@@ -148,3 +148,78 @@ pub struct ReadyMark {
     pub agent_name: Option<String>,
     pub marked_at: DateTime<Utc>,
 }
+
+/// `orchestrators.allium: config.orchestrator_log_shown`: how many log
+/// entries a read and the orchestrator's prompt show, newest first.
+pub const ORCHESTRATOR_LOG_SHOWN: usize = 10;
+
+/// One log entry as every read renders it.
+pub fn log_line(e: &OrchestratorLogEntry) -> String {
+    let mut line = format!(
+        "#{} {} {} {}",
+        e.id,
+        e.at.format("%Y-%m-%dT%H:%M:%SZ"),
+        e.host,
+        e.kind
+    );
+    if let Some(task) = e.task_id {
+        line.push_str(&format!(" task #{}", task.0));
+    }
+    if let Some(trouble) = &e.trouble {
+        line.push_str(&format!(" ({trouble})"));
+    }
+    if let Some(q) = &e.question {
+        line.push_str(&format!(" — asked: {q}"));
+    }
+    line.push_str(&format!(" — {}", e.text));
+    line
+}
+
+/// One open item as the epic read and the prompt render it.
+pub fn item_line(i: &WaitingItem) -> String {
+    let about = match i.task_id {
+        Some(task) => format!("task #{}: {}", task.0, i.about),
+        None => format!("the epic: {}", i.about),
+    };
+    format!(
+        "#{} {about} — tried: {} — recommends: {} (raised {}, {})",
+        i.id,
+        i.tried,
+        i.recommendation,
+        i.raised_at.format("%Y-%m-%dT%H:%M:%SZ"),
+        i.host
+    )
+}
+
+/// One note as the epic read and the prompt render it.
+pub fn note_line(n: &EpicNote) -> String {
+    let done = if n.done { " [done]" } else { "" };
+    format!("#{}{done} {}", n.id, n.text)
+}
+
+/// The notes of `epic`, open ones first, each group by id.
+pub fn notes_in_order(notes: &[EpicNote], epic: EpicId) -> Vec<&EpicNote> {
+    let mut mine: Vec<&EpicNote> = notes.iter().filter(|n| n.epic_id == epic).collect();
+    mine.sort_by_key(|n| (n.done, n.id));
+    mine
+}
+
+/// The open items of `epic`, oldest first.
+pub fn open_items(items: &[WaitingItem], epic: EpicId) -> Vec<&WaitingItem> {
+    let mut open: Vec<&WaitingItem> = items
+        .iter()
+        .filter(|i| i.epic_id == epic && i.is_open())
+        .collect();
+    open.sort_by_key(|i| i.id);
+    open
+}
+
+/// The log entries that pass `keep`, newest first.
+pub fn newest_first(
+    log: &[OrchestratorLogEntry],
+    keep: impl Fn(&OrchestratorLogEntry) -> bool,
+) -> Vec<&OrchestratorLogEntry> {
+    let mut kept: Vec<&OrchestratorLogEntry> = log.iter().filter(|e| keep(e)).collect();
+    kept.sort_by_key(|e| std::cmp::Reverse(e.id));
+    kept
+}

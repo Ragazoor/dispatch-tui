@@ -15,9 +15,6 @@ use std::time::Duration;
 use super::*;
 use crate::models::{Epic, EpicId, EpicOrchestration, Orchestrator, Task, TaskStatus, TmuxWindow};
 
-/// `orchestrators.allium: config.orchestrator_log_shown`.
-const ORCHESTRATOR_LOG_SHOWN: usize = 10;
-
 /// What one tick does for this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum OrchestratorAction {
@@ -241,8 +238,14 @@ impl OrchestratorHost {
                 }
             }
             OrchestratorAction::GiveUp(o) => {
-                // Asked on every tick that finds it down: the store raises the
-                // item once per bout, and again if it was resolved meanwhile.
+                // The store raises the item once per bout, and again if it was
+                // resolved meanwhile; a tick that already holds it asks nothing.
+                let held = db.list_waiting_items().await.into_iter().any(|i| {
+                    i.epic_id == o.epic_id && i.host == host && i.task_id.is_none() && i.is_open()
+                });
+                if held {
+                    return;
+                }
                 if let Err(e) = db.raise_orchestrator_down_item(o.id, host).await {
                     tracing::warn!(orchestrator = %o.name, "could not raise the down orchestrator's item: {e:#}");
                 }
@@ -354,24 +357,16 @@ impl OrchestratorHost {
     /// `orchestrators.allium: EnoughForAFreshStart`, `GivenItsLearnings`.
     async fn memory(&self, epic: &Epic) -> crate::dispatch::OrchestratorMemory {
         let db = &self.database;
-        let (notes, items, log, learnings) = tokio::join!(
+        let (notes, open_items, log, learnings) = tokio::join!(
             db.list_epic_notes(),
             db.list_waiting_items(),
-            db.list_orchestrator_log(),
+            db.orchestrator_log_of_epic(epic.id),
             crate::dispatch::list_learnings_for_epic(&**db, epic, &self.emb_svc)
         );
-        let mut open_items: Vec<_> = items
-            .into_iter()
-            .filter(|i| i.epic_id == epic.id && i.is_open())
-            .collect();
-        open_items.sort_by_key(|i| i.id);
-        let mut newest_log: Vec<_> = log.into_iter().filter(|e| e.epic_id == epic.id).collect();
-        newest_log.sort_by_key(|e| std::cmp::Reverse(e.id));
-        newest_log.truncate(ORCHESTRATOR_LOG_SHOWN);
         crate::dispatch::OrchestratorMemory {
-            notes: notes.into_iter().filter(|n| n.epic_id == epic.id).collect(),
+            notes,
             open_items,
-            newest_log,
+            log,
             learnings,
         }
     }

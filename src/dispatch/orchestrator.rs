@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::models::{
-    Epic, EpicNote, EpicOrchestration, Learning, OrchestratorLogEntry, ReadyMarker, StartRule,
-    SubStatus, TaskStatus, TmuxWindow, WaitingItem,
+    item_line, log_line, newest_first, note_line, notes_in_order, open_items, Epic, EpicNote,
+    EpicOrchestration, Learning, OrchestratorLogEntry, ReadyMarker, StartRule, SubStatus,
+    TaskStatus, TmuxWindow, WaitingItem, ORCHESTRATOR_LOG_SHOWN,
 };
 use crate::process::ProcessRunner;
 use crate::tmux;
@@ -152,10 +153,10 @@ pub struct OrchestratorPromptTask {
 pub struct OrchestratorMemory {
     /// Every note of the epic.
     pub notes: Vec<EpicNote>,
-    /// Every open item of the epic.
+    /// The epic's waiting items; the prompt shows the open ones.
     pub open_items: Vec<WaitingItem>,
-    /// The newest log entries, newest first.
-    pub newest_log: Vec<OrchestratorLogEntry>,
+    /// The epic's log; the prompt shows the newest entries.
+    pub log: Vec<OrchestratorLogEntry>,
     /// The learnings that fit the epic, best first.
     pub learnings: Vec<Learning>,
 }
@@ -236,49 +237,43 @@ pub fn build_orchestrator_prompt(
 /// The memory part of the prompt: notes, open items, the newest log entries,
 /// how to keep them, a note from a learning, and the learnings.
 fn push_memory(p: &mut String, epic: &Epic, memory: &OrchestratorMemory) {
-    p.push_str("\nYour notes for this epic (id, [done] when ticked):\n");
-    let mut notes: Vec<&EpicNote> = memory.notes.iter().collect();
-    notes.sort_by_key(|n| (n.done, n.id));
-    if notes.is_empty() {
-        p.push_str("- none\n");
-    }
-    for n in notes {
-        let done = if n.done { " [done]" } else { "" };
-        p.push_str(&format!("- #{}{done} {}\n", n.id, n.text));
-    }
-    p.push_str("\nItems that wait for the operator:\n");
-    if memory.open_items.is_empty() {
-        p.push_str("- none\n");
-    }
-    for i in &memory.open_items {
-        let about = match i.task_id {
-            Some(t) => format!("task #{}", t.0),
-            None => "the epic".to_string(),
-        };
-        p.push_str(&format!(
-            "- #{} {about}: {} — you recommended: {}\n",
-            i.id, i.about, i.recommendation
-        ));
-    }
-    p.push_str(&format!(
-        "\nThe newest entries of the epic's log, newest first (orchestrator-log_search with epic_id {} reads the rest):\n",
-        epic.id.0
-    ));
-    if memory.newest_log.is_empty() {
-        p.push_str("- none\n");
-    }
-    for e in &memory.newest_log {
-        let task = e
-            .task_id
-            .map(|t| format!(" task #{}", t.0))
-            .unwrap_or_default();
-        p.push_str(&format!(
-            "- {} {}{task}: {}\n",
-            e.at.format("%Y-%m-%dT%H:%M:%SZ"),
-            e.kind,
-            e.text
-        ));
-    }
+    let section = |p: &mut String, heading: &str, lines: Vec<String>| {
+        p.push_str(heading);
+        if lines.is_empty() {
+            p.push_str("- none\n");
+        }
+        for line in lines {
+            p.push_str(&format!("- {line}\n"));
+        }
+    };
+    section(
+        p,
+        "\nYour notes for this epic (id, [done] when ticked):\n",
+        notes_in_order(&memory.notes, epic.id)
+            .into_iter()
+            .map(note_line)
+            .collect(),
+    );
+    section(
+        p,
+        "\nItems that wait for the operator:\n",
+        open_items(&memory.open_items, epic.id)
+            .into_iter()
+            .map(item_line)
+            .collect(),
+    );
+    section(
+        p,
+        &format!(
+            "\nThe newest entries of the epic's log, newest first (orchestrator-log_search with epic_id {} reads the rest):\n",
+            epic.id.0
+        ),
+        newest_first(&memory.log, |_| true)
+            .into_iter()
+            .take(ORCHESTRATOR_LOG_SHOWN)
+            .map(log_line)
+            .collect(),
+    );
     p.push_str(
         "\nThis memory outlives your session, so keep it as you go. Give a one-line reason with \
          every task_dispatch. After you answer an agent, record it with orchestrator-answer_record. \
@@ -412,7 +407,7 @@ mod tests {
                 raised_at: at,
                 resolved_at: None,
             }],
-            newest_log: vec![OrchestratorLogEntry {
+            log: vec![OrchestratorLogEntry {
                 id: 3,
                 epic_id: EpicId(7),
                 host: "h".into(),
@@ -443,9 +438,9 @@ mod tests {
             "- #2 use v3",
             "- #1 [done] ticked",
             "Items that wait for the operator:",
-            "- #5 task #9: may I drop it? — you recommended: keep it",
+            "- #5 task #9: may I drop it? — tried: read it — recommends: keep it",
             "orchestrator-log_search with epic_id 7 reads the rest",
-            "started_task task #9: first step",
+            "started_task task #9 — first step",
             "with every task_dispatch",
             "orchestrator-summary_record",
             "A note is a to-do or a fact",

@@ -651,9 +651,17 @@ pub trait OrchestratorStore: Send + Sync {
     /// `StartOrchestratorSession`. `resumed`: the board continues the
     /// conversation it last held for the epic.
     async fn start_orchestrator_session(&self, id: i64, host: &str, resumed: bool) -> Result<()>;
-    /// Every log entry this board holds, every epic's, oldest first
-    /// (`core.allium: OrchestratorLogEntry`).
-    async fn list_orchestrator_log(&self) -> Vec<crate::models::OrchestratorLogEntry>;
+    /// The log of `epic` this board holds, oldest first (`core.allium:
+    /// OrchestratorLogEntry`).
+    async fn orchestrator_log_of_epic(
+        &self,
+        epic: EpicId,
+    ) -> Vec<crate::models::OrchestratorLogEntry>;
+    /// The log entries this board holds that name `task`, oldest first.
+    async fn orchestrator_log_of_task(
+        &self,
+        task: TaskId,
+    ) -> Vec<crate::models::OrchestratorLogEntry>;
     /// Every epic note this board holds (`core.allium: EpicNote`).
     async fn list_epic_notes(&self) -> Vec<crate::models::EpicNote>;
     /// Every waiting item this board holds, open or resolved (`core.allium:

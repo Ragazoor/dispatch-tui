@@ -842,7 +842,7 @@ async fn an_orchestrators_start_is_logged_with_its_reason() {
         .await,
     );
 
-    let log = state.db.list_orchestrator_log().await;
+    let log = state.db.orchestrator_log_of_epic(e).await;
     assert_eq!(log.len(), 1, "{log:?}");
     assert_eq!(log[0].kind, crate::models::LogEntryKind::StartedTask);
     assert_eq!(log[0].task_id, Some(task));
